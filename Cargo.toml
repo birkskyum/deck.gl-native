@@ -5,6 +5,7 @@ members = [
   "crates/luma-gl",
   "crates/deck-gl",
   "crates/deck-gl-layers",
+    "crates/deck-gl-json",
   "crates/deck-gl-ffi",
   "examples",
 ]
@@ -23,6 +24,7 @@ math-gl = { path = "crates/math-gl" }
 luma-gl = { path = "crates/luma-gl" }
 deck-gl = { path = "crates/deck-gl" }
 deck-gl-layers = { path = "crates/deck-gl-layers" }
+deck-gl-json = { path = "crates/deck-gl-json" }
 
 wgpu = "30"
 naga = { version = "30", features = ["wgsl-in"] }

@@ -13,6 +13,7 @@ math-gl = { workspace = true }
 luma-gl = { workspace = true }
 deck-gl = { workspace = true }
 deck-gl-layers = { workspace = true }
+deck-gl-json = { workspace = true }
 wgpu = { workspace = true }
 glam = { workspace = true }
 pollster = { workspace = true }

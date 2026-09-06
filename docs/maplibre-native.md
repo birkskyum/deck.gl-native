@@ -49,6 +49,7 @@ Environment variables read by the overlay:
 | Variable | Effect |
 | --- | --- |
 | `DECKGL_OVERLAY=0` | Disable the overlay |
+| `DECKGL_JSON=scene.json` | Show a [JSON description](json.md) instead of the demo scene (also honoured by the all-Rust demo below) |
 | `DECKGL_LOAD_DEPTH=1` | Depth test against the map's depth buffer instead of clearing depth first |
 | `DECKGL_SCREENSHOT=frame.png` | Write the composited frame to a PNG once, `DECKGL_SCREENSHOT_AFTER_MS` (default 8000) after the first frame |
 

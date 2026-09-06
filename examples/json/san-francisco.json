@@ -1,0 +1,93 @@
+{
+  "description": "Inline data around San Francisco: a polygon, a path, points and arcs. Runs offline.",
+  "initialViewState": {
+    "longitude": -122.42,
+    "latitude": 37.775,
+    "zoom": 12.2,
+    "pitch": 45,
+    "bearing": -20
+  },
+  "layers": [
+    {
+      "@@type": "PolygonLayer",
+      "id": "park",
+      "data": [
+        {
+          "name": "Golden Gate Park",
+          "contour": [
+            [-122.511, 37.771], [-122.454, 37.774], [-122.453, 37.766], [-122.510, 37.763]
+          ],
+          "height": 60
+        },
+        {
+          "name": "Presidio",
+          "contour": [
+            [-122.480, 37.810], [-122.446, 37.805], [-122.452, 37.788], [-122.486, 37.786]
+          ],
+          "height": 120
+        }
+      ],
+      "extruded": true,
+      "wireframe": true,
+      "stroked": false,
+      "opacity": 0.8,
+      "getPolygon": "@@=contour",
+      "getElevation": "@@=height",
+      "getFillColor": "@@=height > 100 ? [80, 200, 120] : [60, 140, 220]",
+      "getLineColor": [255, 255, 255]
+    },
+    {
+      "@@type": "PathLayer",
+      "id": "route",
+      "data": [
+        {
+          "path": [
+            [-122.510, 37.766], [-122.470, 37.770], [-122.446, 37.776],
+            [-122.420, 37.780], [-122.404, 37.790], [-122.395, 37.795]
+          ],
+          "color": [255, 170, 0]
+        }
+      ],
+      "widthUnits": "pixels",
+      "getWidth": 4,
+      "getColor": "@@=color",
+      "capRounded": true,
+      "jointRounded": true
+    },
+    {
+      "@@type": "ScatterplotLayer",
+      "id": "stops",
+      "data": [
+        {"coordinates": [-122.510, 37.766], "passengers": 800},
+        {"coordinates": [-122.470, 37.770], "passengers": 1500},
+        {"coordinates": [-122.446, 37.776], "passengers": 400},
+        {"coordinates": [-122.420, 37.780], "passengers": 2600},
+        {"coordinates": [-122.404, 37.790], "passengers": 3100},
+        {"coordinates": [-122.395, 37.795], "passengers": 900}
+      ],
+      "pickable": true,
+      "stroked": true,
+      "radiusUnits": "meters",
+      "radiusMinPixels": 3,
+      "lineWidthMinPixels": 1,
+      "getPosition": "@@=coordinates",
+      "getRadius": "@@=passengers / 10",
+      "getFillColor": "@@=passengers > 2000 ? [255, 80, 80] : [255, 200, 80]",
+      "getLineColor": [40, 40, 40]
+    },
+    {
+      "@@type": "ArcLayer",
+      "id": "flows",
+      "data": [
+        {"from": [-122.510, 37.766], "to": [-122.395, 37.795], "count": 12},
+        {"from": [-122.470, 37.770], "to": [-122.404, 37.790], "count": 5}
+      ],
+      "widthUnits": "pixels",
+      "getSourcePosition": "@@=from",
+      "getTargetPosition": "@@=to",
+      "getWidth": "@@=count",
+      "getSourceColor": [0, 200, 255],
+      "getTargetColor": [255, 0, 200]
+    }
+  ]
+}

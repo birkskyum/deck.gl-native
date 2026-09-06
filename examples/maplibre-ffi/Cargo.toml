@@ -13,6 +13,7 @@ description = "deck.gl-native layers drawn into a maplibre-native map through ma
 [dependencies]
 deck-gl = { path = "../../crates/deck-gl" }
 deck-gl-layers = { path = "../../crates/deck-gl-layers" }
+deck-gl-json = { path = "../../crates/deck-gl-json" }
 deck-gl-ffi = { path = "../../crates/deck-gl-ffi" }
 deck-gl-examples = { path = ".." }
 maplibre-native-ffi = { path = "../../../maplibre-native-ffi/bindings/rust/crates/maplibre-native-ffi", features = ["metal"] }

@@ -8,10 +8,11 @@
 // platforms until Vulkan host interop lands.
 #![cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
 
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, Viewport, WebMercatorViewportOptions};
+use deck_gl::{Deck, DeckProps, Layer, Viewport, WebMercatorViewportOptions};
+use deck_gl_json::JsonConverter;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod metal;
@@ -111,6 +112,14 @@ impl DeckglHandle {
         Ok(())
     }
 
+    /// Replace the layers now, or once the deck exists.
+    pub(crate) fn set_layers(&mut self, layers: Vec<Box<dyn Layer>>) {
+        match self.deck.as_mut() {
+            Some(deck) => deck.set_layers(layers),
+            None => self.pending_layers = Some(layers),
+        }
+    }
+
     pub(crate) fn apply_camera(&mut self) {
         if let (Some(deck), Some(camera)) = (self.deck.as_mut(), self.camera) {
             deck.set_device_pixel_ratio(camera.pixel_ratio);
@@ -174,12 +183,65 @@ pub unsafe extern "C" fn deckgl_load_demo_scene(deck: *mut DeckglHandle) -> i32 
     let Some(handle) = (unsafe { deck.as_mut() }) else {
         return 1;
     };
-    let layers = deck_gl_examples::scene::layers();
-    match handle.deck.as_mut() {
-        Some(deck) => deck.set_layers(layers),
-        None => handle.pending_layers = Some(layers),
-    }
+    handle.set_layers(deck_gl_examples::scene::layers());
     0
+}
+
+/// # Safety
+/// `ptr` must be null or a valid C string.
+unsafe fn c_string(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+    }
+}
+
+fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_json::JsonDeck>) -> i32 {
+    match result {
+        Ok(json) => {
+            for warning in &json.warnings {
+                eprintln!("deck.gl-native: {warning}");
+            }
+            handle.set_layers(json.layers);
+            0
+        }
+        Err(e) => handle.set_error(e.to_string()),
+    }
+}
+
+/// # Safety
+/// `deck` must be a valid handle; `json` must be a valid C string and `base_dir` null or one.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_set_layers_json(
+    deck: *mut DeckglHandle,
+    json: *const c_char,
+    base_dir: *const c_char,
+) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let Some(json) = (unsafe { c_string(json) }) else {
+        return handle.set_error("deckgl_set_layers_json: json is null");
+    };
+    let converter = match unsafe { c_string(base_dir) } {
+        Some(dir) if !dir.is_empty() => JsonConverter::with_base_dir(dir),
+        _ => JsonConverter::new(),
+    };
+    apply_json(handle, converter.parse(&json))
+}
+
+/// # Safety
+/// `deck` must be a valid handle and `path` a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_load_json_file(deck: *mut DeckglHandle, path: *const c_char) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let Some(path) = (unsafe { c_string(path) }) else {
+        return handle.set_error("deckgl_load_json_file: path is null");
+    };
+    apply_json(handle, JsonConverter::parse_file(path))
 }
 
 /// # Safety

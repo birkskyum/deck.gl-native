@@ -46,6 +46,15 @@ void deckgl_destroy(DeckglHandle* deck);
 /** Replace the layers with the built-in demo scene (San Francisco). */
 int32_t deckgl_load_demo_scene(DeckglHandle* deck);
 
+/** Replace the layers with a JSON description in the @deck.gl/json (pydeck) format: either a
+ *  description object with `layers`, or a bare array of layers. Relative `data`, `image` and
+ *  `iconAtlas` paths resolve against `base_dir` when it is not NULL. Returns 0 on success;
+ *  see deckgl_last_error otherwise. Unsupported props are reported on stderr and skipped. */
+int32_t deckgl_set_layers_json(DeckglHandle* deck, const char* json, const char* base_dir);
+
+/** Load a JSON description from a file. Relative paths inside resolve against its directory. */
+int32_t deckgl_load_json_file(DeckglHandle* deck, const char* path);
+
 void deckgl_set_camera(DeckglHandle* deck, const DeckglCamera* camera);
 
 /** Draw all layers into the given id<MTLTexture> color and depth attachments. The color

@@ -1,0 +1,26 @@
+[package]
+name = "deck-gl-json"
+description = "JSON layer descriptions for deck.gl-native, compatible with @deck.gl/json and pydeck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["fetch"]
+# Load `data`, `image` and `iconAtlas` props from http(s) URLs.
+fetch = ["dep:ureq"]
+
+[dependencies]
+deck-gl = { workspace = true }
+deck-gl-layers = { workspace = true }
+glam = { workspace = true }
+image = { workspace = true, features = ["jpeg"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ureq = { version = "3", optional = true }
+
+[dev-dependencies]
+luma-gl = { workspace = true }
+wgpu = { workspace = true }

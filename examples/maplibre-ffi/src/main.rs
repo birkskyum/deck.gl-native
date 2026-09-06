@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 
 use deck_gl::luma_gl::device::{create_render_texture, read_texture_rgba8};
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps};
-use deck_gl_examples::scene;
+use deck_gl::{Deck, DeckProps, ViewState};
+use deck_gl_examples::spec;
 use deckgl::{maplibre_near_far_pixels, viewport_from_camera, DeckglCamera};
 use maplibre_native_ffi as mln;
 use objc2::runtime::ProtocolObject;
@@ -204,6 +204,7 @@ struct MapHandles {
 /// Runs the runtime and the map until shutdown. Owns both for their whole lifetime.
 fn map_thread(
     size: ViewportSize,
+    view: ViewState,
     handles: mpsc::Sender<MapHandles>,
     commands: mpsc::Receiver<CameraCommand>,
     shared: Arc<Shared>,
@@ -226,7 +227,6 @@ fn map_thread(
                 | mln::RuntimeEventMask::MAP_RENDER_FRAME_FINISHED,
         )?;
         map.set_style_url(STYLE_URL)?;
-        let view = scene::view_state(-25.0);
         let mut camera = mln::CameraOptions::default();
         camera.center = Some(mln::LatLng::new(view.latitude, view.longitude));
         camera.zoom = Some(view.zoom);
@@ -270,7 +270,7 @@ fn map_thread(
     }
 }
 
-fn apply_command(map: &mln::MapHandle, command: CameraCommand, home: deck_gl::ViewState) -> mln::Result<()> {
+fn apply_command(map: &mln::MapHandle, command: CameraCommand, home: ViewState) -> mln::Result<()> {
     match command {
         CameraCommand::GestureStart => map.set_gesture_in_progress(true),
         CameraCommand::GestureEnd => map.set_gesture_in_progress(false),
@@ -398,6 +398,8 @@ impl State {
         surface.configure(&device, &config);
 
         let attachments = Attachments::new(&device, size);
+        let loaded = spec::load(-25.0)?;
+        let view = loaded.view_state;
 
         // maplibre-native on its own thread; we get a reference to attach a session to
         let shared = Arc::new(Shared::default());
@@ -407,7 +409,7 @@ impl State {
             let shared = shared.clone();
             std::thread::Builder::new()
                 .name("maplibre".into())
-                .spawn(move || map_thread(size, handles_tx, commands_rx, shared))?
+                .spawn(move || map_thread(size, view, handles_tx, commands_rx, shared))?
         };
         let handles = match handles_rx.recv() {
             Ok(handles) => handles,
@@ -433,8 +435,8 @@ impl State {
                 width: size.logical_width,
                 height: size.logical_height,
                 device_pixel_ratio: size.scale_factor as f32,
-                view_state: scene::view_state(-25.0),
-                layers: scene::layers(),
+                view_state: view,
+                layers: loaded.layers,
                 ..Default::default()
             },
         )?;

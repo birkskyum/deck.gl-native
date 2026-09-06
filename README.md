@@ -28,6 +28,8 @@ Working today, headless and verified pixel by pixel in tests:
 - Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
   example (4,600 extruded polygons) parses and renders in under 50 ms
+- JSON descriptions in the `@deck.gl/json` and pydeck format, with `@@=` accessor expressions
+  and data from inline rows, files or URLs. See [docs/json.md](docs/json.md).
 
 ![GeoJsonLayer rendering deck.gl's Vancouver blocks example](docs/images/geojson-vancouver.png)
 
@@ -51,7 +53,8 @@ Not yet: transitions, controllers, and the wider layer catalog. See
 | `luma-gl` | `@luma.gl/core`, `@luma.gl/shadertools` | Shader assembly, uniform blocks, textures, `Model`, headless device helpers |
 | `deck-gl` | `@deck.gl/core` | `Deck`, `Layer`, `Viewport`, the `project` shader module, Arrow data accessors |
 | `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `BitmapLayer`, `IconLayer`, `ColumnLayer`, `PointCloudLayer`, `PolygonLayer`, `GeoJsonLayer` |
-| `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop |
+| `deck-gl-json` | `@deck.gl/json` | JSON descriptions (pydeck format) with expression accessors |
+| `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop; JSON layers |
 | `deck-gl-examples` | | Example binaries |
 
 Shader sources under `src/wgsl` in each crate are copied from deck.gl 9.4 and luma.gl (MIT).
@@ -65,6 +68,8 @@ cargo test --workspace                     # unit tests plus headless GPU render
 cargo run --release --bin texture_render   # renders the example scene to target/texture-render.png
 cargo run --release --bin window           # the same scene in a window, with hover highlighting
 cargo run --release --bin geojson -- file.geojson   # any GeoJSON file, extruded and colored by properties
+cargo run --release --bin json_render -- examples/json/san-francisco.json out.png   # a JSON description to a PNG
+DECKGL_JSON=examples/json/vancouver-blocks.json cargo run --release --bin window   # any example, from a JSON description
 cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a maplibre-native basemap
 ```
 
@@ -99,6 +104,25 @@ deck.draw(&mut render_pass)?;
 
 `Deck::set_viewport` accepts a caller-built `Viewport`, which is how a host map renderer will
 drive the deck camera from its own.
+
+The same scene as a JSON description, the format pydeck and deck.gl's JSON playground use:
+
+```rust
+let json = deck_gl_json::JsonConverter::parse_file("scene.json")?;
+deck.set_layers(json.layers);
+```
+
+```json
+{
+  "layers": [{
+    "@@type": "ScatterplotLayer",
+    "data": "points.geojson",
+    "getPosition": "@@=geometry.coordinates",
+    "getFillColor": "@@=properties.count > 10 ? [255, 0, 0] : [0, 0, 255]",
+    "getRadius": 50
+  }]
+}
+```
 
 ## Credits and license
 

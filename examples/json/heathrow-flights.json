@@ -1,0 +1,34 @@
+{
+  "description": "The deck.gl website LineLayer example: flights out of Heathrow. Fetches data from GitHub.",
+  "websiteUrl": "https://deck.gl/examples/line-layer",
+  "initialViewState": {
+    "latitude": 47.65,
+    "longitude": 7,
+    "zoom": 4.5,
+    "pitch": 50,
+    "bearing": 0
+  },
+  "layers": [
+    {
+      "@@type": "ScatterplotLayer",
+      "id": "airports",
+      "data": "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/line/airports.json",
+      "radiusScale": 20,
+      "radiusMinPixels": 2,
+      "getPosition": "@@=coordinates",
+      "getFillColor": [255, 140, 0],
+      "getRadius": 60
+    },
+    {
+      "@@type": "LineLayer",
+      "id": "flight-paths",
+      "data": "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/line/heathrow-flights.json",
+      "opacity": 0.8,
+      "widthUnits": "pixels",
+      "getWidth": 3,
+      "getSourcePosition": "@@=start",
+      "getTargetPosition": "@@=end",
+      "getColor": "@@=[140 + end[2] / 100, 32 + end[2] / 50, 64, 192]"
+    }
+  ]
+}

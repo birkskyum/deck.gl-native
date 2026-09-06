@@ -1,14 +1,15 @@
 //! The example scene in a window, with the camera orbiting the scene.
 //!
-//! Run with `cargo run --release --bin window`.
+//! Run with `cargo run --release --bin window`. Set `DECKGL_JSON` to show a JSON description
+//! instead of the built-in scene.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps};
-use deck_gl_examples::scene;
+use deck_gl::{Deck, DeckProps, ViewState};
+use deck_gl_examples::{scene, spec};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -22,6 +23,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     depth: wgpu::Texture,
     deck: Deck,
+    base_view: ViewState,
     start: Instant,
     cursor: Option<(f64, f64)>,
     hovered: Option<(String, u32)>,
@@ -72,6 +74,8 @@ impl State {
             wgpu::TextureFormat::Depth24Plus,
         );
         let scale = window.scale_factor() as f32;
+        let loaded = spec::load(-25.0).expect("scene");
+        let base_view = loaded.view_state;
         let deck = Deck::new(
             &device,
             &queue,
@@ -80,8 +84,8 @@ impl State {
                 width: (config.width as f32 / scale) as u32,
                 height: (config.height as f32 / scale) as u32,
                 device_pixel_ratio: scale,
-                view_state: scene::view_state(0.0),
-                layers: scene::layers(),
+                view_state: base_view,
+                layers: loaded.layers,
                 ..Default::default()
             },
         )
@@ -95,6 +99,7 @@ impl State {
             config,
             depth,
             deck,
+            base_view,
             start: Instant::now(),
             cursor: None,
             hovered: None,
@@ -145,8 +150,9 @@ impl State {
     }
 
     fn render(&mut self) {
-        let bearing = -25.0 + self.start.elapsed().as_secs_f64() * 8.0;
-        self.deck.set_view_state(scene::view_state(bearing));
+        let mut view = self.base_view;
+        view.bearing += self.start.elapsed().as_secs_f64() * 8.0;
+        self.deck.set_view_state(view);
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
