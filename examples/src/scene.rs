@@ -74,7 +74,10 @@ fn block(x: f64, y: f64, w: f64, h: f64) -> Polygon {
 /// Build the scene's layers, bottom to top.
 pub fn layers() -> Vec<Box<dyn Layer>> {
     let scatterplot = ScatterplotLayer::new(ScatterplotLayerProps {
-        base: LayerProps::new("points"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("points")
+        },
         data: LayerData::from_batch(scatterplot_batch()),
         get_position: Accessor::column("position"),
         get_fill_color: Accessor::column("color"),
@@ -88,7 +91,10 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
 
     let line_count = 24usize;
     let lines = LineLayer::new(LineLayerProps {
-        base: LayerProps::new("lines"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("lines")
+        },
         data: LayerData::with_length(line_count),
         get_source_position: Accessor::Constant([CENTER[0], CENTER[1], 0.0]),
         get_target_position: Accessor::func(move |i| {
@@ -130,7 +136,10 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let polygons = Arc::new(polygons);
     let elevations = Arc::new(elevations);
     let solid_polygons = SolidPolygonLayer::new(SolidPolygonLayerProps {
-        base: LayerProps::new("blocks"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("blocks")
+        },
         data: LayerData::with_length(polygon_count),
         extruded: true,
         wireframe: true,
@@ -161,7 +170,10 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         .collect();
     let route = Arc::new(route);
     let paths = PathLayer::new(PathLayerProps {
-        base: LayerProps::new("route"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("route")
+        },
         data: LayerData::with_length(1),
         get_path: Accessor::func(move |_| (*route).clone()),
         get_color: Accessor::Constant([20, 120, 255, 255]),
@@ -175,7 +187,10 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     // Arcs from the center to points around the bay
     let arc_count = 8usize;
     let arcs = ArcLayer::new(ArcLayerProps {
-        base: LayerProps::new("arcs"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("arcs")
+        },
         data: LayerData::with_length(arc_count),
         get_source_position: Accessor::Constant([CENTER[0], CENTER[1], 0.0]),
         get_target_position: Accessor::func(move |i| {
@@ -206,7 +221,10 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     ];
     let park = Arc::new(park);
     let polygons = PolygonLayer::new(PolygonLayerProps {
-        base: LayerProps::new("park"),
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("park")
+        },
         data: LayerData::with_length(1),
         get_polygon: Accessor::func(move |_| (*park).clone()),
         get_fill_color: Accessor::Constant([80, 200, 120, 160]),

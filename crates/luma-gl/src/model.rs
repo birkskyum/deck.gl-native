@@ -98,6 +98,9 @@ pub struct ModelDescriptor<'a> {
     /// Constant and slope-scaled depth bias, in the units of `wgpu::DepthBiasState`.
     pub depth_bias: wgpu::DepthBiasState,
     pub cull_mode: Option<wgpu::Face>,
+    /// Also build a picking pipeline: same shader, an RGBA8 target, and alpha taken from the
+    /// blend constant so a pass can tag every layer with an id. See [`Model::draw_picking`].
+    pub pickable: bool,
 }
 
 impl<'a> ModelDescriptor<'a> {
@@ -120,7 +123,28 @@ impl<'a> ModelDescriptor<'a> {
             depth_compare: wgpu::CompareFunction::LessEqual,
             depth_bias: wgpu::DepthBiasState::default(),
             cull_mode: None,
+            pickable: false,
         }
+    }
+}
+
+/// Format of the picking target every picking pipeline renders into.
+pub const PICKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Blend state of deck.gl's picking pass: color written as is, alpha replaced by the blend
+/// constant, which the pass sets to the layer's id.
+pub fn picking_blend() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::Zero,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Constant,
+            dst_factor: wgpu::BlendFactor::Zero,
+            operation: wgpu::BlendOperation::Add,
+        },
     }
 }
 
@@ -149,6 +173,7 @@ struct IndexBuffer {
 pub struct Model {
     label: String,
     pipeline: wgpu::RenderPipeline,
+    picking_pipeline: Option<wgpu::RenderPipeline>,
     bind_group: wgpu::BindGroup,
     uniforms: HashMap<String, UniformBlock>,
     vertex_slots: Vec<Option<wgpu::Buffer>>,
@@ -222,55 +247,65 @@ impl Model {
             })
             .collect();
 
-        let color_target = wgpu::ColorTargetState {
-            format: desc.target.color_format,
-            blend: desc.blend,
-            write_mask: wgpu::ColorWrites::ALL,
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(desc.label),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vertexMain"),
-                compilation_options: Default::default(),
-                buffers: &buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: desc.topology,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: desc.cull_mode,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+        let make_pipeline = |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
+            let color_target = wgpu::ColorTargetState {
                 format,
-                depth_write_enabled: Some(desc.depth_write_enabled),
-                depth_compare: Some(desc.depth_compare),
-                stencil: wgpu::StencilState::default(),
-                bias: desc.depth_bias,
-            }),
-            multisample: wgpu::MultisampleState {
-                count: desc.target.sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fragmentMain"),
-                compilation_options: Default::default(),
-                targets: &[Some(color_target)],
-            }),
-            multiview_mask: None,
-            cache: None,
+                blend,
+                write_mask: wgpu::ColorWrites::ALL,
+            };
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vertexMain"),
+                    compilation_options: Default::default(),
+                    buffers: &buffers,
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: desc.topology,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: desc.cull_mode,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: Some(desc.depth_write_enabled),
+                    depth_compare: Some(desc.depth_compare),
+                    stencil: wgpu::StencilState::default(),
+                    bias: desc.depth_bias,
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: desc.target.sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fragmentMain"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(color_target)],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = make_pipeline(desc.label, desc.target.color_format, desc.blend);
+        let picking_pipeline = desc.pickable.then(|| {
+            make_pipeline(
+                &format!("{}:picking", desc.label),
+                PICKING_FORMAT,
+                Some(picking_blend()),
+            )
         });
 
         Ok(Self {
             label: desc.label.to_string(),
             pipeline,
+            picking_pipeline,
             bind_group,
             uniforms,
             vertex_slots: vec![None; desc.vertex_layouts.len()],
@@ -336,6 +371,23 @@ impl Model {
 
     /// Encode this model's draw call into the pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        self.draw_with(&self.pipeline, pass)
+    }
+
+    /// Encode a draw with the picking pipeline. The pass must render into a
+    /// [`PICKING_FORMAT`] target and have its blend constant set to the layer id.
+    pub fn draw_picking(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        match &self.picking_pipeline {
+            Some(pipeline) => self.draw_with(pipeline, pass),
+            None => Ok(()),
+        }
+    }
+
+    pub fn is_pickable(&self) -> bool {
+        self.picking_pipeline.is_some()
+    }
+
+    fn draw_with(&self, pipeline: &wgpu::RenderPipeline, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
         if self.instance_count == 0 {
             return Ok(());
         }
@@ -347,7 +399,7 @@ impl Model {
                 )));
             }
         }
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         for (slot, buffer) in self.vertex_slots.iter().enumerate() {
             pass.set_vertex_buffer(slot as u32, buffer.as_ref().unwrap().slice(..));

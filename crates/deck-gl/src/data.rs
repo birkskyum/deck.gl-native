@@ -69,6 +69,9 @@ impl<T: Clone + std::fmt::Debug> std::fmt::Debug for Accessor<T> {
 pub struct LayerData {
     pub batch: Option<RecordBatch>,
     pub length: usize,
+    /// For sub layers of a composite layer: the source row of each item, so picking and
+    /// highlighting report the parent's rows. Mirrors deck.gl's `__source.index`.
+    pub source_rows: Option<Arc<Vec<u32>>>,
 }
 
 impl LayerData {
@@ -77,12 +80,31 @@ impl LayerData {
         Self {
             length: batch.num_rows(),
             batch: Some(batch),
+            source_rows: None,
         }
     }
 
     /// Data with only a length. All accessors must be constants or functions.
     pub fn with_length(length: usize) -> Self {
-        Self { batch: None, length }
+        Self {
+            batch: None,
+            length,
+            source_rows: None,
+        }
+    }
+
+    /// Map every item to a row of a parent layer's data (for composite sub layers).
+    pub fn with_source_rows(mut self, rows: Arc<Vec<u32>>) -> Self {
+        self.source_rows = Some(rows);
+        self
+    }
+
+    /// The row reported by picking for item `index`.
+    pub fn source_row(&self, index: usize) -> u32 {
+        match &self.source_rows {
+            Some(rows) => rows.get(index).copied().unwrap_or(index as u32),
+            None => index as u32,
+        }
     }
 
     pub fn len(&self) -> usize {

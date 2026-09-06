@@ -13,7 +13,7 @@ pub mod model;
 pub mod shader;
 pub mod uniform;
 
-pub use model::{Model, ModelDescriptor, RenderTarget, VertexBufferLayout};
+pub use model::{Model, ModelDescriptor, RenderTarget, VertexBufferLayout, PICKING_FORMAT};
 pub use shader::{assemble_shader, AssembledShader, ShaderModuleSource};
 pub use uniform::UniformBlock;
 pub use wgpu;

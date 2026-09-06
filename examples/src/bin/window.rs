@@ -23,6 +23,8 @@ struct State {
     depth: wgpu::Texture,
     deck: Deck,
     start: Instant,
+    cursor: Option<(f64, f64)>,
+    hovered: Option<(String, u32)>,
 }
 
 impl State {
@@ -94,6 +96,32 @@ impl State {
             depth,
             deck,
             start: Instant::now(),
+            cursor: None,
+            hovered: None,
+        }
+    }
+
+    /// Pick under the cursor and highlight the hit. Prints when the hit changes.
+    fn update_hover(&mut self) {
+        let Some((x, y)) = self.cursor.take() else { return };
+        let hit = match self.deck.pick(x, y) {
+            Ok(hit) => hit,
+            Err(e) => {
+                eprintln!("pick error: {e}");
+                return;
+            }
+        };
+        let key = hit.as_ref().map(|h| (h.layer_id.clone(), h.index));
+        if key != self.hovered {
+            self.deck.clear_highlights();
+            if let Some(hit) = &hit {
+                self.deck.set_highlighted_object(&hit.layer_id, Some(hit.index));
+                println!(
+                    "hover: layer {} object {} at {:.5}, {:.5}",
+                    hit.layer_id, hit.index, hit.coordinate[0], hit.coordinate[1]
+                );
+            }
+            self.hovered = key;
         }
     }
 
@@ -150,6 +178,7 @@ impl State {
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(frame);
+        self.update_hover();
     }
 }
 
@@ -182,6 +211,15 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 state.render();
                 state.window.request_redraw();
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let scale = state.window.scale_factor();
+                state.cursor = Some((position.x / scale, position.y / scale));
+            }
+            WindowEvent::CursorLeft { .. } => {
+                state.cursor = None;
+                state.hovered = None;
+                state.deck.clear_highlights();
             }
             _ => {}
         }

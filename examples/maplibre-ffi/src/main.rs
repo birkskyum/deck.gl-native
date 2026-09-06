@@ -367,6 +367,8 @@ struct State {
     deck: Deck,
     start: Instant,
     screenshot_done: bool,
+    hover_cursor: Option<(f64, f64)>,
+    hovered: Option<(String, u32)>,
 }
 
 impl State {
@@ -462,6 +464,8 @@ impl State {
             deck,
             start: Instant::now(),
             screenshot_done: false,
+            hover_cursor: None,
+            hovered: None,
         })
     }
 
@@ -564,6 +568,28 @@ impl State {
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
 
         self.maybe_screenshot()?;
+        self.update_hover()?;
+        Ok(())
+    }
+
+    /// Pick under the cursor and highlight the hit. Prints when the hit changes.
+    fn update_hover(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some((x, y)) = self.hover_cursor.take() else {
+            return Ok(());
+        };
+        let hit = self.deck.pick(x, y)?;
+        let key = hit.as_ref().map(|h| (h.layer_id.clone(), h.index));
+        if key != self.hovered {
+            self.deck.clear_highlights();
+            if let Some(hit) = &hit {
+                self.deck.set_highlighted_object(&hit.layer_id, Some(hit.index));
+                println!(
+                    "hover: layer {} object {} at {:.5}, {:.5}",
+                    hit.layer_id, hit.index, hit.coordinate[0], hit.coordinate[1]
+                );
+            }
+            self.hovered = key;
+        }
         Ok(())
     }
 

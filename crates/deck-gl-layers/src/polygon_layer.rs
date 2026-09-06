@@ -139,12 +139,13 @@ impl PolygonLayer {
             }
             let ring_count = rings.len();
             let rings = Arc::new(rings);
+            let source_rows = Arc::new(rows.iter().map(|&r| r as u32).collect::<Vec<u32>>());
             let rows = Arc::new(rows);
             let colors = Arc::new(line_colors);
             let widths = Arc::new(line_widths);
             layers.push(Box::new(PathLayer::new(PathLayerProps {
                 base: self.sub_props("stroke"),
-                data: LayerData::with_length(ring_count),
+                data: LayerData::with_length(ring_count).with_source_rows(source_rows),
                 width_units: props.line_width_units,
                 width_scale: props.line_width_scale,
                 width_min_pixels: props.line_width_min_pixels,
@@ -189,5 +190,18 @@ impl Layer for PolygonLayer {
 
     fn draw(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
         self.sub_layers.draw(ctx, pass)
+    }
+
+    fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        self.sub_layers.set_picking_active(ctx, active)
+    }
+
+    fn draw_picking(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        self.sub_layers.draw_picking(ctx, pass)
+    }
+
+    fn set_highlighted_object(&mut self, index: Option<u32>) {
+        self.props.base.highlighted_object_index = index;
+        self.sub_layers.set_highlighted_object(index);
     }
 }

@@ -4,6 +4,7 @@ use glam::DMat4;
 use luma_gl::{Model, RenderTarget};
 
 use crate::constants::CoordinateSystem;
+use crate::data::Color;
 use crate::lighting::LightingEffect;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
 use crate::viewport::Viewport;
@@ -21,6 +22,10 @@ pub struct LayerProps {
     pub coordinate_origin: [f64; 3],
     pub model_matrix: Option<DMat4>,
     pub wrap_longitude: bool,
+    /// Object (data row) drawn with `highlight_color`, typically the hovered one.
+    pub highlighted_object_index: Option<u32>,
+    /// RGBA in 0..255, blended over the highlighted object.
+    pub highlight_color: Color,
 }
 
 impl Default for LayerProps {
@@ -34,6 +39,8 @@ impl Default for LayerProps {
             coordinate_origin: [0.0; 3],
             model_matrix: None,
             wrap_longitude: false,
+            highlighted_object_index: None,
+            highlight_color: [0, 0, 128, 128],
         }
     }
 }
@@ -90,6 +97,37 @@ pub trait Layer {
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()>;
 
     fn draw(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()>;
+
+    /// Switch the layer's shaders between normal and picking color output. Called outside of
+    /// any render pass, before and after [`Layer::draw_picking`].
+    fn set_picking_active(&mut self, _ctx: &LayerContext, _active: bool) -> Result<()> {
+        Ok(())
+    }
+
+    /// Draw into the picking target. Only called for layers whose props say `pickable`.
+    fn draw_picking(&mut self, _ctx: &LayerContext, _pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Change which object is drawn highlighted. Takes effect on the next update.
+    fn set_highlighted_object(&mut self, _index: Option<u32>) {}
+}
+
+/// Encode an object index the way the `picking` shader module does: `index + 1` as three
+/// bytes, little endian. Zero means "not pickable".
+pub fn encode_picking_color(index: u32) -> [u8; 3] {
+    let value = index + 1;
+    [
+        (value & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        ((value >> 16) & 0xff) as u8,
+    ]
+}
+
+/// Inverse of [`encode_picking_color`]. `None` for the zero color.
+pub fn decode_picking_color(color: [u8; 3]) -> Option<u32> {
+    let value = color[0] as u32 + ((color[1] as u32) << 8) + ((color[2] as u32) << 16);
+    value.checked_sub(1)
 }
 
 /// The sub layers of a composite layer. Mirrors what deck.gl's `CompositeLayer` does with the
@@ -137,6 +175,39 @@ impl SubLayers {
         }
         Ok(())
     }
+
+    pub fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        for (layer, initialized) in &mut self.layers {
+            if *initialized {
+                layer.set_picking_active(ctx, active)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn draw_picking(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        for (layer, initialized) in &mut self.layers {
+            if *initialized && layer.props().visible && layer.props().pickable {
+                layer.draw_picking(ctx, pass)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_highlighted_object(&mut self, index: Option<u32>) {
+        for (layer, _) in &mut self.layers {
+            layer.set_highlighted_object(index);
+        }
+    }
+}
+
+/// Write `picking.isActive` on a model and upload it. Used by layers' `set_picking_active`.
+pub fn set_model_picking_active(model: &mut Model, queue: &wgpu::Queue, active: bool) -> Result<()> {
+    model
+        .uniforms("picking")?
+        .set_f32("isActive", if active { 1.0 } else { 0.0 })?;
+    model.upload_uniforms(queue);
+    Ok(())
 }
 
 /// Fill the uniform blocks every deck.gl layer shader has: `project`, `layer` and `picking`,
@@ -164,11 +235,27 @@ pub fn update_standard_uniforms(
     let picking = model.uniforms("picking")?;
     picking.set_f32("isActive", 0.0)?;
     picking.set_f32("isAttribute", 0.0)?;
-    picking.set_f32("isHighlightActive", 0.0)?;
     picking.set_f32("useByteColors", 1.0)?;
-    picking.set_vec3("highlightedObjectColor", glam::Vec3::ZERO)?;
-    picking.set_vec4("highlightColor", glam::Vec4::new(0.0, 1.0, 1.0, 1.0))?;
     picking.set_f32("disabledPickingIndexCount", 0.0)?;
+    match props.highlighted_object_index {
+        Some(index) => {
+            let color = encode_picking_color(index);
+            picking.set_f32("isHighlightActive", 1.0)?;
+            picking.set_vec3(
+                "highlightedObjectColor",
+                glam::Vec3::new(color[0] as f32, color[1] as f32, color[2] as f32),
+            )?;
+        }
+        None => {
+            picking.set_f32("isHighlightActive", 0.0)?;
+            picking.set_vec3("highlightedObjectColor", glam::Vec3::ZERO)?;
+        }
+    }
+    let h = props.highlight_color;
+    picking.set_vec4(
+        "highlightColor",
+        glam::Vec4::new(h[0] as f32, h[1] as f32, h[2] as f32, h[3] as f32) / 255.0,
+    )?;
 
     if model.has_uniforms("lighting") {
         ctx.lighting.write(model.uniforms("lighting")?)?;

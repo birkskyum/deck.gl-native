@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/solid-polygon-layer/solid-polygon-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons};
-use deck_gl::layer::{depth_bias_for_layer, update_standard_uniforms};
+use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
 use deck_gl::math_gl::web_mercator::lng_lat_to_world;
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
@@ -153,7 +153,7 @@ impl SolidPolygonLayer {
                 elevation: elevations[r as usize],
                 fill_color: fill_colors[r as usize],
                 line_color: line_colors[r as usize],
-                row_index: r,
+                row_index: data.source_row(r as usize),
             })
             .collect();
 
@@ -220,6 +220,7 @@ impl Layer for SolidPolygonLayer {
         let id = self.props.base.id.clone();
         let modules = self.modules();
         let depth_bias = depth_bias_for_layer(ctx.layer_index);
+        let pickable = self.props.base.pickable;
         let top_label = format!("{id}-top");
         let side_label = format!("{id}-side");
         let wireframe_label = format!("{id}-wireframe");
@@ -239,6 +240,7 @@ impl Layer for SolidPolygonLayer {
                 ctx.target,
             );
             desc.depth_bias = depth_bias;
+            desc.pickable = pickable;
             self.top = Some(Model::new(&ctx.device, &desc)?);
         }
 
@@ -261,6 +263,7 @@ impl Layer for SolidPolygonLayer {
                 ctx.target,
             );
             desc.depth_bias = depth_bias;
+            desc.pickable = pickable;
             let mut side = Model::new(&ctx.device, &desc)?;
             // top right - top left - bottom right - bottom left
             let side_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0];
@@ -280,6 +283,7 @@ impl Layer for SolidPolygonLayer {
                     ctx.target,
                 );
                 desc.depth_bias = depth_bias;
+                desc.pickable = pickable;
                 let mut wireframe = Model::new(&ctx.device, &desc)?;
                 // top right - top left - bottom left - bottom right
                 let wire_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -336,5 +340,33 @@ impl Layer for SolidPolygonLayer {
             }
         }
         Ok(())
+    }
+
+    fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        for model in [&mut self.top, &mut self.side, &mut self.wireframe]
+            .into_iter()
+            .flatten()
+        {
+            set_model_picking_active(model, &ctx.queue, active)?;
+        }
+        Ok(())
+    }
+
+    fn draw_picking(&mut self, _ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        if self.props.extruded {
+            if let Some(side) = &self.side {
+                side.draw_picking(pass)?;
+            }
+        }
+        if self.props.filled {
+            if let Some(top) = &self.top {
+                top.draw_picking(pass)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_highlighted_object(&mut self, index: Option<u32>) {
+        self.props.base.highlighted_object_index = index;
     }
 }

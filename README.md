@@ -25,13 +25,14 @@ Working today, headless and verified pixel by pixel in tests:
 - deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
 - Arrow record batches as layer data, with column, constant and function accessors
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide
+- Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
 
 - Rendering into a maplibre-native map, either inside maplibre-native's own Metal backend
   through a C API, or from an all-Rust host through maplibre-native-ffi. See
   [docs/maplibre-native.md](docs/maplibre-native.md).
 - The C API library cross-compiles for iOS (`cargo build --target aarch64-apple-ios -p deck-gl-ffi`).
 
-Not yet: picking passes, transitions, and the wider layer catalog. See
+Not yet: transitions, controllers, and the wider layer catalog. See
 [docs/rust-port.md](docs/rust-port.md) for the design and the open decisions.
 
 ![maplibre-native with the deck.gl-native overlay](docs/images/maplibre-overlay.png)

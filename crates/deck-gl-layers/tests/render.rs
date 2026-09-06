@@ -7,7 +7,7 @@ use deck_gl::luma_gl::device::{
     create_headless_context, create_render_texture, read_texture_rgba8, HeadlessContext,
 };
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Unit, ViewState};
+use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
     ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer,
     PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
@@ -24,6 +24,28 @@ fn context() -> Option<HeadlessContext> {
             None
         }
     }
+}
+
+fn make_deck(ctx: &HeadlessContext, layers: Vec<Box<dyn Layer>>) -> Deck {
+    Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: ViewState {
+                longitude: CENTER[0],
+                latitude: CENTER[1],
+                zoom: 14.0,
+                pitch: 0.0,
+                bearing: 0.0,
+            },
+            layers,
+            ..Default::default()
+        },
+    )
+    .expect("deck")
 }
 
 /// Render layers on a transparent background and return RGBA pixels.
@@ -325,4 +347,81 @@ fn polygon_layer_fills_and_strokes() {
     assert_pixel(&pixels, c + 19, c, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, c, c - 24, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, 2, 2, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn pick_finds_the_object_and_layer_under_a_pixel() {
+    let Some(ctx) = context() else { return };
+    // 0.0007 degrees is about 16 pixels at zoom 14; the viewport is 64 pixels wide
+    let d = 0.0007;
+    // Two circles in one layer, a polygon in another, drawn after the circles.
+    let circles = ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("circles")
+        },
+        data: LayerData::with_length(2),
+        get_position: Accessor::func(move |i| [CENTER[0] + if i == 0 { -d } else { d }, CENTER[1], 0.0]),
+        get_radius: Accessor::Constant(8.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    });
+    let s = 0.0002;
+    let square = Arc::new(vec![vec![
+        [CENTER[0] - s, CENTER[1] - s, 0.0],
+        [CENTER[0] + s, CENTER[1] - s, 0.0],
+        [CENTER[0] + s, CENTER[1] + s, 0.0],
+        [CENTER[0] - s, CENTER[1] + s, 0.0],
+    ]]);
+    let polygon = PolygonLayer::new(PolygonLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("square")
+        },
+        data: LayerData::with_length(1),
+        get_polygon: Accessor::func(move |_| (*square).clone()),
+        stroked: false,
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(circles), Box::new(polygon)]);
+    let c = SIZE as f64 / 2.0;
+    let left = deck.pick(c - 16.0, c).expect("pick").expect("hit");
+    assert_eq!(left.layer_id, "circles");
+    assert_eq!(left.index, 0);
+    let right = deck.pick(c + 16.0, c).expect("pick").expect("hit");
+    assert_eq!((right.layer_id.as_str(), right.index), ("circles", 1));
+    assert!(
+        (right.coordinate[0] - (CENTER[0] + d)).abs() < 2e-4,
+        "{:?}",
+        right.coordinate
+    );
+    let middle: PickingInfo = deck.pick(c, c).expect("pick").expect("hit");
+    assert_eq!((middle.layer_id.as_str(), middle.index), ("square", 0));
+    assert_eq!(deck.pick(2.0, 2.0).expect("pick"), None);
+    assert_eq!(deck.pick(-1.0, 5.0).expect("pick"), None);
+}
+
+#[test]
+fn highlighted_object_is_tinted() {
+    let Some(ctx) = context() else { return };
+    let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            pickable: true,
+            highlighted_object_index: Some(0),
+            highlight_color: [0, 0, 255, 255],
+            ..LayerProps::new("points")
+        },
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant(CENTER),
+        get_radius: Accessor::Constant(12.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    assert_pixel(&pixels, c, c, [0, 0, 255, 255], 1);
 }

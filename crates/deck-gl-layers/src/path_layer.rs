@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/path-layer/path-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
-use deck_gl::layer::{depth_bias_for_layer, update_standard_uniforms};
+use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Path, Result, Unit, Viewport};
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
@@ -105,7 +105,7 @@ impl PathLayer {
             .map(|&r| InstanceData {
                 width: widths[r as usize],
                 color: colors[r as usize],
-                row_index: r,
+                row_index: data.source_row(r as usize),
             })
             .collect();
 
@@ -171,6 +171,7 @@ impl Layer for PathLayer {
             ctx.target,
         );
         desc.depth_bias = depth_bias_for_layer(ctx.layer_index);
+        desc.pickable = self.props.base.pickable;
         let mut model = Model::new(&ctx.device, &desc)?;
 
         // [0] position on segment - 0: start, 1: end
@@ -230,5 +231,23 @@ impl Layer for PathLayer {
             model.draw(pass)?;
         }
         Ok(())
+    }
+
+    fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        if let Some(model) = &mut self.model {
+            set_model_picking_active(model, &ctx.queue, active)?;
+        }
+        Ok(())
+    }
+
+    fn draw_picking(&mut self, _ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        if let Some(model) = &self.model {
+            model.draw_picking(pass)?;
+        }
+        Ok(())
+    }
+
+    fn set_highlighted_object(&mut self, index: Option<u32>) {
+        self.props.base.highlighted_object_index = index;
     }
 }

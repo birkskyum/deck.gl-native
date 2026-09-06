@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/scatterplot-layer/scatterplot-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_vec2};
-use deck_gl::layer::{depth_bias_for_layer, update_standard_uniforms};
+use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -163,6 +163,7 @@ impl Layer for ScatterplotLayer {
             ctx.target,
         );
         desc.depth_bias = depth_bias_for_layer(ctx.layer_index);
+        desc.pickable = self.props.base.pickable;
         let mut model = Model::new(&ctx.device, &desc)?;
         // a square that minimally covers the unit circle
         let positions: [f32; 12] = [-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
@@ -207,5 +208,23 @@ impl Layer for ScatterplotLayer {
             model.draw(pass)?;
         }
         Ok(())
+    }
+
+    fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        if let Some(model) = &mut self.model {
+            set_model_picking_active(model, &ctx.queue, active)?;
+        }
+        Ok(())
+    }
+
+    fn draw_picking(&mut self, _ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        if let Some(model) = &self.model {
+            model.draw_picking(pass)?;
+        }
+        Ok(())
+    }
+
+    fn set_highlighted_object(&mut self, index: Option<u32>) {
+        self.props.base.highlighted_object_index = index;
     }
 }
