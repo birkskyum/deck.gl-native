@@ -72,17 +72,40 @@ pub struct UniformBinding {
     pub layout: UniformLayout,
 }
 
+/// Kind of a non-buffer resource binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceKind {
+    /// `texture_2d<f32>`
+    Texture2D,
+    /// `sampler`
+    Sampler,
+}
+
+/// A texture or sampler declaration found in the assembled shader.
+#[derive(Clone, Debug)]
+pub struct ResourceBinding {
+    pub name: String,
+    pub group: u32,
+    pub binding: u32,
+    pub kind: ResourceKind,
+}
+
 /// Result of [`assemble_shader`].
 #[derive(Clone, Debug)]
 pub struct AssembledShader {
     pub label: String,
     pub wgsl: String,
     pub uniforms: Vec<UniformBinding>,
+    pub resources: Vec<ResourceBinding>,
 }
 
 impl AssembledShader {
     pub fn uniform(&self, name: &str) -> Option<&UniformBinding> {
         self.uniforms.iter().find(|u| u.name == name)
+    }
+
+    pub fn resource(&self, name: &str) -> Option<&ResourceBinding> {
+        self.resources.iter().find(|r| r.name == name)
     }
 }
 
@@ -106,13 +129,36 @@ pub fn assemble_shader(label: &str, modules: &[ShaderModuleSource], main: &str) 
 
     let gctx = module.to_ctx();
     let mut uniforms = Vec::new();
+    let mut resources = Vec::new();
     for (_, var) in module.global_variables.iter() {
-        if var.space != AddressSpace::Uniform {
-            continue;
-        }
         let Some(binding) = &var.binding else { continue };
         let name = var.name.clone().unwrap_or_default();
         let ty = &module.types[var.ty];
+        if var.space == AddressSpace::Handle {
+            let kind = match &ty.inner {
+                TypeInner::Image {
+                    dim: naga::ImageDimension::D2,
+                    arrayed: false,
+                    class: naga::ImageClass::Sampled { multi: false, .. },
+                } => ResourceKind::Texture2D,
+                TypeInner::Sampler { comparison: false } => ResourceKind::Sampler,
+                other => {
+                    return Err(LumaError::Shader(format!(
+                        "{label}: unsupported resource binding `{name}`: {other:?}"
+                    )))
+                }
+            };
+            resources.push(ResourceBinding {
+                name,
+                group: binding.group,
+                binding: binding.binding,
+                kind,
+            });
+            continue;
+        }
+        if var.space != AddressSpace::Uniform {
+            continue;
+        }
         let layout = match &ty.inner {
             TypeInner::Struct { members, span } => {
                 let mut fields = Vec::with_capacity(members.len());
@@ -150,11 +196,13 @@ pub fn assemble_shader(label: &str, modules: &[ShaderModuleSource], main: &str) 
         });
     }
     uniforms.sort_by_key(|u| u.binding);
+    resources.sort_by_key(|r| r.binding);
 
     Ok(AssembledShader {
         label: label.to_string(),
         wgsl,
         uniforms,
+        resources,
     })
 }
 
@@ -251,5 +299,20 @@ struct BUniforms { m: mat4x4<f32>, v: vec2<f32>, };
         assert_eq!(b.layout.field("m").unwrap().kind, UniformKind::Mat4F);
         assert_eq!(b.layout.field("v").unwrap().offset, 64);
         assert_eq!(b.layout.size, 80);
+    }
+
+    #[test]
+    fn finds_textures_and_samplers() {
+        let main = r#"
+@group(0) @binding(auto) var tex: texture_2d<f32>;
+@group(0) @binding(auto) var texSampler: sampler;
+@vertex fn vertexMain(@location(0) p: vec2<f32>) -> @builtin(position) vec4<f32> { return vec4<f32>(p, 0.0, 1.0); }
+@fragment fn fragmentMain(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> { return textureSample(tex, texSampler, p.xy); }
+"#;
+        let shader = assemble_shader("tex", &[], main).unwrap();
+        assert_eq!(shader.resource("tex").unwrap().kind, ResourceKind::Texture2D);
+        assert_eq!(shader.resource("tex").unwrap().binding, 0);
+        assert_eq!(shader.resource("texSampler").unwrap().kind, ResourceKind::Sampler);
+        assert_eq!(shader.resource("texSampler").unwrap().binding, 1);
     }
 }

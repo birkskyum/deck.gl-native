@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::shader::AssembledShader;
+use crate::shader::{AssembledShader, ResourceBinding, ResourceKind, UniformBinding};
 use crate::uniform::UniformBlock;
 use crate::{LumaError, Result};
 
@@ -168,14 +168,21 @@ struct IndexBuffer {
     count: u32,
 }
 
-/// A drawable: pipeline, uniform blocks, bind group and vertex buffers.
+/// A drawable: pipeline, uniform blocks, textures, bind group and vertex buffers.
 #[derive(Debug)]
 pub struct Model {
     label: String,
+    device: wgpu::Device,
     pipeline: wgpu::RenderPipeline,
     picking_pipeline: Option<wgpu::RenderPipeline>,
+    bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
+    bind_group_dirty: bool,
+    uniform_bindings: Vec<UniformBinding>,
+    resource_bindings: Vec<ResourceBinding>,
     uniforms: HashMap<String, UniformBlock>,
+    textures: HashMap<String, wgpu::TextureView>,
+    samplers: HashMap<String, wgpu::Sampler>,
     vertex_slots: Vec<Option<wgpu::Buffer>>,
     slot_names: Vec<&'static str>,
     index_buffer: Option<IndexBuffer>,
@@ -191,10 +198,10 @@ impl Model {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&shader.wgsl)),
         });
 
-        // Uniform blocks and the bind group layout are derived from the shader.
+        // Uniform blocks and the bind group layout are derived from the shader. Textures and
+        // samplers start as placeholders so the bind group is always complete.
         let mut uniforms = HashMap::new();
         let mut layout_entries = Vec::new();
-        let mut group_entries = Vec::new();
         for binding in &shader.uniforms {
             let block = UniformBlock::new(
                 device,
@@ -213,22 +220,51 @@ impl Model {
             });
             uniforms.insert(binding.name.clone(), block);
         }
-        for binding in &shader.uniforms {
-            let block = &uniforms[&binding.name];
-            group_entries.push(wgpu::BindGroupEntry {
-                binding: binding.binding,
-                resource: block.buffer().as_entire_binding(),
-            });
+        let mut textures = HashMap::new();
+        let mut samplers = HashMap::new();
+        for resource in &shader.resources {
+            match resource.kind {
+                ResourceKind::Texture2D => {
+                    layout_entries.push(wgpu::BindGroupLayoutEntry {
+                        binding: resource.binding,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    });
+                    textures.insert(
+                        resource.name.clone(),
+                        placeholder_texture(device).create_view(&Default::default()),
+                    );
+                }
+                ResourceKind::Sampler => {
+                    layout_entries.push(wgpu::BindGroupLayoutEntry {
+                        binding: resource.binding,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    });
+                    samplers.insert(resource.name.clone(), default_sampler(device));
+                }
+            }
         }
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(desc.label),
             entries: &layout_entries,
         });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(desc.label),
-            layout: &bind_group_layout,
-            entries: &group_entries,
-        });
+        let bind_group = build_bind_group(
+            device,
+            desc.label,
+            &bind_group_layout,
+            &shader.uniforms,
+            &shader.resources,
+            &uniforms,
+            &textures,
+            &samplers,
+        );
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(desc.label),
             bind_group_layouts: &[Some(&bind_group_layout)],
@@ -247,6 +283,11 @@ impl Model {
             })
             .collect();
 
+        // Depth bias is only valid for triangle topologies.
+        let depth_bias = match desc.topology {
+            wgpu::PrimitiveTopology::TriangleList | wgpu::PrimitiveTopology::TriangleStrip => desc.depth_bias,
+            _ => wgpu::DepthBiasState::default(),
+        };
         let make_pipeline = |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
             let color_target = wgpu::ColorTargetState {
                 format,
@@ -276,7 +317,7 @@ impl Model {
                     depth_write_enabled: Some(desc.depth_write_enabled),
                     depth_compare: Some(desc.depth_compare),
                     stencil: wgpu::StencilState::default(),
-                    bias: desc.depth_bias,
+                    bias: depth_bias,
                 }),
                 multisample: wgpu::MultisampleState {
                     count: desc.target.sample_count,
@@ -304,10 +345,17 @@ impl Model {
 
         Ok(Self {
             label: desc.label.to_string(),
+            device: device.clone(),
             pipeline,
             picking_pipeline,
+            bind_group_layout,
             bind_group,
+            bind_group_dirty: false,
+            uniform_bindings: shader.uniforms.clone(),
+            resource_bindings: shader.resources.clone(),
             uniforms,
+            textures,
+            samplers,
             vertex_slots: vec![None; desc.vertex_layouts.len()],
             slot_names: desc.vertex_layouts.iter().map(|l| l.name).collect(),
             index_buffer: None,
@@ -331,11 +379,45 @@ impl Model {
         self.uniforms.contains_key(name)
     }
 
-    /// Upload every dirty uniform block. Call before encoding the render pass.
+    /// Upload every dirty uniform block and rebuild the bind group if a texture or sampler
+    /// changed. Call before encoding the render pass.
     pub fn upload_uniforms(&mut self, queue: &wgpu::Queue) {
         for block in self.uniforms.values_mut() {
             block.upload(queue);
         }
+        if self.bind_group_dirty {
+            self.bind_group = build_bind_group(
+                &self.device,
+                &self.label,
+                &self.bind_group_layout,
+                &self.uniform_bindings,
+                &self.resource_bindings,
+                &self.uniforms,
+                &self.textures,
+                &self.samplers,
+            );
+            self.bind_group_dirty = false;
+        }
+    }
+
+    /// Bind a texture view to a `texture_2d<f32>` declared in the shader.
+    pub fn set_texture(&mut self, name: &str, view: wgpu::TextureView) -> Result<()> {
+        if !self.textures.contains_key(name) {
+            return Err(LumaError::Model(format!("{}: no texture `{name}`", self.label)));
+        }
+        self.textures.insert(name.to_string(), view);
+        self.bind_group_dirty = true;
+        Ok(())
+    }
+
+    /// Bind a sampler to a `sampler` declared in the shader.
+    pub fn set_sampler(&mut self, name: &str, sampler: wgpu::Sampler) -> Result<()> {
+        if !self.samplers.contains_key(name) {
+            return Err(LumaError::Model(format!("{}: no sampler `{name}`", self.label)));
+        }
+        self.samplers.insert(name.to_string(), sampler);
+        self.bind_group_dirty = true;
+        Ok(())
     }
 
     /// Bind a vertex buffer to the slot with the given layout name.
@@ -421,4 +503,108 @@ impl Model {
         }
         Ok(())
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_bind_group(
+    device: &wgpu::Device,
+    label: &str,
+    layout: &wgpu::BindGroupLayout,
+    uniform_bindings: &[UniformBinding],
+    resource_bindings: &[ResourceBinding],
+    uniforms: &HashMap<String, UniformBlock>,
+    textures: &HashMap<String, wgpu::TextureView>,
+    samplers: &HashMap<String, wgpu::Sampler>,
+) -> wgpu::BindGroup {
+    let mut entries = Vec::new();
+    for binding in uniform_bindings {
+        entries.push(wgpu::BindGroupEntry {
+            binding: binding.binding,
+            resource: uniforms[&binding.name].buffer().as_entire_binding(),
+        });
+    }
+    for resource in resource_bindings {
+        let entry = match resource.kind {
+            ResourceKind::Texture2D => wgpu::BindingResource::TextureView(&textures[&resource.name]),
+            ResourceKind::Sampler => wgpu::BindingResource::Sampler(&samplers[&resource.name]),
+        };
+        entries.push(wgpu::BindGroupEntry {
+            binding: resource.binding,
+            resource: entry,
+        });
+    }
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &entries,
+    })
+}
+
+/// A 1x1 white texture bound until the layer provides one.
+fn placeholder_texture(device: &wgpu::Device) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("placeholder"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+/// Linear filtering, clamp to edge.
+pub fn default_sampler(device: &wgpu::Device) -> wgpu::Sampler {
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("linear clamp"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    })
+}
+
+/// Upload RGBA8 pixels into a new 2D texture usable for sampling.
+pub fn create_rgba8_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> wgpu::Texture {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    texture
 }

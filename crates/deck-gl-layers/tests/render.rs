@@ -9,9 +9,9 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, GeoJsonLayer, GeoJsonLayerProps, LineLayer, LineLayerProps, PathLayer,
-    PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, GeoJsonLayer, GeoJsonLayerProps,
+    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -477,4 +477,31 @@ fn geojson_layer_renders_polygons_lines_and_points_with_feature_accessors() {
     let hit = deck.pick(c + 26.0, c).unwrap().expect("point");
     assert_eq!((hit.layer_id.as_str(), hit.index), ("geojson", 2));
     assert!(deck.pick(c, 3.0).unwrap().is_none());
+}
+
+#[test]
+fn bitmap_layer_drapes_an_image_over_bounds() {
+    let Some(ctx) = context() else { return };
+    // 2x2 image: red, green on the top row; blue, white on the bottom row
+    let image = BitmapImage::new(
+        2,
+        2,
+        vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255],
+    );
+    let d = 0.0008;
+    let layer = BitmapLayer::new(BitmapLayerProps {
+        base: LayerProps::new("bitmap"),
+        image: Some(image),
+        bounds: [CENTER[0] - d, CENTER[1] - d, CENTER[0] + d, CENTER[1] + d],
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    // Top left of the image is the north west corner: up and left on screen. Sample near the
+    // corners, outside the bilinear blend between the two texel centers.
+    assert_pixel(&pixels, c - 15, c - 19, [255, 0, 0, 255], 2);
+    assert_pixel(&pixels, c + 15, c - 19, [0, 255, 0, 255], 2);
+    assert_pixel(&pixels, c - 15, c + 19, [0, 0, 255, 255], 2);
+    assert_pixel(&pixels, c + 15, c + 19, [255, 255, 255, 255], 2);
+    assert_pixel(&pixels, 1, 1, [0, 0, 0, 0], 0);
 }

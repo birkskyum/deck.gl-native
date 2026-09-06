@@ -8,8 +8,9 @@ use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer,
-    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, LineLayer, LineLayerProps,
+    PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -235,7 +236,51 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         ..Default::default()
     });
 
+    // A procedural image (color wheel over a checkerboard) draped south west of the center
+    let size = 128u32;
+    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let (fx, fy) = (x as f64 / size as f64 - 0.5, y as f64 / size as f64 - 0.5);
+            let angle = fy.atan2(fx);
+            let r = (fx * fx + fy * fy).sqrt();
+            let check = ((x / 16 + y / 16) % 2) as f64;
+            let hue = |offset: f64| (((angle + offset).sin() * 0.5 + 0.5) * 255.0) as u8;
+            let inside = r < 0.45;
+            rgba.extend_from_slice(&[
+                if inside {
+                    hue(0.0)
+                } else {
+                    (160.0 + 60.0 * check) as u8
+                },
+                if inside {
+                    hue(2.1)
+                } else {
+                    (160.0 + 60.0 * check) as u8
+                },
+                if inside {
+                    hue(4.2)
+                } else {
+                    (160.0 + 60.0 * check) as u8
+                },
+                if inside { 255 } else { 180 },
+            ]);
+        }
+    }
+    let bitmap = BitmapLayer::new(BitmapLayerProps {
+        base: LayerProps::new("bitmap"),
+        image: Some(BitmapImage::new(size, size, rgba)),
+        bounds: [
+            CENTER[0] - 0.062,
+            CENTER[1] - 0.05,
+            CENTER[0] - 0.032,
+            CENTER[1] - 0.026,
+        ],
+        ..Default::default()
+    });
+
     vec![
+        Box::new(bitmap),
         Box::new(solid_polygons),
         Box::new(polygons),
         Box::new(scatterplot),

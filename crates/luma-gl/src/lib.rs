@@ -13,7 +13,10 @@ pub mod model;
 pub mod shader;
 pub mod uniform;
 
-pub use model::{Model, ModelDescriptor, RenderTarget, VertexBufferLayout, PICKING_FORMAT};
+pub use model::{
+    create_rgba8_texture, default_sampler, Model, ModelDescriptor, RenderTarget, VertexBufferLayout,
+    PICKING_FORMAT,
+};
 pub use shader::{assemble_shader, AssembledShader, ShaderModuleSource};
 pub use uniform::UniformBlock;
 pub use wgpu;
