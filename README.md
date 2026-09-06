@@ -1,10 +1,6 @@
 # deck.gl-native
 
-This is an open-source C++ implementation of deck.gl.
-
-> This project is no longer active. It was an experiment to understand what it would take to build a native version of deck.gl. 
-> There are discussions about restarting a deck.gl-native effort (this time probably in Rust instead of C++) to help us integrate more non-JavaScript code, better support mobile platforms, and collaborate better with basemaps like maplibre-gl. 
-> If you have more than a passing interest in this topic you are welcome to join us at https://www.openvisualization.org/#get-involved.
+This is an open-source Rust implementation of deck.gl.
 
 <br />
 <table style="border: 0;" align="center">
