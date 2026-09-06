@@ -4,6 +4,10 @@
 //! `MTLCommandQueue` through wgpu's hal layer, so deck's command buffers are committed on the
 //! host's queue and execute after whatever the host committed before them.
 
+// Only the Metal host exists so far, so the shared handle machinery is unused on other
+// platforms until Vulkan host interop lands.
+#![cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
+
 use std::ffi::{c_char, c_void, CString};
 
 use deck_gl::luma_gl::RenderTarget;
