@@ -8,8 +8,8 @@ use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer,
+    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -189,8 +189,37 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         ..Default::default()
     });
 
+    // A stroked polygon with a hole, drawn by the composite PolygonLayer
+    let park: Polygon = vec![
+        vec![
+            [CENTER[0] - 0.058, CENTER[1] + 0.01, 0.0],
+            [CENTER[0] - 0.03, CENTER[1] + 0.012, 0.0],
+            [CENTER[0] - 0.028, CENTER[1] + 0.03, 0.0],
+            [CENTER[0] - 0.056, CENTER[1] + 0.034, 0.0],
+        ],
+        vec![
+            [CENTER[0] - 0.05, CENTER[1] + 0.017, 0.0],
+            [CENTER[0] - 0.04, CENTER[1] + 0.017, 0.0],
+            [CENTER[0] - 0.04, CENTER[1] + 0.026, 0.0],
+            [CENTER[0] - 0.05, CENTER[1] + 0.026, 0.0],
+        ],
+    ];
+    let park = Arc::new(park);
+    let polygons = PolygonLayer::new(PolygonLayerProps {
+        base: LayerProps::new("park"),
+        data: LayerData::with_length(1),
+        get_polygon: Accessor::func(move |_| (*park).clone()),
+        get_fill_color: Accessor::Constant([80, 200, 120, 160]),
+        get_line_color: Accessor::Constant([20, 90, 50, 255]),
+        get_line_width: Accessor::Constant(4.0),
+        line_width_units: Unit::Pixels,
+        line_joint_rounded: true,
+        ..Default::default()
+    });
+
     vec![
         Box::new(solid_polygons),
+        Box::new(polygons),
         Box::new(scatterplot),
         Box::new(paths),
         Box::new(lines),

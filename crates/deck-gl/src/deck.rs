@@ -2,7 +2,7 @@
 
 use luma_gl::RenderTarget;
 
-use crate::layer::{Layer, LayerContext};
+use crate::layer::{Layer, LayerContext, LAYER_INDEX_STRIDE};
 use crate::lighting::LightingEffect;
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
 use crate::Result;
@@ -175,7 +175,7 @@ impl Deck {
     /// Must be called before [`Deck::draw`], outside of any render pass.
     pub fn update(&mut self) -> Result<()> {
         for (index, entry) in self.layers.iter_mut().enumerate() {
-            self.ctx.layer_index = index as u32;
+            self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
             if !entry.initialized {
                 entry.layer.initialize(&self.ctx)?;
                 entry.initialized = true;
@@ -191,7 +191,7 @@ impl Deck {
     /// [`RenderTarget`]. The pass viewport is expected to cover the full deck size.
     pub fn draw(&mut self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
         for (index, entry) in self.layers.iter_mut().enumerate() {
-            self.ctx.layer_index = index as u32;
+            self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
             if entry.initialized && entry.layer.props().visible {
                 entry.layer.draw(&self.ctx, pass)?;
             }

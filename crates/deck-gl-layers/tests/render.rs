@@ -9,8 +9,8 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer,
+    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -295,4 +295,34 @@ fn arc_layer_with_zero_height_is_a_straight_line() {
     assert_pixel(&pixels, c, c, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, c - 12, c, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, c, c - 10, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn polygon_layer_fills_and_strokes() {
+    let Some(ctx) = context() else { return };
+    let d = 0.0008;
+    let polygon = Arc::new(vec![vec![
+        [CENTER[0] - d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] + d, 0.0],
+        [CENTER[0] - d, CENTER[1] + d, 0.0],
+    ]]);
+    let layer = PolygonLayer::new(PolygonLayerProps {
+        base: LayerProps::new("polygons"),
+        data: LayerData::with_length(1),
+        get_polygon: Accessor::func(move |_| (*polygon).clone()),
+        get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+        get_line_color: Accessor::Constant([255, 0, 0, 255]),
+        get_line_width: Accessor::Constant(6.0),
+        line_width_units: Unit::Pixels,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    // Fill in the middle, stroke centered on the edges (19 pixels out in x, 24 in y because of the
+    // latitude scale), nothing outside
+    assert_pixel(&pixels, c, c, [0, 0, 255, 255], 1);
+    assert_pixel(&pixels, c + 19, c, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, c, c - 24, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, 2, 2, [0, 0, 0, 0], 0);
 }

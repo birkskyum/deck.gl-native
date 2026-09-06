@@ -59,6 +59,10 @@ pub struct LayerContext {
     pub layer_index: u32,
 }
 
+/// Top-level layers are spaced this far apart in `layer_index`, leaving room for the sub
+/// layers of composite layers to get their own depth bias slots.
+pub const LAYER_INDEX_STRIDE: u32 = 8;
+
 /// deck.gl's default `getPolygonOffset`: `[0, -layerIndex * 100]`, so that a layer drawn later
 /// wins the depth test against earlier layers on the same surface instead of z-fighting.
 pub fn depth_bias_for_layer(layer_index: u32) -> wgpu::DepthBiasState {
@@ -86,6 +90,53 @@ pub trait Layer {
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()>;
 
     fn draw(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()>;
+}
+
+/// The sub layers of a composite layer. Mirrors what deck.gl's `CompositeLayer` does with the
+/// result of `renderLayers`: initialize new sub layers, update and draw them in order, and give
+/// each one its own depth bias slot after the parent's.
+#[derive(Default)]
+pub struct SubLayers {
+    layers: Vec<(Box<dyn Layer>, bool)>,
+}
+
+impl SubLayers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+
+    /// Replace the sub layers. GPU resources of the old ones are dropped.
+    pub fn replace(&mut self, layers: Vec<Box<dyn Layer>>) {
+        self.layers = layers.into_iter().map(|layer| (layer, false)).collect();
+    }
+
+    pub fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        let mut sub_ctx = ctx.clone();
+        for (index, (layer, initialized)) in self.layers.iter_mut().enumerate() {
+            sub_ctx.layer_index = ctx.layer_index + index as u32;
+            if !*initialized {
+                layer.initialize(&sub_ctx)?;
+                *initialized = true;
+            }
+            if layer.props().visible {
+                layer.update(&sub_ctx, viewport)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn draw(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        for (layer, initialized) in &mut self.layers {
+            if *initialized && layer.props().visible {
+                layer.draw(ctx, pass)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Fill the uniform blocks every deck.gl layer shader has: `project`, `layer` and `picking`,

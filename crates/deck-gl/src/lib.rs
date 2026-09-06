@@ -20,7 +20,7 @@ pub mod viewport;
 pub use constants::{CoordinateSystem, ProjectionMode, Unit};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, ViewState};
-pub use layer::{Layer, LayerContext, LayerProps};
+pub use layer::{Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, PointLight};
 pub use viewport::{Viewport, WebMercatorViewportOptions};
 
