@@ -69,7 +69,7 @@ fn tesselate_column(nradial: u32, extruded: bool) -> ColumnGeometry {
     }
     // top: 0, -1, 1, -2, 2, -3, 3, ...
     for j in (if extruded { 0 } else { 1 })..verts_around_edge {
-        let v = (j / 2) as i64 * if j % 2 == 0 { 1 } else { -1 };
+        let v = (j / 2) as i64 * if j.is_multiple_of(2) { 1 } else { -1 };
         let a = v as f32 * step;
         let (sin, cos) = a.sin_cos();
         vertices.push(GeometryVertex {

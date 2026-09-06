@@ -23,7 +23,7 @@ pub fn create_vertex_buffer(device: &wgpu::Device, label: &str, contents: &[u8])
     let contents = if contents.is_empty() {
         padded = vec![0u8; 16];
         padded.as_slice()
-    } else if contents.len() % 4 != 0 {
+    } else if !contents.len().is_multiple_of(4) {
         padded = contents.to_vec();
         padded.resize(contents.len().div_ceil(4) * 4, 0);
         padded.as_slice()

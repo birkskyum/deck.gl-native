@@ -317,7 +317,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
             [CENTER[0] + 0.075 * a.cos(), CENTER[1] + 0.058 * a.sin(), 0.0]
         }),
         get_icon: Accessor::func(|i| {
-            if i % 2 == 0 {
+            if i.is_multiple_of(2) {
                 "pin".to_string()
             } else {
                 "ring".to_string()
