@@ -549,6 +549,7 @@ dependencies = [
  "glam",
  "luma-gl",
  "math-gl",
+ "serde_json",
  "thiserror 2.0.20",
  "wgpu",
 ]
@@ -560,6 +561,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "deck-gl",
+ "deck-gl-json",
  "deck-gl-layers",
  "glam",
  "image",
@@ -578,11 +580,25 @@ version = "0.1.0"
 dependencies = [
  "deck-gl",
  "deck-gl-examples",
+ "deck-gl-json",
  "deck-gl-layers",
  "objc2 0.6.4",
  "objc2-metal 0.3.2",
  "pollster",
  "wgpu",
+]
+
+[[package]]
+name = "deck-gl-json"
+version = "0.1.0"
+dependencies = [
+ "deck-gl",
+ "deck-gl-layers",
+ "glam",
+ "image",
+ "serde_json",
+ "thiserror 2.0.20",
+ "ureq",
 ]
 
 [[package]]
@@ -596,6 +612,7 @@ dependencies = [
  "glam",
  "luma-gl",
  "math-gl",
+ "serde_json",
  "thiserror 2.0.20",
  "wgpu",
 ]
@@ -607,6 +624,7 @@ dependencies = [
  "deck-gl",
  "deck-gl-examples",
  "deck-gl-ffi",
+ "deck-gl-json",
  "deck-gl-layers",
  "image",
  "maplibre-native-ffi",
