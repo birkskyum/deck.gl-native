@@ -6,10 +6,10 @@ use std::sync::Arc;
 use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, UInt8Builder};
 use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use deck_gl::{Accessor, Layer, LayerData, LayerProps, Polygon, Unit, ViewState};
+use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
 use deck_gl_layers::{
-    LineLayer, LineLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -147,7 +147,55 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         ..Default::default()
     });
 
-    vec![Box::new(solid_polygons), Box::new(scatterplot), Box::new(lines)]
+    // A winding route drawn with joints and round caps
+    let route: Path = (0..40)
+        .map(|i| {
+            let t = i as f64 / 39.0;
+            let a = t * std::f64::consts::TAU * 1.5;
+            [
+                CENTER[0] - 0.05 + t * 0.1 + 0.006 * a.sin(),
+                CENTER[1] - 0.03 + 0.012 * (a * 0.7).cos() + t * 0.02,
+                0.0,
+            ]
+        })
+        .collect();
+    let route = Arc::new(route);
+    let paths = PathLayer::new(PathLayerProps {
+        base: LayerProps::new("route"),
+        data: LayerData::with_length(1),
+        get_path: Accessor::func(move |_| (*route).clone()),
+        get_color: Accessor::Constant([20, 120, 255, 255]),
+        get_width: Accessor::Constant(6.0),
+        width_units: Unit::Pixels,
+        joint_rounded: true,
+        cap_rounded: true,
+        ..Default::default()
+    });
+
+    // Arcs from the center to points around the bay
+    let arc_count = 8usize;
+    let arcs = ArcLayer::new(ArcLayerProps {
+        base: LayerProps::new("arcs"),
+        data: LayerData::with_length(arc_count),
+        get_source_position: Accessor::Constant([CENTER[0], CENTER[1], 0.0]),
+        get_target_position: Accessor::func(move |i| {
+            let a = (i as f64 + 0.5) / arc_count as f64 * std::f64::consts::TAU;
+            [CENTER[0] + 0.05 * a.cos(), CENTER[1] + 0.04 * a.sin(), 0.0]
+        }),
+        get_source_color: Accessor::Constant([255, 80, 0, 255]),
+        get_target_color: Accessor::Constant([0, 200, 255, 255]),
+        get_width: Accessor::Constant(3.0),
+        get_height: Accessor::Constant(0.6),
+        ..Default::default()
+    });
+
+    vec![
+        Box::new(solid_polygons),
+        Box::new(scatterplot),
+        Box::new(paths),
+        Box::new(lines),
+        Box::new(arcs),
+    ]
 }
 
 pub const CLEAR_COLOR: wgpu::Color = wgpu::Color {

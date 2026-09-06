@@ -24,6 +24,8 @@ pub type Position = [f64; 3];
 pub type Color = [u8; 4];
 /// A polygon as a list of rings. The first ring is the outer boundary, the rest are holes.
 pub type Polygon = Vec<Vec<Position>>;
+/// A path (polyline) as a list of positions.
+pub type Path = Vec<Position>;
 
 /// How a per-object value is obtained.
 #[derive(Clone)]
@@ -227,6 +229,27 @@ pub fn resolve_colors(data: &LayerData, accessor: &Accessor<Color>) -> Result<Ve
                         255
                     },
                 ]
+            })
+            .collect())
+    })
+}
+
+/// Resolve paths. Columns must be GeoArrow linestrings (`List<FixedSizeList<Float64, 2|3>>`).
+pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<Path>> {
+    resolve_with(data, accessor, |column| {
+        let (offsets, coords) = list_parts(column.as_ref())?;
+        let (values, width) = fixed_size_list_to_f64(coords.as_ref())?;
+        if width != 2 && width != 3 {
+            return Err(DeckError::Data(format!(
+                "path coordinates must have 2 or 3 components, got {width}"
+            )));
+        }
+        Ok((0..offsets.len().saturating_sub(1))
+            .map(|i| {
+                values[offsets[i] * width..offsets[i + 1] * width]
+                    .chunks(width)
+                    .map(|c| [c[0], c[1], if width == 3 { c[2] } else { 0.0 }])
+                    .collect()
             })
             .collect())
     })

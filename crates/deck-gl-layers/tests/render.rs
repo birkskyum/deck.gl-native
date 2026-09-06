@@ -9,8 +9,8 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Unit, ViewState};
 use deck_gl_layers::{
-    LineLayer, LineLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -243,4 +243,56 @@ fn later_layer_wins_on_a_shared_surface() {
         }
     }
     assert_pixel(&pixels, c + 24, c, [0, 0, 255, 255], 1);
+}
+
+#[test]
+fn path_layer_draws_a_polyline_with_a_corner() {
+    let Some(ctx) = context() else { return };
+    // An L shape: west to center, then north. Width 6 pixels.
+    let d = 0.001;
+    let path = Arc::new(vec![
+        [CENTER[0] - d, CENTER[1], 0.0],
+        [CENTER[0], CENTER[1], 0.0],
+        [CENTER[0], CENTER[1] + d, 0.0],
+    ]);
+    let layer = PathLayer::new(PathLayerProps {
+        base: LayerProps::new("path"),
+        data: LayerData::with_length(1),
+        get_path: Accessor::func(move |_| (*path).clone()),
+        get_color: Accessor::Constant([255, 0, 255, 255]),
+        get_width: Accessor::Constant(6.0),
+        width_units: Unit::Pixels,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    // Along the horizontal leg, on the vertical leg (north is up on screen), and at the corner
+    assert_pixel(&pixels, c - 12, c, [255, 0, 255, 255], 1);
+    assert_pixel(&pixels, c, c - 12, [255, 0, 255, 255], 1);
+    assert_pixel(&pixels, c, c, [255, 0, 255, 255], 1);
+    // Off the path: east of the corner and south of the horizontal leg
+    assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c - 12, c + 10, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn arc_layer_with_zero_height_is_a_straight_line() {
+    let Some(ctx) = context() else { return };
+    let d = 0.001;
+    let layer = ArcLayer::new(ArcLayerProps {
+        base: LayerProps::new("arcs"),
+        data: LayerData::with_length(1),
+        get_source_position: Accessor::Constant([CENTER[0] - d, CENTER[1], 0.0]),
+        get_target_position: Accessor::Constant([CENTER[0] + d, CENTER[1], 0.0]),
+        get_source_color: Accessor::Constant([255, 0, 0, 255]),
+        get_target_color: Accessor::Constant([255, 0, 0, 255]),
+        get_width: Accessor::Constant(6.0),
+        get_height: Accessor::Constant(0.0),
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, c - 12, c, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, c, c - 10, [0, 0, 0, 0], 0);
 }
