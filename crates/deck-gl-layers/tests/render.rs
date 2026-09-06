@@ -9,9 +9,10 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, GeoJsonLayer, GeoJsonLayerProps,
-    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
+    GeoJsonLayer, GeoJsonLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
+    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -504,4 +505,75 @@ fn bitmap_layer_drapes_an_image_over_bounds() {
     assert_pixel(&pixels, c - 15, c + 19, [0, 0, 255, 255], 2);
     assert_pixel(&pixels, c + 15, c + 19, [255, 255, 255, 255], 2);
     assert_pixel(&pixels, 1, 1, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn column_layer_draws_flat_disks_and_extruded_columns() {
+    let Some(ctx) = context() else { return };
+    let flat = ColumnLayer::new(ColumnLayerProps {
+        base: LayerProps::new("disks"),
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant([CENTER[0] - 0.0007, CENTER[1], 0.0]),
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        radius: 10.0,
+        radius_units: Unit::Pixels,
+        extruded: false,
+        ..Default::default()
+    });
+    let extruded = ColumnLayer::new(ColumnLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("columns")
+        },
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant([CENTER[0] + 0.0007, CENTER[1], 0.0]),
+        get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+        get_elevation: Accessor::Constant(200.0),
+        radius: 10.0,
+        radius_units: Unit::Pixels,
+        wireframe: true,
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(flat), Box::new(extruded)]);
+    let c = SIZE as f64 / 2.0;
+    let hit = deck.pick(c + 16.0, c).unwrap().expect("column");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("columns", 0));
+
+    let flat = ColumnLayer::new(ColumnLayerProps {
+        base: LayerProps::new("disks"),
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant(CENTER),
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        radius: 10.0,
+        radius_units: Unit::Pixels,
+        extruded: false,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(flat)]);
+    let c = SIZE / 2;
+    // Flat disks are unlit, so the fill color comes through exactly
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, c + 6, c, [255, 0, 0, 255], 1);
+    assert_pixel(&pixels, c + 14, c, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn point_cloud_layer_draws_lit_points() {
+    let Some(ctx) = context() else { return };
+    let layer = PointCloudLayer::new(PointCloudLayerProps {
+        base: LayerProps::new("cloud"),
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant(CENTER),
+        get_color: Accessor::Constant([255, 0, 0, 255]),
+        point_size: 8.0,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    let p = pixel(&pixels, c, c);
+    assert!(
+        p[3] == 255 && p[0] > 120 && p[0] > p[1] + 40 && p[0] > p[2] + 40,
+        "{p:?}"
+    );
+    assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
 }

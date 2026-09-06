@@ -8,9 +8,9 @@ use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, LineLayer, LineLayerProps,
-    PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
+    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -279,9 +279,34 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         ..Default::default()
     });
 
+    // Hexagonal columns in a small grid east of the blocks
+    let column_count = 5 * 4;
+    let columns = ColumnLayer::new(ColumnLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("columns")
+        },
+        data: LayerData::with_length(column_count),
+        disk_resolution: 6,
+        radius: 150.0,
+        get_position: Accessor::func(|i| {
+            [
+                CENTER[0] + 0.04 + (i % 5) as f64 * 0.0045,
+                CENTER[1] - 0.03 + (i / 5) as f64 * 0.0045,
+                0.0,
+            ]
+        }),
+        get_elevation: Accessor::func(|i| 100.0 + 80.0 * ((i * 5) % 7) as f32),
+        get_fill_color: Accessor::func(|i| [90, 120 + ((i * 17) % 100) as u8, 220, 255]),
+        get_line_color: Accessor::Constant([30, 30, 60, 255]),
+        wireframe: true,
+        ..Default::default()
+    });
+
     vec![
         Box::new(bitmap),
         Box::new(solid_polygons),
+        Box::new(columns),
         Box::new(polygons),
         Box::new(scatterplot),
         Box::new(paths),

@@ -168,7 +168,8 @@ fn fixed_size_list_to_f64(array: &dyn Array) -> Result<(Vec<f64>, usize)> {
     Ok((values[start..end].to_vec(), width))
 }
 
-fn resolve_with<T: Clone>(
+/// Resolve an accessor, reading columns through `from_column`.
+pub fn resolve_with<T: Clone>(
     data: &LayerData,
     accessor: &Accessor<T>,
     from_column: impl FnOnce(&ArrayRef) -> Result<Vec<T>>,
