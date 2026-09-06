@@ -1,0 +1,19 @@
+[package]
+name = "deck-gl-layers"
+description = "Rust port of @deck.gl/layers: ScatterplotLayer, LineLayer, SolidPolygonLayer on wgpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+math-gl = { workspace = true }
+luma-gl = { workspace = true }
+deck-gl = { workspace = true }
+wgpu = { workspace = true }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+earcutr = { workspace = true }
+arrow-array = { workspace = true }

@@ -1,0 +1,32 @@
+[package]
+name = "deck-gl-maplibre-demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "deck.gl-native layers drawn into a maplibre-native map through maplibre-native-ffi, all in Rust"
+
+# Standalone crate: it needs the MapLibre native library, which the maplibre-native-ffi
+# build script downloads, and a checkout of https://github.com/maplibre/maplibre-native-ffi
+# next to this repository.
+[workspace]
+
+[dependencies]
+deck-gl = { path = "../../crates/deck-gl" }
+deck-gl-layers = { path = "../../crates/deck-gl-layers" }
+deck-gl-ffi = { path = "../../crates/deck-gl-ffi" }
+deck-gl-examples = { path = ".." }
+maplibre-native-ffi = { path = "../../../maplibre-native-ffi/bindings/rust/crates/maplibre-native-ffi", features = ["metal"] }
+wgpu = "30"
+winit = "0.30"
+pollster = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-metal = "0.3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
