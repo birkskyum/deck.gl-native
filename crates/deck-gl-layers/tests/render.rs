@@ -10,9 +10,9 @@ use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
     ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
-    GeoJsonLayer, GeoJsonLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
-    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps,
+    GeoJsonLayer, GeoJsonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer,
+    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
+    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -576,4 +576,69 @@ fn point_cloud_layer_draws_lit_points() {
         "{p:?}"
     );
     assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn icon_layer_draws_masked_icons_from_an_atlas() {
+    let Some(ctx) = context() else { return };
+    // 16x8 atlas: left half is an opaque white square icon, right half is transparent
+    let mut rgba = vec![0u8; 16 * 8 * 4];
+    for y in 0..8 {
+        for x in 0..8 {
+            let i = (y * 16 + x) * 4;
+            rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+        }
+    }
+    let mut mapping = std::collections::HashMap::new();
+    mapping.insert("square".to_string(), IconMapping::new(0, 0, 8, 8).mask());
+    mapping.insert("blank".to_string(), IconMapping::new(8, 0, 8, 8));
+    let atlas = Arc::new(IconAtlas {
+        image: BitmapImage::new(16, 8, rgba),
+        mapping,
+    });
+    let layer = IconLayer::new(IconLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("icons")
+        },
+        data: LayerData::with_length(2),
+        atlas: Some(atlas),
+        get_position: Accessor::func(|i| [CENTER[0] + if i == 0 { -0.0007 } else { 0.0007 }, CENTER[1], 0.0]),
+        get_icon: Accessor::func(|i| {
+            if i == 0 {
+                "square".to_string()
+            } else {
+                "blank".to_string()
+            }
+        }),
+        get_color: Accessor::Constant([0, 128, 255, 255]),
+        get_size: Accessor::Constant(16.0),
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    let c = SIZE as f64 / 2.0;
+    let hit = deck.pick(c - 16.0, c).unwrap().expect("icon");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("icons", 0));
+    // The blank icon is fully transparent and discarded, so nothing is picked there
+    assert!(deck.pick(c + 16.0, c).unwrap().is_none());
+    assert_eq!(
+        IconAtlas::mapping_from_json(
+            r#"{"m": {"x": 1, "y": 2, "width": 3, "height": 4, "anchorY": 4, "mask": true}}"#
+        )
+        .unwrap()["m"],
+        IconMapping::new(1, 2, 3, 4)
+            .mask()
+            .anchor(1.5, 4.0)
+            .into_anchor_x_default()
+    );
+}
+
+trait AnchorFix {
+    fn into_anchor_x_default(self) -> Self;
+}
+impl AnchorFix for IconMapping {
+    fn into_anchor_x_default(mut self) -> Self {
+        self.anchor_x = None;
+        self
+    }
 }

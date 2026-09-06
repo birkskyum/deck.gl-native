@@ -218,6 +218,22 @@ pub fn resolve_f32(data: &LayerData, accessor: &Accessor<f32>) -> Result<Vec<f32
     })
 }
 
+/// Resolve strings from a `Utf8` or `LargeUtf8` column.
+pub fn resolve_strings(data: &LayerData, accessor: &Accessor<String>) -> Result<Vec<String>> {
+    resolve_with(data, accessor, |column| {
+        if let Some(array) = column.as_string_opt::<i32>() {
+            return Ok(array.iter().map(|v| v.unwrap_or_default().to_string()).collect());
+        }
+        if let Some(array) = column.as_string_opt::<i64>() {
+            return Ok(array.iter().map(|v| v.unwrap_or_default().to_string()).collect());
+        }
+        Err(DeckError::Data(format!(
+            "expected a string column, got {}",
+            column.data_type()
+        )))
+    })
+}
+
 /// Resolve 2-component vectors from a `FixedSizeList` column of width 2.
 pub fn resolve_vec2(data: &LayerData, accessor: &Accessor<[f32; 2]>) -> Result<Vec<[f32; 2]>> {
     resolve_with(data, accessor, |column| {

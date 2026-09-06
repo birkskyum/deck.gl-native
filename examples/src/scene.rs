@@ -9,8 +9,9 @@ use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
 use deck_gl_layers::{
     ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
-    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
+    PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -303,6 +304,30 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         ..Default::default()
     });
 
+    // Icons from a procedural atlas: a pin and a ring, both masks colored per instance
+    let icons = IconLayer::new(IconLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("icons")
+        },
+        data: LayerData::with_length(12),
+        atlas: Some(Arc::new(icon_atlas())),
+        get_position: Accessor::func(|i| {
+            let a = i as f64 / 12.0 * std::f64::consts::TAU;
+            [CENTER[0] + 0.075 * a.cos(), CENTER[1] + 0.058 * a.sin(), 0.0]
+        }),
+        get_icon: Accessor::func(|i| {
+            if i % 2 == 0 {
+                "pin".to_string()
+            } else {
+                "ring".to_string()
+            }
+        }),
+        get_color: Accessor::func(|i| [255, 40 + (i * 18) as u8, 80, 255]),
+        get_size: Accessor::Constant(32.0),
+        ..Default::default()
+    });
+
     vec![
         Box::new(bitmap),
         Box::new(solid_polygons),
@@ -312,7 +337,42 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         Box::new(paths),
         Box::new(lines),
         Box::new(arcs),
+        Box::new(icons),
     ]
+}
+
+/// A 64x32 atlas with a map pin on the left and a ring on the right, as alpha masks.
+pub fn icon_atlas() -> IconAtlas {
+    let (w, h) = (64u32, 32u32);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+            let visible = if x < 32 {
+                // pin: a disk with a hole on top of a triangle pointing down to the anchor
+                let d = ((fx - 16.0).powi(2) + (fy - 11.0).powi(2)).sqrt();
+                let tail = fy >= 11.0 && (fx - 16.0).abs() < (32.0 - fy) * 0.45;
+                (d < 9.0 || tail) && d >= 3.5
+            } else {
+                let r = ((fx - 48.0).powi(2) + (fy - 16.0).powi(2)).sqrt();
+                (9.0..14.0).contains(&r)
+            };
+            if visible {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+    let mut mapping = std::collections::HashMap::new();
+    mapping.insert(
+        "pin".to_string(),
+        IconMapping::new(0, 0, 32, 32).mask().anchor(16.0, 32.0),
+    );
+    mapping.insert("ring".to_string(), IconMapping::new(32, 0, 32, 32).mask());
+    IconAtlas {
+        image: BitmapImage::new(w, h, rgba),
+        mapping,
+    }
 }
 
 pub const CLEAR_COLOR: wgpu::Color = wgpu::Color {
