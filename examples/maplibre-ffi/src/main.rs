@@ -72,6 +72,128 @@ struct Shared {
     camera: Mutex<Option<mln::CameraOptions>>,
     shutdown: AtomicBool,
     failure: Mutex<Option<String>>,
+    /// Set on the first pointer or key interaction; stops the automatic orbit.
+    interacted: AtomicBool,
+}
+
+/// A camera change decoded on the winit thread and applied on the map's owner thread.
+#[derive(Clone, Copy, Debug)]
+enum CameraCommand {
+    GestureStart,
+    GestureEnd,
+    MoveBy { dx: f64, dy: f64 },
+    ScaleBy { scale: f64, anchor: mln::ScreenPoint },
+    BearingBy { delta: f64 },
+    PitchBy { delta: f64 },
+    Reset,
+}
+
+const DRAG_ROTATE_FACTOR: f64 = 0.5;
+const DRAG_PITCH_FACTOR: f64 = 0.5;
+
+/// Decodes winit input into camera commands, in logical pixels.
+#[derive(Default)]
+struct Input {
+    left_down: bool,
+    right_down: bool,
+    control: bool,
+    cursor: (f64, f64),
+    last: (f64, f64),
+}
+
+impl Input {
+    fn handle(
+        &mut self,
+        event: &WindowEvent,
+        scale_factor: f64,
+        commands: &mpsc::Sender<CameraCommand>,
+    ) -> bool {
+        use winit::event::{ElementState, MouseButton, MouseScrollDelta};
+        let send = |command: CameraCommand| {
+            let _ = commands.send(command);
+        };
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let (x, y) = (position.x / scale_factor, position.y / scale_factor);
+                let (dx, dy) = (x - self.last.0, y - self.last.1);
+                self.last = (x, y);
+                self.cursor = (x, y);
+                if self.right_down || (self.left_down && self.control) {
+                    if dx != 0.0 {
+                        send(CameraCommand::BearingBy {
+                            delta: dx * DRAG_ROTATE_FACTOR,
+                        });
+                    }
+                    if dy != 0.0 {
+                        send(CameraCommand::PitchBy {
+                            delta: -dy * DRAG_PITCH_FACTOR,
+                        });
+                    }
+                    true
+                } else if self.left_down {
+                    send(CameraCommand::MoveBy { dx, dy });
+                    true
+                } else {
+                    false
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let down = *state == ElementState::Pressed;
+                match button {
+                    MouseButton::Left => self.left_down = down,
+                    MouseButton::Right => self.right_down = down,
+                    _ => return false,
+                }
+                self.last = self.cursor;
+                send(if down {
+                    CameraCommand::GestureStart
+                } else {
+                    CameraCommand::GestureEnd
+                });
+                true
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y as f64,
+                    MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+                };
+                if lines == 0.0 {
+                    return false;
+                }
+                send(CameraCommand::ScaleBy {
+                    scale: 2f64.powf(lines * 0.25),
+                    anchor: mln::ScreenPoint::new(self.cursor.0, self.cursor.1),
+                });
+                true
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.control = modifiers.state().control_key();
+                false
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                use winit::keyboard::{KeyCode, PhysicalKey};
+                if event.state != ElementState::Pressed {
+                    return false;
+                }
+                match event.physical_key {
+                    PhysicalKey::Code(KeyCode::Digit0) => send(CameraCommand::Reset),
+                    PhysicalKey::Code(KeyCode::KeyQ) => send(CameraCommand::BearingBy { delta: -10.0 }),
+                    PhysicalKey::Code(KeyCode::KeyE) => send(CameraCommand::BearingBy { delta: 10.0 }),
+                    PhysicalKey::Code(KeyCode::Equal) => send(CameraCommand::ScaleBy {
+                        scale: 1.25,
+                        anchor: mln::ScreenPoint::new(self.cursor.0, self.cursor.1),
+                    }),
+                    PhysicalKey::Code(KeyCode::Minus) => send(CameraCommand::ScaleBy {
+                        scale: 0.8,
+                        anchor: mln::ScreenPoint::new(self.cursor.0, self.cursor.1),
+                    }),
+                    _ => return false,
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// What the map thread hands the render thread once the map exists.
@@ -80,7 +202,12 @@ struct MapHandles {
 }
 
 /// Runs the runtime and the map until shutdown. Owns both for their whole lifetime.
-fn map_thread(size: ViewportSize, handles: mpsc::Sender<MapHandles>, shared: Arc<Shared>) {
+fn map_thread(
+    size: ViewportSize,
+    handles: mpsc::Sender<MapHandles>,
+    commands: mpsc::Receiver<CameraCommand>,
+    shared: Arc<Shared>,
+) {
     let result = (|| -> Result<(), Box<dyn Error>> {
         let mut runtime_options = mln::RuntimeOptions::default();
         runtime_options.cache_path = Some(
@@ -119,10 +246,15 @@ fn map_thread(size: ViewportSize, handles: mpsc::Sender<MapHandles>, shared: Arc
 
         let start = Instant::now();
         while !shared.shutdown.load(Ordering::Relaxed) {
-            // Slow orbit so the demo moves on its own
-            let mut orbit = mln::CameraOptions::default();
-            orbit.bearing = Some(view.bearing + start.elapsed().as_secs_f64() * 6.0);
-            map.jump_to(&orbit)?;
+            for command in commands.try_iter() {
+                apply_command(&map, command, view)?;
+            }
+            if !shared.interacted.load(Ordering::Relaxed) {
+                // Slow orbit until the user takes over
+                let mut orbit = mln::CameraOptions::default();
+                orbit.bearing = Some(view.bearing + start.elapsed().as_secs_f64() * 6.0);
+                map.jump_to(&orbit)?;
+            }
 
             runtime.pump(Some(Duration::from_millis(4)), None)?;
             let _ = runtime.drain_events(0)?;
@@ -135,6 +267,33 @@ fn map_thread(size: ViewportSize, handles: mpsc::Sender<MapHandles>, shared: Arc
     })();
     if let Err(e) = result {
         *shared.failure.lock().unwrap() = Some(e.to_string());
+    }
+}
+
+fn apply_command(map: &mln::MapHandle, command: CameraCommand, home: deck_gl::ViewState) -> mln::Result<()> {
+    match command {
+        CameraCommand::GestureStart => map.set_gesture_in_progress(true),
+        CameraCommand::GestureEnd => map.set_gesture_in_progress(false),
+        CameraCommand::MoveBy { dx, dy } => map.move_by(dx, dy),
+        CameraCommand::ScaleBy { scale, anchor } => map.scale_by(scale, Some(anchor)),
+        CameraCommand::BearingBy { delta } => {
+            let mut camera = mln::CameraOptions::default();
+            camera.bearing = Some(map.camera()?.bearing.unwrap_or(0.0) + delta);
+            map.jump_to(&camera)
+        }
+        CameraCommand::PitchBy { delta } => {
+            let mut camera = mln::CameraOptions::default();
+            camera.pitch = Some((map.camera()?.pitch.unwrap_or(0.0) + delta).clamp(0.0, 85.0));
+            map.jump_to(&camera)
+        }
+        CameraCommand::Reset => {
+            let mut camera = mln::CameraOptions::default();
+            camera.center = Some(mln::LatLng::new(home.latitude, home.longitude));
+            camera.zoom = Some(home.zoom);
+            camera.pitch = Some(home.pitch);
+            camera.bearing = Some(home.bearing);
+            map.jump_to(&camera)
+        }
     }
 }
 
@@ -202,6 +361,8 @@ struct State {
     attachments: Attachments,
     shared: Arc<Shared>,
     map_thread: Option<JoinHandle<()>>,
+    commands: mpsc::Sender<CameraCommand>,
+    input: Input,
     session: Option<mln::RenderSessionHandle>,
     deck: Deck,
     start: Instant,
@@ -239,11 +400,12 @@ impl State {
         // maplibre-native on its own thread; we get a reference to attach a session to
         let shared = Arc::new(Shared::default());
         let (handles_tx, handles_rx) = mpsc::channel();
+        let (commands, commands_rx) = mpsc::channel();
         let map_thread = {
             let shared = shared.clone();
             std::thread::Builder::new()
                 .name("maplibre".into())
-                .spawn(move || map_thread(size, handles_tx, shared))?
+                .spawn(move || map_thread(size, handles_tx, commands_rx, shared))?
         };
         let handles = match handles_rx.recv() {
             Ok(handles) => handles,
@@ -294,6 +456,8 @@ impl State {
             attachments,
             shared,
             map_thread: Some(map_thread),
+            commands,
+            input: Input::default(),
             session: Some(session),
             deck,
             start: Instant::now(),
@@ -498,7 +662,15 @@ impl ApplicationHandler for App {
                 state.window.request_redraw();
                 result
             }
-            _ => Ok(()),
+            ref event => {
+                if state
+                    .input
+                    .handle(event, state.size.scale_factor, &state.commands)
+                {
+                    state.shared.interacted.store(true, Ordering::Relaxed);
+                }
+                Ok(())
+            }
         };
         if let Err(e) = result {
             eprintln!("error: {e}");

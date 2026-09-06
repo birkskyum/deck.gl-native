@@ -75,6 +75,10 @@ cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml
 The crate is a standalone workspace member so the main workspace builds without the native
 download. It expects the maplibre-native-ffi checkout next to this repository.
 
+Left drag pans, right drag or ctrl+drag rotates and pitches, scroll zooms at the cursor, Q
+and E rotate, plus and minus zoom, 0 resets the camera. The map orbits on its own until the
+first interaction.
+
 The runtime and the map run on their own thread, as in maplibre-native-ffi's `rust-map`
 example: pumping the runtime from a winit callback spins the Cocoa run loop re-entrantly and
 winit panics. The map thread also drives the orbit and publishes the camera; the winit thread

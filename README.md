@@ -29,6 +29,7 @@ Working today, headless and verified pixel by pixel in tests:
 - Rendering into a maplibre-native map, either inside maplibre-native's own Metal backend
   through a C API, or from an all-Rust host through maplibre-native-ffi. See
   [docs/maplibre-native.md](docs/maplibre-native.md).
+- The C API library cross-compiles for iOS (`cargo build --target aarch64-apple-ios -p deck-gl-ffi`).
 
 Not yet: picking passes, transitions, and the wider layer catalog. See
 [docs/rust-port.md](docs/rust-port.md) for the design and the open decisions.
