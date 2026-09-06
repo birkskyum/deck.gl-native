@@ -69,7 +69,11 @@ impl DeckglHandle {
         if self.target != Some(target) {
             self.deck = None;
         }
-        if self.deck.is_none() {
+        if let Some(deck) = self.deck.as_mut() {
+            if let Some(layers) = self.pending_layers.take() {
+                deck.set_layers(layers);
+            }
+        } else {
             let camera = self.camera.unwrap_or(DeckglCamera {
                 longitude: 0.0,
                 latitude: 0.0,
@@ -99,8 +103,6 @@ impl DeckglHandle {
             deck.set_viewport(viewport_from_camera(&camera));
             self.deck = Some(deck);
             self.target = Some(target);
-        } else if let Some(layers) = self.pending_layers.take() {
-            self.deck.as_mut().unwrap().set_layers(layers);
         }
         Ok(())
     }
