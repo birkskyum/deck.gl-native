@@ -1,0 +1,17 @@
+[package]
+name = "luma-gl"
+description = "Rust port of luma.gl: thin model, shader assembly and uniform block helpers over wgpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+wgpu = { workspace = true }
+naga = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+pollster = { workspace = true }

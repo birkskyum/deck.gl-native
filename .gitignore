@@ -120,3 +120,6 @@ DerivedData/
 /build*/
 /install*/
 Testing
+
+## Rust
+target/

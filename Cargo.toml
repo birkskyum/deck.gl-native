@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/math-gl",
+  "crates/luma-gl",
+  "crates/deck-gl",
+  "crates/deck-gl-layers",
+  "crates/deck-gl-ffi",
+  "examples",
+]
+# Standalone: needs the native MapLibre library and a sibling maplibre-native-ffi checkout.
+exclude = ["examples/maplibre-ffi"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+repository = "https://github.com/birkskyum/deck.gl-native"
+
+[workspace.dependencies]
+math-gl = { path = "crates/math-gl" }
+luma-gl = { path = "crates/luma-gl" }
+deck-gl = { path = "crates/deck-gl" }
+deck-gl-layers = { path = "crates/deck-gl-layers" }
+
+wgpu = "30"
+naga = { version = "30", features = ["wgsl-in"] }
+glam = "0.33"
+bytemuck = { version = "1", features = ["derive"] }
+regex = "1"
+thiserror = "2"
+pollster = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+arrow-array = "59"
+arrow-schema = "59"
+arrow-buffer = "59"
+earcutr = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

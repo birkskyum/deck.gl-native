@@ -1,0 +1,158 @@
+//! The example scene used by the `texture_render` and `window` binaries: a scatterplot fed
+//! from Arrow columns, lines built by accessor functions, and extruded polygons with a hole.
+
+use std::sync::Arc;
+
+use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, UInt8Builder};
+use arrow_array::{Array, Float32Array, RecordBatch};
+use arrow_schema::{DataType, Field, Schema};
+use deck_gl::{Accessor, Layer, LayerData, LayerProps, Polygon, Unit, ViewState};
+use deck_gl_layers::{
+    LineLayer, LineLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps,
+};
+
+pub const CENTER: [f64; 2] = [-122.42, 37.775];
+
+pub fn view_state(bearing: f64) -> ViewState {
+    ViewState {
+        longitude: CENTER[0],
+        latitude: CENTER[1],
+        zoom: 12.6,
+        pitch: 50.0,
+        bearing,
+    }
+}
+
+/// Scatterplot data as an Arrow record batch: position, color and radius columns.
+pub fn scatterplot_batch() -> RecordBatch {
+    let mut positions = FixedSizeListBuilder::new(Float64Builder::new(), 2);
+    let mut colors = FixedSizeListBuilder::new(UInt8Builder::new(), 4);
+    let mut radius = Vec::new();
+    let n = 40;
+    for i in 0..n {
+        for j in 0..n {
+            let fx = i as f64 / (n - 1) as f64;
+            let fy = j as f64 / (n - 1) as f64;
+            positions.values().append_value(CENTER[0] - 0.06 + fx * 0.12);
+            positions.values().append_value(CENTER[1] - 0.045 + fy * 0.09);
+            positions.append(true);
+            colors
+                .values()
+                .append_slice(&[(255.0 * fx) as u8, 80, (255.0 * fy) as u8, 220]);
+            colors.append(true);
+            radius.push(20.0 + 60.0 * ((fx * 6.0).sin() * (fy * 6.0).cos()).abs() as f32);
+        }
+    }
+    let positions = positions.finish();
+    let colors = colors.finish();
+    let schema = Schema::new(vec![
+        Field::new("position", positions.data_type().clone(), false),
+        Field::new("color", colors.data_type().clone(), false),
+        Field::new("radius", DataType::Float32, false),
+    ]);
+    RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(positions),
+            Arc::new(colors),
+            Arc::new(Float32Array::from(radius)),
+        ],
+    )
+    .expect("valid batch")
+}
+
+fn block(x: f64, y: f64, w: f64, h: f64) -> Polygon {
+    vec![vec![
+        [x, y, 0.0],
+        [x + w, y, 0.0],
+        [x + w, y + h, 0.0],
+        [x, y + h, 0.0],
+    ]]
+}
+
+/// Build the scene's layers, bottom to top.
+pub fn layers() -> Vec<Box<dyn Layer>> {
+    let scatterplot = ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps::new("points"),
+        data: LayerData::from_batch(scatterplot_batch()),
+        get_position: Accessor::column("position"),
+        get_fill_color: Accessor::column("color"),
+        get_radius: Accessor::column("radius"),
+        get_line_color: Accessor::Constant([255, 255, 255, 255]),
+        radius_units: Unit::Meters,
+        stroked: true,
+        line_width_min_pixels: 1.0,
+        ..Default::default()
+    });
+
+    let line_count = 24usize;
+    let lines = LineLayer::new(LineLayerProps {
+        base: LayerProps::new("lines"),
+        data: LayerData::with_length(line_count),
+        get_source_position: Accessor::Constant([CENTER[0], CENTER[1], 0.0]),
+        get_target_position: Accessor::func(move |i| {
+            let a = i as f64 / line_count as f64 * std::f64::consts::TAU;
+            [CENTER[0] + 0.07 * a.cos(), CENTER[1] + 0.055 * a.sin(), 0.0]
+        }),
+        get_color: Accessor::func(|i| [255, (i * 10 % 255) as u8, 60, 255]),
+        get_width: Accessor::func(|i| 1.0 + (i % 4) as f32),
+        width_units: Unit::Pixels,
+        ..Default::default()
+    });
+
+    let mut polygons: Vec<Polygon> = Vec::new();
+    let mut elevations = Vec::new();
+    for i in 0..5 {
+        for j in 0..4 {
+            let x = CENTER[0] - 0.02 + i as f64 * 0.009;
+            let y = CENTER[1] - 0.012 + j as f64 * 0.007;
+            polygons.push(block(x, y, 0.006, 0.0045));
+            elevations.push(150.0 + 250.0 * ((i * 7 + j * 3) % 5) as f32);
+        }
+    }
+    polygons.push(vec![
+        vec![
+            [CENTER[0] + 0.03, CENTER[1] + 0.015, 0.0],
+            [CENTER[0] + 0.055, CENTER[1] + 0.015, 0.0],
+            [CENTER[0] + 0.055, CENTER[1] + 0.035, 0.0],
+            [CENTER[0] + 0.03, CENTER[1] + 0.035, 0.0],
+        ],
+        vec![
+            [CENTER[0] + 0.036, CENTER[1] + 0.02, 0.0],
+            [CENTER[0] + 0.048, CENTER[1] + 0.02, 0.0],
+            [CENTER[0] + 0.048, CENTER[1] + 0.03, 0.0],
+            [CENTER[0] + 0.036, CENTER[1] + 0.03, 0.0],
+        ],
+    ]);
+    elevations.push(0.0);
+    let polygon_count = polygons.len();
+    let polygons = Arc::new(polygons);
+    let elevations = Arc::new(elevations);
+    let solid_polygons = SolidPolygonLayer::new(SolidPolygonLayerProps {
+        base: LayerProps::new("blocks"),
+        data: LayerData::with_length(polygon_count),
+        extruded: true,
+        wireframe: true,
+        get_polygon: Accessor::func(move |i| polygons[i].clone()),
+        get_elevation: Accessor::func(move |i| elevations[i]),
+        get_fill_color: Accessor::func(move |i| {
+            if i == polygon_count - 1 {
+                [60, 180, 120, 200]
+            } else {
+                [230, 200, 80, 255]
+            }
+        }),
+        get_line_color: Accessor::Constant([40, 40, 40, 255]),
+        ..Default::default()
+    });
+
+    vec![Box::new(solid_polygons), Box::new(scatterplot), Box::new(lines)]
+}
+
+pub const CLEAR_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.07,
+    g: 0.08,
+    b: 0.11,
+    a: 1.0,
+};
