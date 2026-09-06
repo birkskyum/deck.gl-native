@@ -1,5 +1,98 @@
 # deck.gl-native
 
+A native implementation of [deck.gl](https://deck.gl) for native hardware: Rust on
+[wgpu](https://wgpu.rs), rendering with deck.gl's own WGSL shaders and taking Apache Arrow
+and GeoArrow data directly.
+
+This repository started in 2020 as a C++ prototype on dawn (see
+[the original C++ prototype](#original-c-prototype-2020) below). That prototype stalled for
+lack of funding and is kept in `cpp/` as a design reference. The Rust port in `crates/` is a
+fresh port of deck.gl 9 and is the active code base.
+
+## Status
+
+Working today, headless and verified pixel by pixel in tests:
+
+- `ScatterplotLayer`, `LineLayer` and `SolidPolygonLayer` (filled, extruded, wireframe, holes)
+- Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it
+- deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
+- Arrow record batches as layer data, with column, constant and function accessors
+- Rendering into any caller-owned `wgpu` render pass, or into textures you provide
+
+- Rendering into a maplibre-native map, either inside maplibre-native's own Metal backend
+  through a C API, or from an all-Rust host through maplibre-native-ffi. See
+  [docs/maplibre-native.md](docs/maplibre-native.md).
+
+Not yet: picking passes, transitions, and the wider layer catalog. See
+[docs/rust-port.md](docs/rust-port.md) for the design and the open decisions.
+
+![maplibre-native with the deck.gl-native overlay](docs/images/maplibre-overlay.png)
+
+*maplibre-native's GLFW app on Metal with deck.gl-native layers drawn into the same frame.*
+
+## Crates
+
+| Crate | JavaScript counterpart | Contents |
+| --- | --- | --- |
+| `math-gl` | `@math.gl/web-mercator` | Web Mercator projection and camera math, f64 |
+| `luma-gl` | `@luma.gl/core`, `@luma.gl/shadertools` | Shader assembly, uniform blocks, `Model`, headless device helpers |
+| `deck-gl` | `@deck.gl/core` | `Deck`, `Layer`, `Viewport`, the `project` shader module, Arrow data accessors |
+| `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` |
+| `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop |
+| `deck-gl-examples` | | Example binaries |
+
+Shader sources under `src/wgsl` in each crate are copied from deck.gl 9.4 and luma.gl (MIT).
+
+## Building and running
+
+Requires a stable Rust toolchain (1.87 or newer) and a GPU with Metal, Vulkan or DirectX 12.
+
+```sh
+cargo test --workspace                     # unit tests plus headless GPU render tests
+cargo run --release --bin texture_render   # renders the example scene to target/texture-render.png
+cargo run --release --bin window           # the same scene in a window with an orbiting camera
+cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a maplibre-native basemap
+```
+
+## Using the library
+
+```rust
+use deck_gl::{Accessor, Deck, DeckProps, LayerData, LayerProps, ViewState};
+use deck_gl_layers::{ScatterplotLayer, ScatterplotLayerProps};
+
+let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+    base: LayerProps::new("points"),
+    data: LayerData::from_batch(record_batch),      // an arrow RecordBatch
+    get_position: Accessor::column("geometry"),     // FixedSizeList<f64, 2 | 3>
+    get_fill_color: Accessor::column("color"),      // FixedSizeList<u8, 3 | 4>
+    get_radius: Accessor::Constant(50.0),           // meters
+    ..Default::default()
+});
+
+let mut deck = Deck::new(&device, &queue, render_target, DeckProps {
+    width, height,
+    view_state: ViewState { longitude: -122.4, latitude: 37.8, zoom: 12.0, pitch: 45.0, bearing: 0.0 },
+    layers: vec![Box::new(layer)],
+    ..Default::default()
+})?;
+
+// Either let the deck begin a pass on your textures...
+deck.render(&mut encoder, &color_view, Some(&depth_view), Some(wgpu::Color::TRANSPARENT))?;
+// ...or draw into a pass you already own, for instance a basemap's:
+deck.update()?;
+deck.draw(&mut render_pass)?;
+```
+
+`Deck::set_viewport` accepts a caller-built `Viewport`, which is how a host map renderer will
+drive the deck camera from its own.
+
+---
+
+## Original C++ prototype (2020)
+
+> The text below describes the archived C++ code in `cpp/`. It does not build on current
+> toolchains and is kept for reference only.
+
 This is an open-source C++ implementation of deck.gl.
 
 > This project is no longer active. It was an experiment to understand what it would take to build a native version of deck.gl. 
