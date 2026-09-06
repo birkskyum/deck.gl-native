@@ -20,12 +20,16 @@ and the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
 
 Working today, headless and verified pixel by pixel in tests:
 
-- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer` and the composite `PolygonLayer`
+- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, and the composite `PolygonLayer` and `GeoJsonLayer`
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it
 - deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
 - Arrow record batches as layer data, with column, constant and function accessors
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide
 - Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
+- A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
+  example (4,600 extruded polygons) parses and renders in under 50 ms
+
+![GeoJsonLayer rendering deck.gl's Vancouver blocks example](docs/images/geojson-vancouver.png)
 
 - Rendering into a maplibre-native map, either inside maplibre-native's own Metal backend
   through a C API, or from an all-Rust host through maplibre-native-ffi. See
@@ -46,7 +50,7 @@ Not yet: transitions, controllers, and the wider layer catalog. See
 | `math-gl` | `@math.gl/web-mercator` | Web Mercator projection and camera math, f64 |
 | `luma-gl` | `@luma.gl/core`, `@luma.gl/shadertools` | Shader assembly, uniform blocks, `Model`, headless device helpers |
 | `deck-gl` | `@deck.gl/core` | `Deck`, `Layer`, `Viewport`, the `project` shader module, Arrow data accessors |
-| `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `PolygonLayer` |
+| `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `PolygonLayer`, `GeoJsonLayer` |
 | `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop |
 | `deck-gl-examples` | | Example binaries |
 
@@ -59,7 +63,8 @@ Requires a stable Rust toolchain (1.87 or newer) and a GPU with Metal, Vulkan or
 ```sh
 cargo test --workspace                     # unit tests plus headless GPU render tests
 cargo run --release --bin texture_render   # renders the example scene to target/texture-render.png
-cargo run --release --bin window           # the same scene in a window with an orbiting camera
+cargo run --release --bin window           # the same scene in a window, with hover highlighting
+cargo run --release --bin geojson -- file.geojson   # any GeoJSON file, extruded and colored by properties
 cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a maplibre-native basemap
 ```
 

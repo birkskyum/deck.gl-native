@@ -139,7 +139,12 @@ impl PolygonLayer {
             }
             let ring_count = rings.len();
             let rings = Arc::new(rings);
-            let source_rows = Arc::new(rows.iter().map(|&r| r as u32).collect::<Vec<u32>>());
+            // Rings map to polygon rows, which in turn may map to a parent layer's rows.
+            let source_rows = Arc::new(
+                rows.iter()
+                    .map(|&r| props.data.source_row(r))
+                    .collect::<Vec<u32>>(),
+            );
             let rows = Arc::new(rows);
             let colors = Arc::new(line_colors);
             let widths = Arc::new(line_widths);

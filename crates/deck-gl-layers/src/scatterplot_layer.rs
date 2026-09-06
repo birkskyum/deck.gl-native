@@ -12,6 +12,16 @@ use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/scatterplot_layer.wgsl");
 
+/// Per-instance scalars interleaved in one buffer, to stay within the vertex buffer limit.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceData {
+    radius: f32,
+    line_width: f32,
+    pixel_offset: [f32; 2],
+    row_index: u32,
+}
+
 /// Properties of a [`ScatterplotLayer`]. Defaults match deck.gl.
 #[derive(Clone, Debug)]
 pub struct ScatterplotLayerProps {
@@ -113,14 +123,14 @@ impl ScatterplotLayer {
             "instancePositions64Low",
             create_vertex_buffer_from(device, "instancePositions64Low", &lo),
         )?;
-        model.set_vertex_buffer(
-            "instanceRadius",
-            create_vertex_buffer_from(device, "instanceRadius", &radius),
-        )?;
-        model.set_vertex_buffer(
-            "instanceLineWidths",
-            create_vertex_buffer_from(device, "instanceLineWidths", &line_widths),
-        )?;
+        let instance_data: Vec<InstanceData> = (0..data.len())
+            .map(|i| InstanceData {
+                radius: radius[i],
+                line_width: line_widths[i],
+                pixel_offset: pixel_offsets[i],
+                row_index: data.source_row(i),
+            })
+            .collect();
         model.set_vertex_buffer(
             "instanceFillColors",
             create_vertex_buffer_from(device, "instanceFillColors", &fill_colors),
@@ -130,8 +140,8 @@ impl ScatterplotLayer {
             create_vertex_buffer_from(device, "instanceLineColors", &line_colors),
         )?;
         model.set_vertex_buffer(
-            "instancePixelOffset",
-            create_vertex_buffer_from(device, "instancePixelOffset", &pixel_offsets),
+            "instanceData",
+            create_vertex_buffer_from(device, "instanceData", &instance_data),
         )?;
         model.set_instance_count(data.len() as u32);
         Ok(())
@@ -149,11 +159,19 @@ impl Layer for ScatterplotLayer {
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x3),
             VertexBufferLayout::instance("instancePositions", 1, VertexFormat::Float32x3),
             VertexBufferLayout::instance("instancePositions64Low", 2, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceRadius", 3, VertexFormat::Float32),
-            VertexBufferLayout::instance("instanceLineWidths", 4, VertexFormat::Float32),
             VertexBufferLayout::instance("instanceFillColors", 5, VertexFormat::Unorm8x4),
             VertexBufferLayout::instance("instanceLineColors", 6, VertexFormat::Unorm8x4),
-            VertexBufferLayout::instance("instancePixelOffset", 7, VertexFormat::Float32x2),
+            VertexBufferLayout::interleaved(
+                "instanceData",
+                std::mem::size_of::<InstanceData>() as u64,
+                wgpu::VertexStepMode::Instance,
+                &[
+                    (3, VertexFormat::Float32, 0),
+                    (4, VertexFormat::Float32, 4),
+                    (7, VertexFormat::Float32x2, 8),
+                    (8, VertexFormat::Uint32, 16),
+                ],
+            ),
         ];
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,

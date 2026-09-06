@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) vis.gl contributors
 // Port of @deck.gl/layers/src/path-layer/path-layer.wgsl.ts and path-layer-uniforms.ts
+//
+// Deviation from deck.gl: the picking color is carried to the fragment stage and the picking
+// and highlight branches are written out explicitly, as the other layer shaders do. deck.gl
+// injects these through shader hooks, which its WGSL path does not support yet.
 
 struct PathUniforms {
   widthScale: f32,
@@ -53,6 +57,7 @@ struct Varyings {
   @location(3) vPathPosition: vec2<f32>,
   @location(4) vPathLength: f32,
   @location(5) vJointType: f32,
+  @location(6) pickingColor: vec3<f32>,
 };
 
 fn flipIfTrue(flag: bool) -> f32 {
@@ -251,6 +256,7 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     attributes.instanceColors.rgb,
     attributes.instanceColors.a * layer.opacity
   );
+  varyings.pickingColor = geometry.pickingColor;
   return varyings;
 }
 
@@ -267,5 +273,30 @@ fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
     }
   }
 
-  return deckgl_premultiplied_alpha(varyings.vColor);
+  if (picking.isActive > 0.5) {
+    if (!picking_isColorValid(varyings.pickingColor)) {
+      discard;
+    }
+    return vec4<f32>(varyings.pickingColor, 1.0);
+  }
+
+  var fragColor = varyings.vColor;
+  if (picking.isHighlightActive > 0.5) {
+    let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);
+    if (picking_isColorZero(abs(varyings.pickingColor - highlightedObjectColor))) {
+      let highLightAlpha = picking.highlightColor.a;
+      let blendedAlpha = highLightAlpha + fragColor.a * (1.0 - highLightAlpha);
+      if (blendedAlpha > 0.0) {
+        let highLightRatio = highLightAlpha / blendedAlpha;
+        fragColor = vec4<f32>(
+          mix(fragColor.rgb, picking.highlightColor.rgb, highLightRatio),
+          blendedAlpha
+        );
+      } else {
+        fragColor = vec4<f32>(fragColor.rgb, 0.0);
+      }
+    }
+  }
+
+  return deckgl_premultiplied_alpha(fragColor);
 }

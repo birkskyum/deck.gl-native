@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) vis.gl contributors
 // Port of @deck.gl/layers/src/scatterplot-layer/scatterplot-layer.wgsl.ts
-// (picking color placeholders resolved to the instance index variant)
+// (picking color placeholders resolved to the rowIndexes variant, so composite layers can
+// report their own rows)
 
 // Main shaders
 
@@ -34,6 +35,7 @@ struct Attributes {
   @location(5) instanceFillColors: vec4<f32>,
   @location(6) instanceLineColors: vec4<f32>,
   @location(7) instancePixelOffset: vec2<f32>,
+  @location(8) rowIndexes: u32,
 };
 
 struct Varyings {
@@ -76,7 +78,7 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   // position on the containing square in [-1, 1] space
   varyings.unitPosition = edgePadding * attributes.positions.xy;
   geometry.uv = varyings.unitPosition;
-  geometry.pickingColor = picking_getPickingColorFromIndex(attributes.instanceIndex);
+  geometry.pickingColor = picking_getPickingColorFromIndex(attributes.rowIndexes);
 
   varyings.innerUnitRadius = 1.0 - scatterplot.stroked * lineWidthPixels / varyings.outerRadiusPixels;
 

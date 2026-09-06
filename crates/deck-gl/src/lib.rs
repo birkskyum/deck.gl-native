@@ -12,6 +12,7 @@
 pub mod constants;
 pub mod data;
 pub mod deck;
+pub mod geojson;
 pub mod layer;
 pub mod lighting;
 pub mod shaderlib;
@@ -20,6 +21,7 @@ pub mod viewport;
 pub use constants::{CoordinateSystem, ProjectionMode, Unit};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, PickingInfo, ViewState};
+pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use layer::{Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, PointLight};
 pub use viewport::{Viewport, WebMercatorViewportOptions};

@@ -9,8 +9,9 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PolygonLayer,
-    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    ArcLayer, ArcLayerProps, GeoJsonLayer, GeoJsonLayerProps, LineLayer, LineLayerProps, PathLayer,
+    PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -424,4 +425,56 @@ fn highlighted_object_is_tinted() {
     let pixels = render(&ctx, vec![Box::new(layer)]);
     let c = SIZE / 2;
     assert_pixel(&pixels, c, c, [0, 0, 255, 255], 1);
+}
+
+#[test]
+fn geojson_layer_renders_polygons_lines_and_points_with_feature_accessors() {
+    let Some(ctx) = context() else { return };
+    let (x, y) = (CENTER[0], CENTER[1]);
+    let d = 0.0004;
+    let text = format!(
+        r#"{{"type":"FeatureCollection","features":[
+            {{"type":"Feature","properties":{{"kind":"poly"}},"geometry":{{"type":"Polygon","coordinates":[[[{x0},{y0}],[{x1},{y0}],[{x1},{y1}],[{x0},{y1}],[{x0},{y0}]]]}}}},
+            {{"type":"Feature","properties":{{"kind":"line"}},"geometry":{{"type":"LineString","coordinates":[[{lx0},{y}],[{lx1},{y}]]}}}},
+            {{"type":"Feature","properties":{{"kind":"point"}},"geometry":{{"type":"Point","coordinates":[{px},{y}]}}}}
+        ]}}"#,
+        x0 = x - d,
+        x1 = x + d,
+        y0 = y - d,
+        y1 = y + d,
+        lx0 = x - 0.0015,
+        lx1 = x - 0.0007,
+        px = x + 0.0011,
+        y = y
+    );
+    let data = Arc::new(deck_gl::FeatureCollection::parse(&text).unwrap());
+    let features = data.clone();
+    let layer = GeoJsonLayer::new(GeoJsonLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("geojson")
+        },
+        data,
+        stroked: true,
+        get_fill_color: Accessor::func(move |i| match features.features[i].string("kind") {
+            Some("poly") => [0, 0, 255, 255],
+            _ => [255, 0, 0, 255],
+        }),
+        get_line_color: Accessor::Constant([0, 255, 0, 255]),
+        get_line_width: Accessor::Constant(4.0),
+        line_width_units: Unit::Pixels,
+        get_point_radius: Accessor::Constant(6.0),
+        point_radius_units: Unit::Pixels,
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    let c = SIZE as f64 / 2.0;
+    // Polygon fill in the middle, line to the west, point to the east
+    let hit = deck.pick(c, c).unwrap().expect("polygon");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("geojson", 0));
+    let hit = deck.pick(c - 26.0, c).unwrap().expect("line");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("geojson", 1));
+    let hit = deck.pick(c + 26.0, c).unwrap().expect("point");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("geojson", 2));
+    assert!(deck.pick(c, 3.0).unwrap().is_none());
 }
