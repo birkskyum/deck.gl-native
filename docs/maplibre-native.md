@@ -50,7 +50,7 @@ Environment variables read by the overlay:
 | --- | --- |
 | `DECKGL_OVERLAY=0` | Disable the overlay |
 | `DECKGL_JSON=scene.json` | Show a [JSON description](json.md) instead of the demo scene (also honoured by the all-Rust demo below) |
-| `DECKGL_LOAD_DEPTH=1` | Depth test against the map's depth buffer instead of clearing depth first |
+| `DECKGL_LOAD_DEPTH=0` | Clear depth before deck draws instead of depth testing against the map's buildings (interleaving is the default) |
 | `DECKGL_SCREENSHOT=frame.png` | Write the composited frame to a PNG once, `DECKGL_SCREENSHOT_AFTER_MS` (default 8000) after the first frame |
 
 ## All-Rust host through maplibre-native-ffi
