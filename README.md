@@ -25,6 +25,8 @@ Working today, headless and verified pixel by pixel in tests:
 - Several views per deck in sub rectangles of the canvas (`Deck::set_views`, pixel or percentage extents, padding, per view cameras, a `layerFilter`, view aware picking)
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it, with repeated world copies across the antimeridian (`DeckProps::repeat`) and `wrapLongitude` shortest paths
 - deck.gl's `project` and `project32` shader modules, picking uniforms, `LightingEffect` with ambient, directional and point lights, and a per-layer `material`
+- GeoArrow geometry columns in both coordinate layouts, interleaved and separated, plus WKB,
+  with the column's extension name reported when a layer cannot read its geometry kind
 - Arrow record batches as layer data, with column, constant and function accessors (a
   constant accessor uploads one element with a zero vertex stride instead of one per object), and
   incremental updates that rewrite only the rows marked as changed (`LayerData::with_changed_rows`)

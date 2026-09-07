@@ -207,6 +207,18 @@ impl LayerData {
     }
 
     /// The Arrow column of the layer's table, by name.
+    /// The GeoArrow extension name of a column (`geoarrow.point`, `geoarrow.multipolygon`
+    /// and so on), when its field carries one.
+    pub fn column_extension(&self, name: &str) -> Option<String> {
+        let batch = self.batch.as_ref()?;
+        let field = batch.schema_ref().field_with_name(name).ok()?;
+        field
+            .metadata()
+            .get("ARROW:extension:name")
+            .filter(|name| name.starts_with("geoarrow."))
+            .cloned()
+    }
+
     pub fn column(&self, name: &str) -> Result<&ArrayRef> {
         let batch = self.batch.as_ref().ok_or_else(|| {
             DeckError::Data(format!("column `{name}` requested but layer has no record batch"))
@@ -244,20 +256,64 @@ fn primitive_to_f64(array: &dyn Array) -> Result<Vec<f64>> {
     })
 }
 
-/// Flatten a `FixedSizeList<numeric>` array into (values, width).
+/// Flatten a GeoArrow coordinate array into (values, width).
+///
+/// Both layouts of the specification are read: interleaved coordinates
+/// (`FixedSizeList<Float64, 2|3>`, `xyxy`) and separated ones (`Struct<x, y, z?>`, the
+/// "struct of arrays" layout), so a column written either way works the same.
 fn fixed_size_list_to_f64(array: &dyn Array) -> Result<(Vec<f64>, usize)> {
-    let list = array.as_fixed_size_list_opt().ok_or_else(|| {
-        DeckError::Data(format!(
-            "expected a FixedSizeList column, got {}",
-            array.data_type()
-        ))
-    })?;
-    let width = list.value_length() as usize;
-    let values = primitive_to_f64(list.values().as_ref())?;
-    // Respect the list array's offset into its child values.
-    let start = list.offset() * width;
-    let end = start + list.len() * width;
-    Ok((values[start..end].to_vec(), width))
+    if let Some(list) = array.as_fixed_size_list_opt() {
+        let width = list.value_length() as usize;
+        let values = primitive_to_f64(list.values().as_ref())?;
+        // Respect the list array's offset into its child values.
+        let start = list.offset() * width;
+        let end = start + list.len() * width;
+        return Ok((values[start..end].to_vec(), width));
+    }
+    if let Some(separated) = separated_coords(array)? {
+        return Ok(separated);
+    }
+    Err(DeckError::Data(format!(
+        "expected interleaved (FixedSizeList) or separated (Struct of x, y and z) coordinates, got {}",
+        array.data_type()
+    )))
+}
+
+/// GeoArrow's separated coordinates: a struct with `x`, `y` and optionally `z` children,
+/// interleaved here into (values, width).
+fn separated_coords(array: &dyn Array) -> Result<Option<(Vec<f64>, usize)>> {
+    let Some(fields) = array.as_struct_opt() else {
+        return Ok(None);
+    };
+    let DataType::Struct(schema) = fields.data_type() else {
+        return Ok(None);
+    };
+    let named = |name: &str| schema.iter().position(|f| f.name() == name);
+    let (Some(x), Some(y)) = (named("x"), named("y")) else {
+        return Ok(None);
+    };
+    let z = named("z");
+    let width = if z.is_some() { 3 } else { 2 };
+    let column = |index: usize| -> Result<Vec<f64>> {
+        let values = primitive_to_f64(fields.column(index).as_ref())?;
+        // The struct's offset applies to its children
+        Ok(values[fields.offset()..fields.offset() + fields.len()].to_vec())
+    };
+    let xs = column(x)?;
+    let ys = column(y)?;
+    let zs = match z {
+        Some(z) => Some(column(z)?),
+        None => None,
+    };
+    let mut values = Vec::with_capacity(xs.len() * width);
+    for row in 0..xs.len() {
+        values.push(xs[row]);
+        values.push(ys[row]);
+        if let Some(zs) = &zs {
+            values.push(zs[row]);
+        }
+    }
+    Ok(Some((values, width)))
 }
 
 /// Resolve an accessor, reading columns through `from_column`.
@@ -284,9 +340,24 @@ pub fn resolve_with<T: Clone + Send>(
     }
 }
 
-/// Resolve positions. Columns must be `FixedSizeList<Float32|Float64>` of width 2 or 3.
+/// Add the GeoArrow extension name of the column to an error, so a column of a geometry kind
+/// that a layer cannot take says which kind it is.
+fn in_geoarrow_column<T, U: Clone>(data: &LayerData, accessor: &Accessor<U>, result: Result<T>) -> Result<T> {
+    let (Err(DeckError::Data(message)), Accessor::Column(name)) = (&result, accessor) else {
+        return result;
+    };
+    match data.column_extension(name) {
+        Some(extension) => Err(DeckError::Data(format!(
+            "column `{name}` is `{extension}`: {message}"
+        ))),
+        None => result,
+    }
+}
+
+/// Resolve positions. Columns hold GeoArrow points, either interleaved
+/// (`FixedSizeList<Float32|Float64, 2|3>`) or separated (`Struct<x, y, z?>`), or WKB.
 pub fn resolve_positions(data: &LayerData, accessor: &Accessor<Position>) -> Result<Vec<Position>> {
-    resolve_with(data, accessor, |column| {
+    let result = resolve_with(data, accessor, |column| {
         if let Some(points) = wkb_column(column, "point", [0.0; 3], |g| match g {
             crate::geojson::Geometry::Point(p) => Some(p),
             _ => None,
@@ -303,7 +374,8 @@ pub fn resolve_positions(data: &LayerData, accessor: &Accessor<Position>) -> Res
             .chunks(width)
             .map(|c| [c[0], c[1], if width == 3 { c[2] } else { 0.0 }])
             .collect())
-    })
+    });
+    in_geoarrow_column(data, accessor, result)
 }
 
 /// Rows above which function accessors are evaluated on all cores.
@@ -471,7 +543,7 @@ pub fn resolve_colors(data: &LayerData, accessor: &Accessor<Color>) -> Result<Ve
 
 /// Resolve paths. Columns must be GeoArrow linestrings (`List<FixedSizeList<Float64, 2|3>>`).
 pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<Path>> {
-    resolve_with(data, accessor, |column| {
+    let result = resolve_with(data, accessor, |column| {
         if let Some(paths) = wkb_column(column, "linestring", Vec::new(), |g| match g {
             crate::geojson::Geometry::LineString(path) => Some(path),
             _ => None,
@@ -493,7 +565,8 @@ pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<
                     .collect()
             })
             .collect())
-    })
+    });
+    in_geoarrow_column(data, accessor, result)
 }
 
 /// Resolve lists of numbers, such as timestamps per path vertex, from a `List<numeric>` column.
@@ -515,7 +588,8 @@ pub fn resolve_f32_lists(data: &LayerData, accessor: &Accessor<Vec<f32>>) -> Res
 /// Resolve polygons. Columns may be GeoArrow polygons
 /// (`List<List<FixedSizeList<Float64, 2|3>>>`) or single rings (`List<FixedSizeList<..>>`).
 pub fn resolve_polygons(data: &LayerData, accessor: &Accessor<Polygon>) -> Result<Vec<Polygon>> {
-    resolve_with(data, accessor, polygons_from_column)
+    let result = resolve_with(data, accessor, polygons_from_column);
+    in_geoarrow_column(data, accessor, result)
 }
 
 fn polygons_from_column(column: &ArrayRef) -> Result<Vec<Polygon>> {
@@ -679,6 +753,70 @@ mod tests {
         // A hint always counts as a change, so layers apply it
         assert_ne!(data.clone().with_changed_rows(0..1), data);
         assert_eq!(data.clone(), data);
+    }
+
+    #[test]
+    fn reads_separated_geoarrow_coordinates() {
+        use arrow_array::{Float64Array, StructArray};
+        use std::collections::HashMap;
+        // GeoArrow's separated layout: a struct of x, y and z columns instead of a list
+        let xs = Arc::new(Float64Array::from(vec![1.0, 3.0])) as ArrayRef;
+        let ys = Arc::new(Float64Array::from(vec![2.0, 4.0])) as ArrayRef;
+        let zs = Arc::new(Float64Array::from(vec![10.0, 20.0])) as ArrayRef;
+        let fields = vec![
+            Field::new("x", DataType::Float64, false),
+            Field::new("y", DataType::Float64, false),
+            Field::new("z", DataType::Float64, false),
+        ];
+        let points = StructArray::new(fields.clone().into(), vec![xs, ys, zs], None);
+        let mut metadata = HashMap::new();
+        metadata.insert("ARROW:extension:name".to_string(), "geoarrow.point".to_string());
+        let schema = Schema::new(vec![
+            Field::new("geometry", points.data_type().clone(), false).with_metadata(metadata)
+        ]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(points)]).unwrap();
+        let data = LayerData::from_batch(batch);
+        assert_eq!(
+            data.column_extension("geometry").as_deref(),
+            Some("geoarrow.point")
+        );
+        assert_eq!(
+            resolve_positions(&data, &Accessor::column("geometry")).unwrap(),
+            vec![[1.0, 2.0, 10.0], [3.0, 4.0, 20.0]]
+        );
+        // Without a z child the points are flat
+        let flat = StructArray::new(
+            fields[..2].to_vec().into(),
+            vec![
+                Arc::new(Float64Array::from(vec![5.0])) as ArrayRef,
+                Arc::new(Float64Array::from(vec![6.0])) as ArrayRef,
+            ],
+            None,
+        );
+        let schema = Schema::new(vec![Field::new("p", flat.data_type().clone(), false)]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(flat)]).unwrap();
+        let data = LayerData::from_batch(batch);
+        assert_eq!(
+            resolve_positions(&data, &Accessor::column("p")).unwrap(),
+            vec![[5.0, 6.0, 0.0]]
+        );
+        assert!(data.column_extension("p").is_none());
+        // A geometry column a layer cannot read says which kind it is
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "ARROW:extension:name".to_string(),
+            "geoarrow.multipolygon".to_string(),
+        );
+        let values = Arc::new(Float64Array::from(vec![1.0])) as ArrayRef;
+        let schema = Schema::new(vec![
+            Field::new("bad", DataType::Float64, false).with_metadata(metadata)
+        ]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![values]).unwrap();
+        let data = LayerData::from_batch(batch);
+        let error = resolve_polygons(&data, &Accessor::column("bad"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("geoarrow.multipolygon"), "{error}");
     }
 
     #[test]
