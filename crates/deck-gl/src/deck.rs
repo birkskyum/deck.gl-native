@@ -181,12 +181,34 @@ impl Deck {
     }
 
     /// Replace all layers. Layers are initialized lazily on the next `update`.
+    /// Replace the layer list. Layers whose id matches an existing layer of the same type keep
+    /// that layer's GPU resources and only take over the new props (see
+    /// [`Layer::update_from`]); everything else is initialized on the next update.
     pub fn set_layers(&mut self, layers: Vec<Box<dyn Layer>>) {
+        let mut previous: Vec<Option<LayerEntry>> = self.layers.drain(..).map(Some).collect();
         self.layers = layers
             .into_iter()
-            .map(|layer| LayerEntry {
-                layer,
-                initialized: false,
+            .map(|mut layer| {
+                let existing = previous
+                    .iter_mut()
+                    .find(|slot| slot.as_ref().is_some_and(|e| e.layer.id() == layer.id()))
+                    .and_then(Option::take);
+                match existing {
+                    Some(mut entry) if entry.initialized => {
+                        if entry.layer.update_from(layer.as_mut()) {
+                            entry
+                        } else {
+                            LayerEntry {
+                                layer,
+                                initialized: false,
+                            }
+                        }
+                    }
+                    _ => LayerEntry {
+                        layer,
+                        initialized: false,
+                    },
+                }
             })
             .collect();
     }

@@ -54,6 +54,18 @@ impl<T: Clone> From<T> for Accessor<T> {
     }
 }
 
+/// Constants and columns compare by value; functions compare by identity.
+impl<T: Clone + PartialEq> PartialEq for Accessor<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Accessor::Constant(a), Accessor::Constant(b)) => a == b,
+            (Accessor::Column(a), Accessor::Column(b)) => a == b,
+            (Accessor::Func(a), Accessor::Func(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
 impl<T: Clone + std::fmt::Debug> std::fmt::Debug for Accessor<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -72,6 +84,36 @@ pub struct LayerData {
     /// For sub layers of a composite layer: the source row of each item, so picking and
     /// highlighting report the parent's rows. Mirrors deck.gl's `__source.index`.
     pub source_rows: Option<Arc<Vec<u32>>>,
+}
+
+/// Batches compare by column identity first, so re-sending the same data is cheap, and by
+/// value otherwise.
+impl PartialEq for LayerData {
+    fn eq(&self, other: &Self) -> bool {
+        if self.length != other.length {
+            return false;
+        }
+        let rows_equal = match (&self.source_rows, &other.source_rows) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
+            _ => false,
+        };
+        if !rows_equal {
+            return false;
+        }
+        match (&self.batch, &other.batch) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                let same_columns = a.num_columns() == b.num_columns()
+                    && a.columns()
+                        .iter()
+                        .zip(b.columns())
+                        .all(|(x, y)| Arc::ptr_eq(x, y));
+                same_columns || a == b
+            }
+            _ => false,
+        }
+    }
 }
 
 impl LayerData {

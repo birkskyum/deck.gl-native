@@ -26,6 +26,8 @@ Working today, headless and verified pixel by pixel in tests:
 - Arrow record batches as layer data, with column, constant and function accessors
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide
 - Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
+- `Deck::set_layers` reconciles by id: a layer re-sent with the same id and type keeps its GPU
+  resources, and attributes are only rebuilt when its props changed
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
   example (4,600 extruded polygons) parses and renders in under 50 ms
 - JSON descriptions in the `@deck.gl/json` and pydeck format, with `@@=` accessor expressions

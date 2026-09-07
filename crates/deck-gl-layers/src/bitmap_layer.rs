@@ -33,7 +33,7 @@ impl BitmapImage {
 }
 
 /// Properties of a [`BitmapLayer`]. Defaults match deck.gl.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BitmapLayerProps {
     pub base: LayerProps,
     pub image: Option<BitmapImage>,
@@ -80,9 +80,12 @@ impl BitmapLayer {
         &self.props
     }
 
+    /// Replace the props. Geometry is rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: BitmapLayerProps) {
-        self.props = props;
-        self.dirty = true;
+        if self.props != props {
+            self.props = props;
+            self.dirty = true;
+        }
     }
 
     fn update_mesh_and_texture(&mut self, ctx: &LayerContext) -> Result<()> {
@@ -215,5 +218,19 @@ impl Layer for BitmapLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn update_from(&mut self, incoming: &mut dyn Layer) -> bool {
+        match incoming.as_any_mut().downcast_mut::<Self>() {
+            Some(other) => {
+                self.set_props(std::mem::take(&mut other.props));
+                true
+            }
+            None => false,
+        }
     }
 }

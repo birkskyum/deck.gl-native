@@ -11,7 +11,7 @@ use crate::viewport::Viewport;
 use crate::Result;
 
 /// Properties shared by all layers. Mirrors deck.gl's `LayerProps`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LayerProps {
     pub id: String,
     pub visible: bool,
@@ -125,6 +125,17 @@ pub trait Layer {
 
     /// Change which object is drawn highlighted. Takes effect on the next update.
     fn set_highlighted_object(&mut self, _index: Option<u32>) {}
+
+    /// For downcasting in [`Layer::update_from`].
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// Take over the props of `incoming`, a layer with the same id that replaces this one in
+    /// [`Deck::set_layers`](crate::Deck::set_layers), keeping this layer's GPU resources.
+    /// Returns false when `incoming` is a different layer type, in which case it is used as is.
+    /// Layers compare the props and only rebuild attributes when something changed.
+    fn update_from(&mut self, _incoming: &mut dyn Layer) -> bool {
+        false
+    }
 }
 
 /// Encode an object index the way the `picking` shader module does: `index + 1` as three

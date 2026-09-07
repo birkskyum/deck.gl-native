@@ -98,7 +98,7 @@ fn tesselate_column(nradial: u32, extruded: bool) -> ColumnGeometry {
 }
 
 /// Properties of a [`ColumnLayer`]. Defaults match deck.gl.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ColumnLayerProps {
     pub base: LayerProps,
     pub data: LayerData,
@@ -182,9 +182,12 @@ impl ColumnLayer {
         &self.props
     }
 
+    /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: ColumnLayerProps) {
-        self.props = props;
-        self.data_dirty = true;
+        if self.props != props {
+            self.props = props;
+            self.data_dirty = true;
+        }
     }
 
     fn models(&mut self) -> impl Iterator<Item = &mut Model> {
@@ -390,5 +393,19 @@ impl Layer for ColumnLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn update_from(&mut self, incoming: &mut dyn Layer) -> bool {
+        match incoming.as_any_mut().downcast_mut::<Self>() {
+            Some(other) => {
+                self.set_props(std::mem::take(&mut other.props));
+                true
+            }
+            None => false,
+        }
     }
 }

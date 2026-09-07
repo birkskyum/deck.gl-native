@@ -16,7 +16,7 @@ use crate::{
 
 /// Properties of a [`GeoJsonLayer`]. Accessors are called with the feature index. Defaults
 /// match deck.gl with `pointType: 'circle'`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GeoJsonLayerProps {
     pub base: LayerProps,
     pub data: Arc<FeatureCollection>,
@@ -134,9 +134,12 @@ impl GeoJsonLayer {
         &self.props
     }
 
+    /// Replace the props. Geometry is rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: GeoJsonLayerProps) {
-        self.props = props;
-        self.dirty = true;
+        if self.props != props {
+            self.props = props;
+            self.dirty = true;
+        }
     }
 
     fn sub_props(&self, suffix: &str) -> LayerProps {
@@ -264,5 +267,19 @@ impl Layer for GeoJsonLayer {
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
         self.sub_layers.set_highlighted_object(index);
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn update_from(&mut self, incoming: &mut dyn Layer) -> bool {
+        match incoming.as_any_mut().downcast_mut::<Self>() {
+            Some(other) => {
+                self.set_props(std::mem::take(&mut other.props));
+                true
+            }
+            None => false,
+        }
     }
 }
