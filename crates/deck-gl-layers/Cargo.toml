@@ -31,6 +31,8 @@ ureq = { version = "3", optional = true }
 h3o = "0.8"
 s2 = "0.0.12"
 flate2 = "1"
+gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
+base64 = "0.22"
 
 [dev-dependencies]
 arrow-schema = { workspace = true }

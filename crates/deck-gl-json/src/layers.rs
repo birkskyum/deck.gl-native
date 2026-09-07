@@ -12,9 +12,10 @@ use deck_gl_layers::{
     HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps,
     LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
     PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer,
-    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer,
-    TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
+    ScatterplotLayerProps, Scenegraph, ScenegraphLayer, ScenegraphLayerProps, ScenegraphLighting,
+    ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer,
+    TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -523,6 +524,10 @@ pub fn convert_layer(
             let data = load_rows(&mut props, options)?;
             Box::new(SimpleMeshLayer::new(simple_mesh(&props, data, options)?))
         }
+        "ScenegraphLayer" => {
+            let data = load_rows(&mut props, options)?;
+            Box::new(ScenegraphLayer::new(scenegraph(&props, data, options)?))
+        }
         _ => {
             warnings.push(format!(
                 "layer `{}`: layer type `{layer_type}` is not available yet and was skipped",
@@ -883,6 +888,65 @@ fn simple_mesh(p: &Props, data: LayerData, options: &ConvertOptions) -> Result<S
         size_scale: p.f32("sizeScale", d.size_scale)?,
         wireframe: p.bool("wireframe", d.wireframe)?,
         instanced: p.bool("_instanced", d.instanced)?,
+        get_position: p.accessor("getPosition", "position", convert::position)?,
+        get_color: p.accessor("getColor", &d.get_color, convert::color)?,
+        get_orientation: p.accessor("getOrientation", &d.get_orientation, convert::vec3)?,
+        get_scale: p.accessor("getScale", &d.get_scale, convert::vec3)?,
+        get_translation: p.accessor("getTranslation", &d.get_translation, convert::vec3)?,
+        get_transform_matrix,
+    })
+}
+
+/// deck.gl's `scenegraph` prop: the path or URL of a `.glb` or `.gltf` file. External
+/// buffers and images of a `.gltf` resolve relative to it.
+fn scenegraph_prop(p: &Props, options: &ConvertOptions) -> Result<Option<Arc<Scenegraph>>> {
+    let Some(source) = p.string("scenegraph")? else {
+        return Ok(None);
+    };
+    let bytes = data::load_bytes(&source, options).map_err(|e| in_layer(p, e))?;
+    let base = match source.rfind('/') {
+        Some(slash) => source[..=slash].to_string(),
+        None => String::new(),
+    };
+    let scene = Scenegraph::from_gltf_with(&bytes, |uri| {
+        let joined = if uri.contains("://") || uri.starts_with('/') {
+            uri.to_string()
+        } else {
+            format!("{base}{uri}")
+        };
+        data::load_bytes(&joined, options).map_err(|e| e.to_string())
+    })
+    .map_err(|e| p.error("scenegraph", format!("{source}: {e}")))?;
+    Ok(Some(Arc::new(scene)))
+}
+
+fn scenegraph(p: &Props, data: LayerData, options: &ConvertOptions) -> Result<ScenegraphLayerProps> {
+    let d = ScenegraphLayerProps::default();
+    let matrix_of = |value: &Value| -> std::result::Result<[f32; 16], String> {
+        let flat = convert::f32_list(value)?;
+        <[f32; 16]>::try_from(flat).map_err(|v| format!("expected 16 numbers, got {}", v.len()))
+    };
+    let identity = Accessor::Constant([
+        1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    let get_transform_matrix = match p.get("getTransformMatrix") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) if items.is_empty() => None,
+        Some(_) => Some(p.accessor("getTransformMatrix", &identity, matrix_of)?),
+    };
+    let lighting = match p.string("_lighting")? {
+        Some(name) => ScenegraphLighting::parse(&name)
+            .ok_or_else(|| p.error("_lighting", format!("expected `flat` or `pbr`, got `{name}`")))?,
+        None => d.lighting,
+    };
+    Ok(ScenegraphLayerProps {
+        base: p.base()?,
+        data,
+        scenegraph: scenegraph_prop(p, options)?,
+        size_scale: p.f32("sizeScale", d.size_scale)?,
+        size_min_pixels: p.f32("sizeMinPixels", d.size_min_pixels)?,
+        size_max_pixels: p.f32("sizeMaxPixels", d.size_max_pixels)?,
+        lighting,
         get_position: p.accessor("getPosition", "position", convert::position)?,
         get_color: p.accessor("getColor", &d.get_color, convert::color)?,
         get_orientation: p.accessor("getOrientation", &d.get_orientation, convert::vec3)?,

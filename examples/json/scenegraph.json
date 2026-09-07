@@ -1,0 +1,22 @@
+{
+  "initialViewState": {"longitude": -122.4, "latitude": 37.79, "zoom": 13, "pitch": 55, "bearing": -20},
+  "layers": [
+    {
+      "@@type": "ScenegraphLayer",
+      "id": "airplanes",
+      "scenegraph": "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/scenegraph-layer/airplane.glb",
+      "data": [
+        {"position": [-122.42, 37.8, 800], "heading": 40},
+        {"position": [-122.4, 37.78, 500], "heading": 120},
+        {"position": [-122.38, 37.8, 1100], "heading": 250}
+      ],
+      "getPosition": "@@=position",
+      "getOrientation": "@@=[0, -heading, 90]",
+      "sizeScale": 40,
+      "sizeMinPixels": 0.1,
+      "sizeMaxPixels": 1.5,
+      "_lighting": "pbr",
+      "pickable": true
+    }
+  ]
+}

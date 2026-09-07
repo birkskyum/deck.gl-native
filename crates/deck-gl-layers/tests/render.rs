@@ -1950,6 +1950,131 @@ fn simple_mesh_layer_samples_textures_and_scales_by_size() {
     assert_eq!(px(c + 16, c)[3], 0);
 }
 
+/// A binary glTF with one right triangle (positions and normals) in a node scaled by
+/// `scale`, coloured by `base_color`.
+fn triangle_glb(scale: f32, base_color: [f32; 4]) -> Vec<u8> {
+    let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let normals: [[f32; 3]; 3] = [[0.0, 0.0, 1.0]; 3];
+    let indices: [u16; 3] = [0, 1, 2];
+    let mut bin: Vec<u8> = Vec::new();
+    bin.extend(bytemuck::cast_slice(&positions));
+    bin.extend(bytemuck::cast_slice(&normals));
+    bin.extend(bytemuck::cast_slice(&indices));
+    bin.extend([0u8; 2]);
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"scale":[{scale},{scale},{scale}],"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1}},"indices":2,"material":0}}]}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}},{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},{{"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},{{"buffer":0,"byteOffset":72,"byteLength":6}}],"buffers":[{{"byteLength":{}}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[{},{},{},{}]}}}}]}}"#,
+        bin.len(),
+        base_color[0],
+        base_color[1],
+        base_color[2],
+        base_color[3]
+    );
+    let mut json = json.into_bytes();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let mut glb = Vec::new();
+    glb.extend(b"glTF");
+    glb.extend(2u32.to_le_bytes());
+    glb.extend(((12 + 8 + json.len() + 8 + bin.len()) as u32).to_le_bytes());
+    glb.extend((json.len() as u32).to_le_bytes());
+    glb.extend(b"JSON");
+    glb.extend(&json);
+    glb.extend((bin.len() as u32).to_le_bytes());
+    glb.extend(b"BIN\0");
+    glb.extend(&bin);
+    glb
+}
+
+#[test]
+fn scenegraph_layer_draws_gltf_scenes_with_node_transforms_and_size_limits() {
+    use deck_gl_layers::{Scenegraph, ScenegraphLayer, ScenegraphLayerProps, ScenegraphLighting};
+    let Some(ctx) = context() else { return };
+    // The node scales the unit triangle to 40 m: about 8 px at zoom 14, pointing up and right
+    let scene = Arc::new(Scenegraph::from_gltf(&triangle_glb(40.0, [0.0, 0.0, 1.0, 1.0])).unwrap());
+    let props = |lighting: ScenegraphLighting, size_min_pixels: f32| ScenegraphLayerProps {
+        base: LayerProps::new("scene"),
+        data: LayerData::with_length(1),
+        scenegraph: Some(scene.clone()),
+        lighting,
+        size_min_pixels,
+        get_position: Accessor::Constant(CENTER),
+        ..Default::default()
+    };
+    let shot = render(
+        &ctx,
+        vec![Box::new(ScenegraphLayer::new(props(
+            ScenegraphLighting::Flat,
+            0.0,
+        )))],
+    );
+    let px = |shot: &[u8], x: u32, y: u32| {
+        let i = ((y * SIZE + x) * 4) as usize;
+        [shot[i], shot[i + 1], shot[i + 2], shot[i + 3]]
+    };
+    let c = SIZE / 2;
+    assert_eq!(
+        px(&shot, c + 2, c - 2),
+        [0, 0, 255, 255],
+        "flat: the material colour as it is"
+    );
+    assert_eq!(
+        px(&shot, c - 2, c + 2)[3],
+        0,
+        "nothing below and left of the corner"
+    );
+    assert_eq!(px(&shot, c + 12, c - 12)[3], 0, "the triangle is about 8 px");
+    // Lit, the top face keeps its hue and gets the lights' intensity
+    let shot = render(
+        &ctx,
+        vec![Box::new(ScenegraphLayer::new(props(
+            ScenegraphLighting::Pbr,
+            0.0,
+        )))],
+    );
+    let lit = px(&shot, c + 2, c - 2);
+    assert!(
+        lit[2] > 60 && lit[0] == 0 && lit[1] == 0 && lit[3] == 255,
+        "lit blue: {lit:?}"
+    );
+    // A minimum size of 10 px per scene unit makes the 40 unit triangle fill the view
+    let shot = render(
+        &ctx,
+        vec![Box::new(ScenegraphLayer::new(props(
+            ScenegraphLighting::Flat,
+            10.0,
+        )))],
+    );
+    assert_eq!(
+        px(&shot, c + 12, c - 12),
+        [0, 0, 255, 255],
+        "sizeMinPixels grew the scene"
+    );
+    // Instance colour multiplies the material and picking finds the instance
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(ScenegraphLayer::new(ScenegraphLayerProps {
+            base: LayerProps {
+                pickable: true,
+                ..LayerProps::new("scene")
+            },
+            get_color: Accessor::Constant([255, 255, 0, 255]),
+            ..props(ScenegraphLighting::Flat, 0.0)
+        }))],
+    );
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(
+        shot.pixel(c + 2, c - 2),
+        [0, 0, 0, 255],
+        "yellow times blue is black"
+    );
+    let info = deck.pick((c + 2) as f64, (c - 2) as f64).unwrap();
+    assert_eq!(
+        info.as_ref().map(|i| (i.layer_id.as_str(), i.index)),
+        Some(("scene", 0))
+    );
+}
+
 #[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };

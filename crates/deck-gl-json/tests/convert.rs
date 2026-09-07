@@ -1096,3 +1096,58 @@ fn simple_mesh_layer_reads_inline_meshes_and_obj_files() {
     assert!(error.contains("out of range"), "{error}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn scenegraph_layer_reads_gltf_files_with_external_buffers() {
+    use deck_gl_layers::{ScenegraphLayer, ScenegraphLighting};
+    let dir = std::env::temp_dir().join(format!("deckgl-gltf-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let bin: Vec<u8> = positions.iter().flatten().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(dir.join("model.bin"), bin).unwrap();
+    std::fs::write(
+        dir.join("model.gltf"),
+        r#"{"asset":{"version":"2.0"},"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0,"translation":[0,0,5]}],"meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}],"bufferViews":[{"buffer":0,"byteLength":36}],"buffers":[{"byteLength":36,"uri":"model.bin"}],"materials":[{"pbrMetallicRoughness":{"baseColorFactor":[1,0.5,0,1]}}]}"#,
+    )
+    .unwrap();
+    let converter = JsonConverter::with_base_dir(&dir);
+    let spec = json!([{
+        "@@type": "ScenegraphLayer",
+        "id": "planes",
+        "scenegraph": "model.gltf",
+        "data": [{"position": [1, 2], "heading": 30}],
+        "getPosition": "@@=position",
+        "getOrientation": "@@=[0, heading, 90]",
+        "sizeScale": 5,
+        "sizeMinPixels": 2,
+        "sizeMaxPixels": 100,
+        "_lighting": "pbr"
+    }]);
+    let mut deck = converter.convert(&spec).unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let layer = deck.layers[0]
+        .as_any_mut()
+        .downcast_mut::<ScenegraphLayer>()
+        .expect("a scenegraph layer");
+    let props = layer.props();
+    let scene = props.scenegraph.as_ref().unwrap();
+    assert_eq!(scene.primitives.len(), 1);
+    assert_eq!(scene.primitives[0].mesh.positions[1], [1.0, 0.0, 0.0]);
+    assert_eq!(scene.primitives[0].base_color, [1.0, 0.5, 0.0, 1.0]);
+    assert_eq!(
+        scene.primitives[0].model_matrix.w_axis.z, 5.0,
+        "the node translation"
+    );
+    assert_eq!(props.size_scale, 5.0);
+    assert_eq!((props.size_min_pixels, props.size_max_pixels), (2.0, 100.0));
+    assert_eq!(props.lighting, ScenegraphLighting::Pbr);
+    assert_eq!(
+        deck_gl::data::resolve_vec3(&props.data, &props.get_orientation).unwrap(),
+        vec![[0.0, 30.0, 90.0]]
+    );
+    let bad =
+        json!([{"@@type": "ScenegraphLayer", "scenegraph": "model.gltf", "data": [], "_lighting": "neon"}]);
+    let error = converter.convert(&bad).unwrap_err().to_string();
+    assert!(error.contains("_lighting"), "{error}");
+    std::fs::remove_dir_all(&dir).ok();
+}
