@@ -63,6 +63,13 @@ pub trait LayerExtension: Send + Sync + fmt::Debug {
         Ok(())
     }
 
+    /// The collision group when the extension takes part in the deck's collision pass (the
+    /// `CollisionFilterExtension`): the layer is then drawn into that group's map with its
+    /// picking colours before every frame.
+    fn collision_group(&self) -> Option<String> {
+        None
+    }
+
     /// deck.gl's `equals`: same extension type with the same options. Implement with
     /// [`same_extension`].
     fn equals(&self, other: &dyn LayerExtension) -> bool;
@@ -222,6 +229,12 @@ impl Extensions {
                 Ok(BufferSpec::instance(a.name, a.name, location, a.format))
             })
             .collect()
+    }
+
+    /// The collision group of the layer, when one of its extensions takes part in the
+    /// collision pass.
+    pub fn collision_group(&self) -> Option<String> {
+        self.0.iter().find_map(|e| e.collision_group())
     }
 
     /// The attribute values of every extension, to append to the layer's own sources.

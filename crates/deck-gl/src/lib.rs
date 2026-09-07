@@ -15,6 +15,7 @@
 )]
 pub mod attribute_manager;
 pub mod attributes;
+pub mod collision;
 pub mod constants;
 pub mod controller;
 pub mod data;
@@ -33,6 +34,7 @@ pub mod viewport;
 pub mod views;
 
 pub use attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field, Part};
+pub use collision::CollisionMaps;
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};

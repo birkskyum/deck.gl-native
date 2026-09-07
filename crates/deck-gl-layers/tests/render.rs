@@ -17,13 +17,14 @@ use deck_gl::{
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
-    BitmapLayerProps, BrushingExtension, ClipExtension, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
-    ContourLayerProps, DataFilterExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
-    GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
-    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, MaskExtension, PathLayer,
-    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
+    BitmapLayerProps, BrushingExtension, ClipExtension, CollisionFilterExtension, ColumnLayer,
+    ColumnLayerProps, Contour, ContourLayer, ContourLayerProps, DataFilterExtension, FilterCategories,
+    GeoJsonLayer, GeoJsonLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer,
+    HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
+    LineLayer, LineLayerProps, MaskExtension, PathLayer, PathLayerProps, PointCloudLayer,
+    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
+    ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextLayer,
+    TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -2613,4 +2614,40 @@ fn mask_extension_keeps_what_the_mask_layer_covers() {
     assert_pixel(&pixels, c - 4, c, [0, 0, 255, 255], 0);
     assert_pixel(&pixels, c + 16, c, [0, 0, 255, 255], 0);
     assert_pixel(&pixels, c + 16, c - 24, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn collision_filter_extension_keeps_the_highest_priority_object() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    // two circles on the same spot (red wins on priority) and one apart
+    let circles = |enabled: bool| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                extensions: Extensions::from_one(CollisionFilterExtension {
+                    collision_enabled: enabled,
+                    ..CollisionFilterExtension::new(Accessor::func(|i| if i == 0 { 10.0 } else { 0.0 }))
+                }),
+                ..LayerProps::new("labels")
+            },
+            data: LayerData::with_length(3),
+            get_position: Accessor::func(move |i| [CENTER[0] + if i == 2 { d } else { 0.0 }, CENTER[1], 0.0]),
+            get_radius: Accessor::Constant(6.0),
+            radius_units: Unit::Pixels,
+            get_fill_color: Accessor::func(|i| match i {
+                0 => [255, 0, 0, 255],
+                1 => [0, 0, 255, 255],
+                _ => [0, 255, 0, 255],
+            }),
+            antialiasing: false,
+            ..Default::default()
+        }))
+    };
+    let pixels = render(&ctx, vec![circles(true)]);
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [0, 255, 0, 255], 0);
+    // without the filter the later object draws on top
+    let pixels = render(&ctx, vec![circles(false)]);
+    assert_pixel(&pixels, c, c, [0, 0, 255, 255], 0);
 }

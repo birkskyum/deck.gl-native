@@ -127,3 +127,8 @@ error for extensions that declare attributes.
   texture fitted to its bounds before the frame instead of on screen (deck.gl's `MaskEffect`),
   for up to four mask layers, with the map view. Layers report their bounds through
   `Layer::bounds`; without them the texture covers twice the view.
+- `CollisionFilterExtension`: hides objects that overlap objects of a higher
+  `get_collision_priority` (labels, icons). Before every frame the deck draws the layers of each
+  `collision_group` into a half resolution map with their picking colours, sorted by priority
+  (deck.gl's `CollisionFilterEffect`), and each object is kept only where the map shows it at
+  its anchor, fading over a five pixel window. `collision_test_props` is not ported.

@@ -4,6 +4,7 @@ use luma_gl::{RenderTarget, PICKING_FORMAT};
 
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
+use crate::collision::{CollisionMaps, CollisionTarget, COLLISION_DOWNSCALE, COLLISION_PADDING};
 use crate::constants::{ClipDepthRange, CoordinateSystem, ProjectionMode};
 use crate::layer::{
     decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
@@ -156,6 +157,10 @@ pub struct Deck {
     masks: Arc<MaskMaps>,
     /// One texture per mask layer id, kept across frames
     mask_textures: HashMap<String, wgpu::Texture>,
+    /// The collision maps of the current frame, shared with the layer context
+    collisions: Arc<CollisionMaps>,
+    /// One colour and depth target per collision group, kept across frames
+    collision_targets: HashMap<String, CollisionTarget>,
 }
 
 impl Deck {
@@ -166,6 +171,7 @@ impl Deck {
         props: DeckProps,
     ) -> Result<Self> {
         let masks = Arc::new(MaskMaps::new(device, queue));
+        let collisions = Arc::new(CollisionMaps::new(device, queue));
         let ctx = LayerContext {
             device: device.clone(),
             queue: queue.clone(),
@@ -178,6 +184,7 @@ impl Deck {
             uniform_slot: 0,
             pointer: None,
             masks: Some(masks.clone()),
+            collisions: Some(collisions.clone()),
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -211,6 +218,8 @@ impl Deck {
             on_click: None,
             masks,
             mask_textures: HashMap::new(),
+            collisions,
+            collision_targets: HashMap::new(),
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -901,7 +910,156 @@ impl Deck {
     pub fn update(&mut self) -> Result<()> {
         self.update_layers(true)?;
         self.update_masks()?;
-        self.update_layers(false)
+        self.update_layers(false)?;
+        self.update_collisions()
+    }
+
+    /// deck.gl's `CollisionFilterEffect`: draw the layers of every collision group into a
+    /// half resolution map with their picking colours, sorted by collision priority, that the
+    /// collision filter extension samples to hide overlapping objects.
+    fn update_collisions(&mut self) -> Result<()> {
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        for (i, entry) in self.layers.iter().enumerate() {
+            let props = entry.layer.props();
+            if !entry.initialized || !props.visible || props.operation.mask {
+                continue;
+            }
+            let Some(group) = props.extensions.collision_group() else {
+                continue;
+            };
+            match groups.iter_mut().find(|(name, _)| *name == group) {
+                Some((_, layers)) => layers.push(i),
+                None => groups.push((group, vec![i])),
+            }
+        }
+        if groups.is_empty() {
+            if !self.collisions.groups.is_empty() {
+                self.publish_collisions(HashMap::new(), false);
+            }
+            return Ok(());
+        }
+        let dpr = self.ctx.device_pixel_ratio;
+        let scale = dpr as f64 / COLLISION_DOWNSCALE as f64;
+        let width = ((self.width as f64 * scale).round() as u32).max(3);
+        let height = ((self.height as f64 * scale).round() as u32).max(3);
+        self.collision_targets
+            .retain(|group, _| groups.iter().any(|(name, _)| name == group));
+        for (group, _) in &groups {
+            let fresh = self
+                .collision_targets
+                .get(group)
+                .is_none_or(|target| target.size() != (width, height));
+            if fresh {
+                let target = CollisionTarget::new(
+                    &self.ctx.device,
+                    group,
+                    width,
+                    height,
+                    self.ctx.target.depth_format,
+                );
+                self.collision_targets.insert(group.clone(), target);
+            }
+        }
+        let views: HashMap<String, wgpu::TextureView> = self
+            .collision_targets
+            .iter()
+            .map(|(group, target)| (group.clone(), target.color.create_view(&Default::default())))
+            .collect();
+
+        // Draw the maps: picking colours at half resolution, depth from the priorities
+        self.publish_collisions(views.clone(), true);
+        self.ctx.device_pixel_ratio = dpr / COLLISION_DOWNSCALE as f32;
+        self.ctx.uniform_slot = 0;
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("deck.gl collisions"),
+            });
+        for (group, layers) in &groups {
+            for &i in layers {
+                self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+                self.layers[i].layer.update(&self.ctx, &self.viewport)?;
+                self.layers[i].layer.set_picking_active(&self.ctx, true)?;
+            }
+            let Some(target) = self.collision_targets.get(group) else {
+                continue;
+            };
+            let color_view = target.color.create_view(&Default::default());
+            let depth_view = target.depth.as_ref().map(|d| d.create_view(&Default::default()));
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("deck.gl collision map"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &color_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: depth_view.as_ref().map(|view| {
+                        wgpu::RenderPassDepthStencilAttachment {
+                            view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_scissor_rect(
+                    COLLISION_PADDING,
+                    COLLISION_PADDING,
+                    width - 2 * COLLISION_PADDING,
+                    height - 2 * COLLISION_PADDING,
+                );
+                for (slot, &i) in layers.iter().enumerate() {
+                    pass.set_blend_constant(wgpu::Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: (slot + 1) as f64 / 255.0,
+                    });
+                    self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+                    self.layers[i].layer.draw_picking(&self.ctx, &mut pass)?;
+                }
+            }
+        }
+        // Uniform writes land before later submissions, so picking stays on until the maps
+        // were submitted
+        self.ctx.queue.submit([encoder.finish()]);
+        for (_, layers) in &groups {
+            for &i in layers {
+                self.layers[i].layer.set_picking_active(&self.ctx, false)?;
+            }
+        }
+        self.ctx.device_pixel_ratio = dpr;
+
+        // Uniforms for the frame, with the fresh maps bound
+        self.publish_collisions(views, false);
+        for (_, layers) in &groups {
+            for &i in layers {
+                self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+                self.layers[i].layer.update(&self.ctx, &self.viewport)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn publish_collisions(&mut self, groups: HashMap<String, wgpu::TextureView>, drawing_to_map: bool) {
+        self.collisions = Arc::new(CollisionMaps {
+            sampler: self.collisions.sampler.clone(),
+            dummy: self.collisions.dummy.clone(),
+            groups,
+            drawing_to_map,
+        });
+        self.ctx.collisions = Some(self.collisions.clone());
     }
 
     /// Initialize and update the layers whose operation is (`masks`) or is not `mask`.

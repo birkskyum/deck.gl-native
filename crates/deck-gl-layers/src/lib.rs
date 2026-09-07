@@ -47,8 +47,8 @@ pub use bitmap_layer::{BitmapImage, BitmapLayer, BitmapLayerProps};
 pub use column_layer::{ColumnLayer, ColumnLayerProps};
 pub use contour_layer::{Contour, ContourGrid, ContourLayer, ContourLayerProps, DEFAULT_CONTOUR_COLOR};
 pub use extensions::{
-    BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, FilterCategories, FilterValues,
-    MaskExtension,
+    BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
+    FilterCategories, FilterValues, MaskExtension,
 };
 pub use geo_cell_layer::{
     geohash_bounds, geohash_polygon, h3_polygon, quadkey_polygon, s2_polygon, CellKind, GeoCellLayer,

@@ -165,6 +165,7 @@ sit on the layer, as in pydeck:
 | `BrushingExtension` | `getBrushingTarget`, `brushingTarget` (`source`, `target`, `source_target`, `custom`), `brushingEnabled`, `brushingRadius` (metres); the pointer comes from `deckgl_pointer_move` or `Deck::pointer_move` |
 | `ClipExtension` | `clipBounds` (`[left, bottom, right, top]`), `clipByInstance` (by default whole objects for point like layers, trimmed geometry for path, polygon, GeoJSON, bitmap and tile layers) |
 | `MaskExtension` | `maskId` (the id of a layer with `"operation": "mask"`), `maskByInstance` (same default as `clipByInstance`), `maskInverted` |
+| `CollisionFilterExtension` | `getCollisionPriority` (-1000 to 1000, higher wins), `collisionEnabled`, `collisionGroup` (`collisionTestProps` is accepted and ignored) |
 
 Extension attributes need a layer on the attribute manager (scatterplot, line, arc, point
 cloud, icon, column); the other layers report an error for them. See

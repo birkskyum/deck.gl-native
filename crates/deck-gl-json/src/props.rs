@@ -11,8 +11,8 @@ use deck_gl::{
     RenderParameters, Unit,
 };
 use deck_gl_layers::{
-    BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, FilterCategories, FilterValues,
-    MaskExtension,
+    BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
+    FilterCategories, FilterValues, MaskExtension,
 };
 use serde_json::{Map, Value};
 
@@ -417,6 +417,22 @@ impl<'a> Props<'a> {
         )
     }
 
+    fn collision_filter_extension(&self) -> Result<CollisionFilterExtension> {
+        let defaults = CollisionFilterExtension::default();
+        if self.get("collisionTestProps").is_some() {
+            self.warn("collisionTestProps is not supported yet and was ignored");
+        }
+        Ok(CollisionFilterExtension {
+            get_collision_priority: self.accessor(
+                "getCollisionPriority",
+                &defaults.get_collision_priority,
+                convert::f32,
+            )?,
+            collision_enabled: self.bool("collisionEnabled", defaults.collision_enabled)?,
+            collision_group: self.string("collisionGroup")?.unwrap_or(defaults.collision_group),
+        })
+    }
+
     fn mask_extension(&self) -> Result<MaskExtension> {
         let defaults = MaskExtension::default();
         Ok(MaskExtension {
@@ -465,6 +481,7 @@ impl<'a> Props<'a> {
                 "BrushingExtension" => extensions.push(Arc::new(self.brushing_extension()?)),
                 "ClipExtension" => extensions.push(Arc::new(self.clip_extension()?)),
                 "MaskExtension" => extensions.push(Arc::new(self.mask_extension()?)),
+                "CollisionFilterExtension" => extensions.push(Arc::new(self.collision_filter_extension()?)),
                 "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
                 other => self.warn(format!(
                     "extension `{other}` is not supported yet and was ignored"

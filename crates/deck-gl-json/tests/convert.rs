@@ -10,7 +10,10 @@ use deck_gl::{
 };
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
-use deck_gl_layers::{BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, MaskExtension};
+use deck_gl_layers::{
+    BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
+    MaskExtension,
+};
 use serde_json::{json, Value};
 
 fn props_with_rows(object: &Value, rows: Vec<Value>) -> (Props<'_>, LayerData) {
@@ -911,4 +914,32 @@ fn mask_operation_and_extension() {
     assert_eq!(mask.mask_id, "geofence");
     assert!(mask.mask_inverted);
     assert!(mask.mask_by_instance);
+}
+
+#[test]
+fn collision_filter_extension_props() {
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([{
+                "@@type": "TextLayer", "id": "labels", "data": [{"position": [1, 2], "name": "a", "rank": 3}],
+                "getPosition": "@@=position", "getText": "@@=name",
+                "extensions": [{"@@type": "CollisionFilterExtension"}],
+                "getCollisionPriority": "@@=rank", "collisionGroup": "labels"
+            }]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let collision = layers[0]
+        .props()
+        .extensions
+        .get::<CollisionFilterExtension>()
+        .unwrap();
+    assert_eq!(collision.collision_group, "labels");
+    assert!(collision.collision_enabled);
+    assert_eq!(
+        resolve_f32(&LayerData::with_length(1), &collision.get_collision_priority).unwrap(),
+        [3.0]
+    );
 }

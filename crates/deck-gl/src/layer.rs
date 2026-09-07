@@ -5,6 +5,7 @@ use std::sync::Arc;
 use glam::DMat4;
 use luma_gl::{Model, ModelDescriptor, RenderTarget};
 
+use crate::collision::CollisionMaps;
 use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::{Color, Position};
 use crate::deck::PickingInfo;
@@ -172,6 +173,7 @@ impl LayerProps {
             || self.parameters != next.parameters
             || self.operation != next.operation
             || self.extensions.shaders() != next.extensions.shaders()
+            || self.extensions.collision_group().is_some() != next.extensions.collision_group().is_some()
     }
 }
 
@@ -199,6 +201,9 @@ pub struct LayerContext {
     pub pointer: Option<[f64; 2]>,
     /// The masks rendered this frame, for the mask extension. `None` outside a `Deck`.
     pub masks: Option<Arc<MaskMaps>>,
+    /// The collision maps of this frame, for the collision filter extension. `None` outside
+    /// a `Deck`.
+    pub collisions: Option<Arc<CollisionMaps>>,
 }
 
 /// Attachments of the mask pass: one red channel texture and no depth buffer.
@@ -235,7 +240,8 @@ impl LayerContext {
     /// `mask`.
     pub fn configure(&self, desc: &mut ModelDescriptor<'_>, props: &LayerProps) {
         desc.depth_bias = self.depth_bias();
-        desc.pickable = props.pickable;
+        // the collision pass draws layers with their picking pipeline
+        desc.pickable = props.pickable || props.extensions.collision_group().is_some();
         props.parameters.apply(desc);
         if props.operation.mask {
             desc.blend = Some(mask_blend());
