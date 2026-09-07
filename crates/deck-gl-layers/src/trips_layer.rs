@@ -8,7 +8,7 @@ use luma_gl::buffer::create_vertex_buffer_from;
 use luma_gl::{Model, VertexBufferLayout};
 use wgpu::VertexFormat;
 
-use crate::path_layer::{path_model, upload_path_attributes, write_path_uniforms, PathLayerProps};
+use crate::path_layer::{path_model, upload_path_attributes, write_path_uniforms, PathLayer, PathLayerProps};
 
 const PATH_SHADER: &str = include_str!("wgsl/path_layer.wgsl");
 
@@ -128,8 +128,8 @@ impl TripsLayer {
     /// Replace the props. Attributes are rebuilt on the next update when they changed; moving
     /// only `current_time` is free.
     pub fn set_props(&mut self, props: TripsLayerProps) {
-        let attributes_changed =
-            self.props.path != props.path || self.props.get_timestamps != props.get_timestamps;
+        let attributes_changed = PathLayer::attributes_changed(&self.props.path, &props.path)
+            || self.props.get_timestamps != props.get_timestamps;
         self.props = props;
         if attributes_changed {
             self.data_dirty = true;

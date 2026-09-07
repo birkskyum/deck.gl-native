@@ -136,6 +136,44 @@ fn bench_layers(c: &mut Criterion) {
         });
         group.finish();
     }
+
+    // Prop updates on the million points: a uniform only change and a colour accessor change
+    let mut group = c.benchmark_group("scatterplot_update");
+    group.sample_size(10);
+    let count = 1_000_000;
+    let mut deck = deck(&ctx, vec![points(count)]);
+    deck.snapshot(None).expect("frame");
+    let mut scale = 1.0f32;
+    group.bench_function(BenchmarkId::new("radius_scale", count), |b| {
+        b.iter(|| {
+            scale += 0.01;
+            let layer = deck.layer_mut("points").expect("layer");
+            let layer = layer
+                .as_any_mut()
+                .downcast_mut::<ScatterplotLayer>()
+                .expect("scatterplot");
+            let mut props = layer.props().clone();
+            props.radius_scale = scale;
+            layer.set_props(props);
+            deck.snapshot(None).expect("frame")
+        });
+    });
+    let mut shade = 0u8;
+    group.bench_function(BenchmarkId::new("fill_color", count), |b| {
+        b.iter(|| {
+            shade = shade.wrapping_add(1);
+            let layer = deck.layer_mut("points").expect("layer");
+            let layer = layer
+                .as_any_mut()
+                .downcast_mut::<ScatterplotLayer>()
+                .expect("scatterplot");
+            let mut props = layer.props().clone();
+            props.get_fill_color = Accessor::Func(Arc::new(move |i| [(i % 255) as u8, shade, 200, 255]));
+            layer.set_props(props);
+            deck.snapshot(None).expect("frame")
+        });
+    });
+    group.finish();
 }
 
 criterion_group!(benches, bench_layers);

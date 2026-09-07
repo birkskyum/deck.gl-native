@@ -100,10 +100,25 @@ impl ArcLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: ArcLayerProps) {
-        if self.props != props {
-            self.props = props;
+        if self.props == props {
+            return;
+        }
+        if Self::attributes_changed(&self.props, &props) {
             self.data_dirty = true;
         }
+        self.props = props;
+    }
+
+    /// Whether the new props need the attributes rebuilt: everything except the props that
+    /// only feed uniforms (sizes, units, flags and the base props).
+    fn attributes_changed(old: &ArcLayerProps, new: &ArcLayerProps) -> bool {
+        let mut probe = new.clone();
+        probe.base = old.base.clone();
+        probe.width_units = old.width_units;
+        probe.width_scale = old.width_scale;
+        probe.width_min_pixels = old.width_min_pixels;
+        probe.width_max_pixels = old.width_max_pixels;
+        probe != *old
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {

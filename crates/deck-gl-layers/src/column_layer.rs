@@ -185,10 +185,31 @@ impl ColumnLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: ColumnLayerProps) {
-        if self.props != props {
-            self.props = props;
+        if self.props == props {
+            return;
+        }
+        if Self::attributes_changed(&self.props, &props) {
             self.data_dirty = true;
         }
+        self.props = props;
+    }
+
+    /// Whether the new props need the attributes rebuilt: everything except the props that
+    /// only feed uniforms (sizes, units, flags and the base props).
+    fn attributes_changed(old: &ColumnLayerProps, new: &ColumnLayerProps) -> bool {
+        let mut probe = new.clone();
+        probe.base = old.base.clone();
+        probe.radius = old.radius;
+        probe.angle = old.angle;
+        probe.offset = old.offset;
+        probe.coverage = old.coverage;
+        probe.elevation_scale = old.elevation_scale;
+        probe.radius_units = old.radius_units;
+        probe.line_width_units = old.line_width_units;
+        probe.line_width_scale = old.line_width_scale;
+        probe.line_width_min_pixels = old.line_width_min_pixels;
+        probe.line_width_max_pixels = old.line_width_max_pixels;
+        probe != *old
     }
 
     fn models(&mut self) -> impl Iterator<Item = &mut Model> {

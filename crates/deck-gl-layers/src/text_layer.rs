@@ -260,10 +260,28 @@ impl TextLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: TextLayerProps) {
-        if self.props != props {
-            self.props = props;
+        if self.props == props {
+            return;
+        }
+        if Self::attributes_changed(&self.props, &props) {
             self.data_dirty = true;
         }
+        self.props = props;
+    }
+
+    /// Whether the new props need the attributes rebuilt: everything except the props that
+    /// only feed uniforms (sizes, units, flags and the base props).
+    fn attributes_changed(old: &TextLayerProps, new: &TextLayerProps) -> bool {
+        let mut probe = new.clone();
+        probe.base = old.base.clone();
+        probe.billboard = old.billboard;
+        probe.size_scale = old.size_scale;
+        probe.size_units = old.size_units;
+        probe.size_min_pixels = old.size_min_pixels;
+        probe.size_max_pixels = old.size_max_pixels;
+        probe.outline_width = old.outline_width;
+        probe.outline_color = old.outline_color;
+        probe != *old
     }
 
     /// The font atlas built for the current data, once updated.

@@ -76,10 +76,23 @@ impl PointCloudLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: PointCloudLayerProps) {
-        if self.props != props {
-            self.props = props;
+        if self.props == props {
+            return;
+        }
+        if Self::attributes_changed(&self.props, &props) {
             self.data_dirty = true;
         }
+        self.props = props;
+    }
+
+    /// Whether the new props need the attributes rebuilt: everything except the props that
+    /// only feed uniforms (sizes, units, flags and the base props).
+    fn attributes_changed(old: &PointCloudLayerProps, new: &PointCloudLayerProps) -> bool {
+        let mut probe = new.clone();
+        probe.base = old.base.clone();
+        probe.size_units = old.size_units;
+        probe.point_size = old.point_size;
+        probe != *old
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {

@@ -107,10 +107,25 @@ impl SolidPolygonLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: SolidPolygonLayerProps) {
-        if self.props != props {
-            self.props = props;
+        if self.props == props {
+            return;
+        }
+        if Self::attributes_changed(&self.props, &props) {
             self.data_dirty = true;
         }
+        self.props = props;
+    }
+
+    /// Whether the new props need the attributes rebuilt: everything except the props that
+    /// only feed uniforms (sizes, units, flags and the base props).
+    fn attributes_changed(old: &SolidPolygonLayerProps, new: &SolidPolygonLayerProps) -> bool {
+        let mut probe = new.clone();
+        probe.base = LayerProps {
+            coordinate_system: new.base.coordinate_system,
+            ..old.base.clone()
+        };
+        probe.elevation_scale = old.elevation_scale;
+        probe != *old
     }
 
     fn modules(&self) -> Vec<ShaderModuleSource> {

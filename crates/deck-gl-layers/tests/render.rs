@@ -1614,6 +1614,64 @@ fn frame_stats_count_layers_draws_and_uploads() {
 }
 
 #[test]
+fn prop_changes_upload_only_what_changed() {
+    let Some(ctx) = context() else { return };
+    let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {
+        base: LayerProps::new("points"),
+        data: LayerData::with_length(100),
+        get_position: Accessor::Constant(CENTER),
+        get_fill_color: Accessor::Constant(color),
+        get_radius: Accessor::Constant(2.0),
+        radius_units: Unit::Pixels,
+        radius_scale,
+        ..Default::default()
+    };
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(ScatterplotLayer::new(props(1.0, [255, 0, 0, 255])))],
+    );
+    deck.snapshot(None).unwrap();
+    let full = deck.stats().uploaded_bytes;
+    assert!(full > 0);
+    // A uniform only change uploads nothing
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        3.0,
+        [255, 0, 0, 255],
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, 0, "{:?}", deck.stats());
+    assert_eq!(
+        shot.pixel(SIZE / 2 + 4, SIZE / 2),
+        [255, 0, 0, 255],
+        "the larger radius shows"
+    );
+    // A colour change uploads the colour buffer only: 4 bytes per instance
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        3.0,
+        [0, 0, 255, 255],
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, 400, "{:?}", deck.stats());
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
+    // The same for a line layer's width
+    let line = |width: f32| LineLayerProps {
+        base: LayerProps::new("line"),
+        data: LayerData::with_length(10),
+        get_source_position: Accessor::Constant([CENTER[0] - 0.001, CENTER[1], 0.0]),
+        get_target_position: Accessor::Constant([CENTER[0] + 0.001, CENTER[1], 0.0]),
+        get_color: Accessor::Constant([0, 255, 0, 255]),
+        get_width: Accessor::Constant(width),
+        width_units: Unit::Pixels,
+        ..Default::default()
+    };
+    let mut deck = make_deck(&ctx, vec![Box::new(LineLayer::new(line(2.0)))]);
+    deck.snapshot(None).unwrap();
+    deck.set_layers(vec![Box::new(LineLayer::new(line(5.0)))]);
+    deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, 40, "widths only: {:?}", deck.stats());
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

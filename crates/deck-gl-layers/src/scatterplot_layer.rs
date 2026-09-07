@@ -75,10 +75,35 @@ impl Default for ScatterplotLayerProps {
 }
 
 /// Renders circles at given coordinates.
+/// Which attribute buffers must be uploaded again.
+#[derive(Clone, Copy, Debug, Default)]
+struct DirtyAttributes {
+    positions: bool,
+    instance: bool,
+    fill_colors: bool,
+    line_colors: bool,
+}
+
+impl DirtyAttributes {
+    fn all() -> Self {
+        Self {
+            positions: true,
+            instance: true,
+            fill_colors: true,
+            line_colors: true,
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.positions || self.instance || self.fill_colors || self.line_colors
+    }
+}
+
 pub struct ScatterplotLayer {
     props: ScatterplotLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    dirty: DirtyAttributes,
 }
 
 impl ScatterplotLayer {
@@ -87,6 +112,7 @@ impl ScatterplotLayer {
             props,
             model: None,
             data_dirty: true,
+            dirty: DirtyAttributes::all(),
         }
     }
 
@@ -96,56 +122,75 @@ impl ScatterplotLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: ScatterplotLayerProps) {
-        if self.props != props {
-            self.props = props;
-            self.data_dirty = true;
+        if self.props == props {
+            return;
         }
+        let old = &self.props;
+        let data_changed = old.data != props.data;
+        self.dirty.positions |= data_changed || old.get_position != props.get_position;
+        self.dirty.instance |= data_changed
+            || old.get_radius != props.get_radius
+            || old.get_line_width != props.get_line_width
+            || old.get_pixel_offset != props.get_pixel_offset;
+        self.dirty.fill_colors |= data_changed || old.get_fill_color != props.get_fill_color;
+        self.dirty.line_colors |= data_changed || old.get_line_color != props.get_line_color;
+        self.data_dirty = self.dirty.any();
+        self.props = props;
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
         let device = &ctx.device;
+        let dirty = self.dirty;
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
-        let positions = resolve_positions(data, &props.get_position)?;
-        let flat: Vec<f64> = positions.iter().flatten().copied().collect();
-        let (hi, lo) = split_f64(&flat);
-        let radius = resolve_f32(data, &props.get_radius)?;
-        let line_widths = resolve_f32(data, &props.get_line_width)?;
-        let fill_colors = resolve_colors(data, &props.get_fill_color)?;
-        let line_colors = resolve_colors(data, &props.get_line_color)?;
-        let pixel_offsets = resolve_vec2(data, &props.get_pixel_offset)?;
-
-        model.set_vertex_buffer(
-            "instancePositions",
-            create_vertex_buffer_from(device, "instancePositions", &hi),
-        )?;
-        model.set_vertex_buffer(
-            "instancePositions64Low",
-            create_vertex_buffer_from(device, "instancePositions64Low", &lo),
-        )?;
-        let instance_data: Vec<InstanceData> = (0..data.len())
-            .map(|i| InstanceData {
-                radius: radius[i],
-                line_width: line_widths[i],
-                pixel_offset: pixel_offsets[i],
-                row_index: data.source_row(i),
-            })
-            .collect();
-        model.set_vertex_buffer(
-            "instanceFillColors",
-            create_vertex_buffer_from(device, "instanceFillColors", &fill_colors),
-        )?;
-        model.set_vertex_buffer(
-            "instanceLineColors",
-            create_vertex_buffer_from(device, "instanceLineColors", &line_colors),
-        )?;
-        model.set_vertex_buffer(
-            "instanceData",
-            create_vertex_buffer_from(device, "instanceData", &instance_data),
-        )?;
+        if dirty.positions {
+            let positions = resolve_positions(data, &props.get_position)?;
+            let flat: Vec<f64> = positions.iter().flatten().copied().collect();
+            let (hi, lo) = split_f64(&flat);
+            model.set_vertex_buffer(
+                "instancePositions",
+                create_vertex_buffer_from(device, "instancePositions", &hi),
+            )?;
+            model.set_vertex_buffer(
+                "instancePositions64Low",
+                create_vertex_buffer_from(device, "instancePositions64Low", &lo),
+            )?;
+        }
+        if dirty.instance {
+            let radius = resolve_f32(data, &props.get_radius)?;
+            let line_widths = resolve_f32(data, &props.get_line_width)?;
+            let pixel_offsets = resolve_vec2(data, &props.get_pixel_offset)?;
+            let instance_data: Vec<InstanceData> = (0..data.len())
+                .map(|i| InstanceData {
+                    radius: radius[i],
+                    line_width: line_widths[i],
+                    pixel_offset: pixel_offsets[i],
+                    row_index: data.source_row(i),
+                })
+                .collect();
+            model.set_vertex_buffer(
+                "instanceData",
+                create_vertex_buffer_from(device, "instanceData", &instance_data),
+            )?;
+        }
+        if dirty.fill_colors {
+            let fill_colors = resolve_colors(data, &props.get_fill_color)?;
+            model.set_vertex_buffer(
+                "instanceFillColors",
+                create_vertex_buffer_from(device, "instanceFillColors", &fill_colors),
+            )?;
+        }
+        if dirty.line_colors {
+            let line_colors = resolve_colors(data, &props.get_line_color)?;
+            model.set_vertex_buffer(
+                "instanceLineColors",
+                create_vertex_buffer_from(device, "instanceLineColors", &line_colors),
+            )?;
+        }
         model.set_instance_count(data.len() as u32);
+        self.dirty = DirtyAttributes::default();
         Ok(())
     }
 }
@@ -195,6 +240,7 @@ impl Layer for ScatterplotLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
+        self.dirty = DirtyAttributes::all();
         Ok(())
     }
 

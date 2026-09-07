@@ -54,10 +54,35 @@ fn shortest_path_variants(wrap_longitude: bool) -> &'static [f32] {
     }
 }
 
+/// Which attribute buffers must be uploaded again.
+#[derive(Clone, Copy, Debug, Default)]
+struct DirtyAttributes {
+    sources: bool,
+    targets: bool,
+    colors: bool,
+    widths: bool,
+}
+
+impl DirtyAttributes {
+    fn all() -> Self {
+        Self {
+            sources: true,
+            targets: true,
+            colors: true,
+            widths: true,
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.sources || self.targets || self.colors || self.widths
+    }
+}
+
 pub struct LineLayer {
     props: LineLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    dirty: DirtyAttributes,
 }
 
 impl LineLayer {
@@ -66,6 +91,7 @@ impl LineLayer {
             props,
             model: None,
             data_dirty: true,
+            dirty: DirtyAttributes::all(),
         }
     }
 
@@ -75,58 +101,74 @@ impl LineLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: LineLayerProps) {
-        if self.props != props {
-            self.props = props;
-            self.data_dirty = true;
+        if self.props == props {
+            return;
         }
+        let old = &self.props;
+        let data_changed = old.data != props.data;
+        self.dirty.sources |= data_changed || old.get_source_position != props.get_source_position;
+        self.dirty.targets |= data_changed || old.get_target_position != props.get_target_position;
+        self.dirty.colors |= data_changed || old.get_color != props.get_color;
+        self.dirty.widths |= data_changed || old.get_width != props.get_width;
+        self.data_dirty = self.dirty.any();
+        self.props = props;
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
         let device = &ctx.device;
+        let dirty = self.dirty;
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
-        let sources: Vec<f64> = resolve_positions(data, &props.get_source_position)?
-            .iter()
-            .flatten()
-            .copied()
-            .collect();
-        let targets: Vec<f64> = resolve_positions(data, &props.get_target_position)?
-            .iter()
-            .flatten()
-            .copied()
-            .collect();
-        let (source_hi, source_lo) = split_f64(&sources);
-        let (target_hi, target_lo) = split_f64(&targets);
-        let colors = resolve_colors(data, &props.get_color)?;
-        let widths = resolve_f32(data, &props.get_width)?;
-
-        model.set_vertex_buffer(
-            "instanceSourcePositions",
-            create_vertex_buffer_from(device, "instanceSourcePositions", &source_hi),
-        )?;
-        model.set_vertex_buffer(
-            "instanceTargetPositions",
-            create_vertex_buffer_from(device, "instanceTargetPositions", &target_hi),
-        )?;
-        model.set_vertex_buffer(
-            "instanceSourcePositions64Low",
-            create_vertex_buffer_from(device, "instanceSourcePositions64Low", &source_lo),
-        )?;
-        model.set_vertex_buffer(
-            "instanceTargetPositions64Low",
-            create_vertex_buffer_from(device, "instanceTargetPositions64Low", &target_lo),
-        )?;
-        model.set_vertex_buffer(
-            "instanceColors",
-            create_vertex_buffer_from(device, "instanceColors", &colors),
-        )?;
-        model.set_vertex_buffer(
-            "instanceWidths",
-            create_vertex_buffer_from(device, "instanceWidths", &widths),
-        )?;
+        if dirty.sources {
+            let sources: Vec<f64> = resolve_positions(data, &props.get_source_position)?
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+            let (hi, lo) = split_f64(&sources);
+            model.set_vertex_buffer(
+                "instanceSourcePositions",
+                create_vertex_buffer_from(device, "instanceSourcePositions", &hi),
+            )?;
+            model.set_vertex_buffer(
+                "instanceSourcePositions64Low",
+                create_vertex_buffer_from(device, "instanceSourcePositions64Low", &lo),
+            )?;
+        }
+        if dirty.targets {
+            let targets: Vec<f64> = resolve_positions(data, &props.get_target_position)?
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+            let (hi, lo) = split_f64(&targets);
+            model.set_vertex_buffer(
+                "instanceTargetPositions",
+                create_vertex_buffer_from(device, "instanceTargetPositions", &hi),
+            )?;
+            model.set_vertex_buffer(
+                "instanceTargetPositions64Low",
+                create_vertex_buffer_from(device, "instanceTargetPositions64Low", &lo),
+            )?;
+        }
+        if dirty.colors {
+            let colors = resolve_colors(data, &props.get_color)?;
+            model.set_vertex_buffer(
+                "instanceColors",
+                create_vertex_buffer_from(device, "instanceColors", &colors),
+            )?;
+        }
+        if dirty.widths {
+            let widths = resolve_f32(data, &props.get_width)?;
+            model.set_vertex_buffer(
+                "instanceWidths",
+                create_vertex_buffer_from(device, "instanceWidths", &widths),
+            )?;
+        }
         model.set_instance_count(data.len() as u32);
+        self.dirty = DirtyAttributes::default();
         Ok(())
     }
 }
@@ -171,6 +213,7 @@ impl Layer for LineLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
+        self.dirty = DirtyAttributes::all();
         Ok(())
     }
 
