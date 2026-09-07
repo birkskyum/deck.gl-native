@@ -184,6 +184,7 @@ impl Layer for ScatterplotLayer {
         );
         desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         // a square that minimally covers the unit circle
         let positions: [f32; 12] = [-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 0.0];

@@ -178,7 +178,7 @@ impl Layer for TripsLayer {
             &self.props.path.base.id,
             &shader,
             &[timestamps],
-            self.props.path.base.pickable,
+            &self.props.path.base,
         )?;
         self.model = Some(model);
         self.data_dirty = true;

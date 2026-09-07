@@ -147,6 +147,7 @@ impl Layer for LineLayer {
         );
         desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         //  (0, -1)-------------_(1, -1)
         //       |          _,-"  |

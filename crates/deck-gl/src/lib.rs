@@ -16,6 +16,7 @@ pub mod deck;
 pub mod geojson;
 pub mod layer;
 pub mod lighting;
+pub mod parameters;
 pub mod shaderlib;
 pub mod viewport;
 
@@ -26,6 +27,7 @@ pub use deck::{Deck, DeckProps, PickingInfo, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use layer::{Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
+pub use parameters::{CullMode, RenderParameters};
 pub use viewport::{Viewport, WebMercatorViewportOptions};
 
 pub use glam;

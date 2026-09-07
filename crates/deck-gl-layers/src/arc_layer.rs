@@ -219,6 +219,7 @@ impl Layer for ArcLayer {
         );
         desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         model.set_vertex_count(self.props.num_segments.max(1) * 2);
         self.model = Some(model);

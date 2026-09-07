@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use deck_gl::glam::DMat4;
-use deck_gl::{Accessor, Color, CoordinateSystem, LayerProps, Material, Unit};
+use deck_gl::wgpu;
+use deck_gl::{Accessor, Color, CoordinateSystem, CullMode, LayerProps, Material, RenderParameters, Unit};
 use serde_json::{Map, Value};
 
 use crate::expression::Expr;
@@ -73,6 +74,8 @@ pub struct Props<'a> {
     pub id: String,
     object: &'a Map<String, Value>,
     used: RefCell<HashSet<String>>,
+    /// Warnings raised while reading props, reported by [`Props::finish`]
+    notes: RefCell<Vec<String>>,
     rows: Option<Rows>,
     /// True when `data` is an Arrow table, so accessors are columns rather than expressions.
     table: bool,
@@ -90,6 +93,7 @@ impl<'a> Props<'a> {
             id,
             object,
             used: RefCell::new(HashSet::new()),
+            notes: RefCell::new(Vec::new()),
             rows: None,
             table: false,
         };
@@ -345,6 +349,19 @@ impl<'a> Props<'a> {
                 ))
             }
         };
+        base.parameters = match self.get("parameters") {
+            None | Some(Value::Null) => RenderParameters::default(),
+            Some(Value::Object(map)) => render_parameters(map, |key| {
+                self.warn(format!("parameters.{key} is not supported yet and was ignored"))
+            })
+            .map_err(|m| self.error("parameters", m))?,
+            Some(other) => {
+                return Err(self.error(
+                    "parameters",
+                    format!("expected an object, got {}", describe(other)),
+                ))
+            }
+        };
         base.highlighted_object_index = match self.get("highlightedObjectIndex") {
             None | Some(Value::Null) => None,
             Some(value) => {
@@ -390,8 +407,16 @@ impl<'a> Props<'a> {
         }
     }
 
+    /// Record a warning about this layer, reported by [`Props::finish`].
+    pub fn warn(&self, message: impl std::fmt::Display) {
+        self.notes
+            .borrow_mut()
+            .push(format!("layer `{}` ({}): {message}", self.id, self.layer_type));
+    }
+
     /// Report props that were never read, mirroring deck.gl's warnings about unknown props.
     pub fn finish(&self, warnings: &mut Vec<String>) {
+        warnings.append(&mut self.notes.borrow_mut());
         let used = self.used.borrow();
         for key in self.object.keys() {
             if !used.contains(key) && !SILENTLY_IGNORED.contains(&key.as_str()) {
@@ -402,6 +427,128 @@ impl<'a> Props<'a> {
             }
         }
     }
+}
+
+/// deck.gl's `parameters` object with luma.gl's WebGPU style names (`depthCompare`,
+/// `depthWriteEnabled`, `cullMode`, `blend`, `blendColorSrcFactor`, ...) plus the WebGL era
+/// `depthTest`, `depthMask` and `cull`. Unknown keys are passed to `unknown`.
+pub fn render_parameters(
+    map: &Map<String, Value>,
+    mut unknown: impl FnMut(&str),
+) -> std::result::Result<RenderParameters, String> {
+    let mut parameters = RenderParameters::default();
+    let mut blend = premultiplied_blend();
+    let mut custom_blend = false;
+    let bool_of = |key: &str, v: &Value| v.as_bool().ok_or_else(|| format!("{key}: expected a boolean"));
+    fn str_of<'v>(key: &str, v: &'v Value) -> std::result::Result<&'v str, String> {
+        v.as_str().ok_or_else(|| format!("{key}: expected a string"))
+    }
+    for (key, value) in map {
+        if value.is_null() {
+            continue;
+        }
+        match key.as_str() {
+            "depthTest" => parameters.depth_test = Some(bool_of(key, value)?),
+            "depthWriteEnabled" | "depthMask" => parameters.depth_write_enabled = Some(bool_of(key, value)?),
+            "depthCompare" => parameters.depth_compare = Some(compare_function(str_of(key, value)?)?),
+            "cullMode" => {
+                parameters.cull_mode = Some(match str_of(key, value)? {
+                    "none" => CullMode::None,
+                    "front" => CullMode::Front,
+                    "back" => CullMode::Back,
+                    other => return Err(format!("cullMode: unknown value `{other}`")),
+                })
+            }
+            "cull" => {
+                parameters.cull_mode = Some(if bool_of(key, value)? {
+                    CullMode::Back
+                } else {
+                    CullMode::None
+                })
+            }
+            "blend" => parameters.blend = Some(bool_of(key, value)?),
+            "blendColorOperation" => {
+                blend.color.operation = blend_operation(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            "blendAlphaOperation" => {
+                blend.alpha.operation = blend_operation(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            "blendColorSrcFactor" => {
+                blend.color.src_factor = blend_factor(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            "blendColorDstFactor" => {
+                blend.color.dst_factor = blend_factor(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            "blendAlphaSrcFactor" => {
+                blend.alpha.src_factor = blend_factor(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            "blendAlphaDstFactor" => {
+                blend.alpha.dst_factor = blend_factor(str_of(key, value)?)?;
+                custom_blend = true;
+            }
+            other => unknown(other),
+        }
+    }
+    if custom_blend {
+        parameters.blend_state = Some(blend);
+    }
+    Ok(parameters)
+}
+
+fn premultiplied_blend() -> wgpu::BlendState {
+    deck_gl::luma_gl::model::premultiplied_alpha_blend()
+}
+
+fn compare_function(name: &str) -> std::result::Result<wgpu::CompareFunction, String> {
+    use wgpu::CompareFunction as C;
+    Ok(match name {
+        "never" => C::Never,
+        "less" => C::Less,
+        "equal" => C::Equal,
+        "less-equal" => C::LessEqual,
+        "greater" => C::Greater,
+        "not-equal" => C::NotEqual,
+        "greater-equal" => C::GreaterEqual,
+        "always" => C::Always,
+        other => return Err(format!("depthCompare: unknown value `{other}`")),
+    })
+}
+
+fn blend_operation(name: &str) -> std::result::Result<wgpu::BlendOperation, String> {
+    use wgpu::BlendOperation as O;
+    Ok(match name {
+        "add" => O::Add,
+        "subtract" => O::Subtract,
+        "reverse-subtract" => O::ReverseSubtract,
+        "min" => O::Min,
+        "max" => O::Max,
+        other => return Err(format!("blend operation: unknown value `{other}`")),
+    })
+}
+
+fn blend_factor(name: &str) -> std::result::Result<wgpu::BlendFactor, String> {
+    use wgpu::BlendFactor as F;
+    Ok(match name {
+        "zero" => F::Zero,
+        "one" => F::One,
+        "src" => F::Src,
+        "one-minus-src" => F::OneMinusSrc,
+        "src-alpha" => F::SrcAlpha,
+        "one-minus-src-alpha" => F::OneMinusSrcAlpha,
+        "dst" => F::Dst,
+        "one-minus-dst" => F::OneMinusDst,
+        "dst-alpha" => F::DstAlpha,
+        "one-minus-dst-alpha" => F::OneMinusDstAlpha,
+        "src-alpha-saturated" => F::SrcAlphaSaturated,
+        "constant" => F::Constant,
+        "one-minus-constant" => F::OneMinusConstant,
+        other => return Err(format!("blend factor: unknown value `{other}`")),
+    })
 }
 
 pub fn describe(value: &Value) -> &'static str {

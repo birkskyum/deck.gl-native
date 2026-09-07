@@ -7,8 +7,10 @@ use deck_gl::luma_gl::device::{
     create_headless_context, create_render_texture, read_texture_rgba8, HeadlessContext,
 };
 use deck_gl::luma_gl::RenderTarget;
+use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Material, Path, PickingInfo, Unit, ViewState,
+    Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Material, Path, PickingInfo, RenderParameters,
+    Unit, ViewState,
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
@@ -603,6 +605,113 @@ fn material_controls_shading_of_extruded_columns() {
         sum(brighter) > sum(shaded),
         "ambient 1.0 {brighter:?} should be brighter than the default {shaded:?}"
     );
+}
+
+#[test]
+fn render_parameters_override_depth_test_and_blending() {
+    let Some(ctx) = context() else { return };
+    let column = || {
+        Box::new(ColumnLayer::new(ColumnLayerProps {
+            base: LayerProps {
+                material: Material::unlit(),
+                ..LayerProps::new("column")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+            get_elevation: Accessor::Constant(200.0),
+            radius: 14.0,
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let disk = |parameters: RenderParameters, color: [u8; 4]| {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                parameters,
+                ..LayerProps::new("disk")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant(color),
+            get_radius: Accessor::Constant(8.0),
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    // The ground level disk sits under the column top, so the depth test hides it
+    let hidden = render(
+        &ctx,
+        vec![column(), disk(RenderParameters::default(), [255, 0, 0, 255])],
+    );
+    assert_pixel(&hidden, c, c, [0, 0, 255, 255], 1);
+    // depthTest: false draws it regardless of depth
+    let on_top = render(
+        &ctx,
+        vec![
+            column(),
+            disk(
+                RenderParameters {
+                    depth_test: Some(false),
+                    ..Default::default()
+                },
+                [255, 0, 0, 255],
+            ),
+        ],
+    );
+    assert_pixel(&on_top, c, c, [255, 0, 0, 255], 1);
+    // depthCompare: always does the same
+    let always = render(
+        &ctx,
+        vec![
+            column(),
+            disk(
+                RenderParameters {
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    ..Default::default()
+                },
+                [255, 0, 0, 255],
+            ),
+        ],
+    );
+    assert_pixel(&always, c, c, [255, 0, 0, 255], 1);
+    // A translucent disk blends over the column by default, and replaces it with blend: false
+    let translucent = RenderParameters {
+        depth_test: Some(false),
+        ..Default::default()
+    };
+    let blended = render(&ctx, vec![column(), disk(translucent, [255, 0, 0, 128])]);
+    assert_pixel(&blended, c, c, [128, 0, 127, 255], 2);
+    let replaced = render(
+        &ctx,
+        vec![
+            column(),
+            disk(
+                RenderParameters {
+                    blend: Some(false),
+                    ..translucent
+                },
+                [255, 0, 0, 128],
+            ),
+        ],
+    );
+    assert_pixel(&replaced, c, c, [128, 0, 0, 128], 2);
+    // Additive blending sums the colours
+    let additive = render(
+        &ctx,
+        vec![
+            column(),
+            disk(
+                RenderParameters {
+                    blend_state: Some(deck_gl::parameters::additive_blend()),
+                    ..translucent
+                },
+                [255, 0, 0, 128],
+            ),
+        ],
+    );
+    assert_pixel(&additive, c, c, [128, 0, 255, 255], 2);
 }
 
 #[test]

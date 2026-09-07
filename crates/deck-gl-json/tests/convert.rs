@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons, resolve_positions};
-use deck_gl::{Accessor, CoordinateSystem, LayerData, Material};
+use deck_gl::wgpu;
+use deck_gl::{Accessor, CoordinateSystem, CullMode, LayerData, Material};
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
 use serde_json::{json, Value};
@@ -498,4 +499,48 @@ fn lighting_effects_and_materials() {
     let bad = json!([{"@@type": "ColumnLayer", "data": [], "material": "shiny"}]);
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
     assert!(error.contains("material"), "{error}");
+}
+
+#[test]
+fn render_parameters() {
+    let spec = json!([
+        {
+            "@@type": "ScatterplotLayer",
+            "id": "glow",
+            "data": [],
+            "parameters": {
+                "depthTest": false,
+                "cullMode": "back",
+                "blendColorSrcFactor": "one",
+                "blendColorDstFactor": "one",
+                "blendAlphaOperation": "max",
+                "stencilTest": true
+            }
+        },
+        {"@@type": "ScatterplotLayer", "id": "plain", "data": [], "parameters": {"depthCompare": "always", "depthWriteEnabled": false, "blend": false}}
+    ]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    let glow = deck.layers[0].props().parameters;
+    assert_eq!(glow.depth_test, Some(false));
+    assert_eq!(glow.cull_mode, Some(CullMode::Back));
+    let blend = glow.blend_state.expect("custom blend");
+    assert_eq!(blend.color.src_factor, wgpu::BlendFactor::One);
+    assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::One);
+    assert_eq!(blend.color.operation, wgpu::BlendOperation::Add);
+    assert_eq!(blend.alpha.operation, wgpu::BlendOperation::Max);
+    let plain = deck.layers[1].props().parameters;
+    assert_eq!(plain.depth_compare, Some(wgpu::CompareFunction::Always));
+    assert_eq!(plain.depth_write_enabled, Some(false));
+    assert_eq!(plain.blend, Some(false));
+    assert!(plain.blend_state.is_none());
+    assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
+    assert!(deck.warnings[0].contains("stencilTest"), "{:?}", deck.warnings);
+
+    let bad =
+        json!([{"@@type": "ScatterplotLayer", "data": [], "parameters": {"depthCompare": "sometimes"}}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(
+        error.contains("depthCompare") && error.contains("sometimes"),
+        "{error}"
+    );
 }

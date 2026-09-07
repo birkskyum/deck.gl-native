@@ -27,6 +27,7 @@ Working today, headless and verified pixel by pixel in tests:
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
+- Per-layer render `parameters`: blend state, depth test and writes, face culling
 - A `MapController` with deck.gl's gestures: drag to pan with inertia, rotate and pitch, zoom
   around the cursor, keyboard moves, zoom and pitch limits. Independent of the windowing
   library; the window example wires it to winit.

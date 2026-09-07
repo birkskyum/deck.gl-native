@@ -128,7 +128,7 @@ Other effect types produce a warning and are skipped.
 
 | Layer | Props |
 | --- | --- |
-| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`) |
+| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`), `parameters` (`depthTest`, `depthWriteEnabled`, `depthCompare`, `cullMode`, `blend`, `blendColorOperation`, `blendColorSrcFactor`, `blendColorDstFactor`, `blendAlphaOperation`, `blendAlphaSrcFactor`, `blendAlphaDstFactor`, with luma.gl's WebGPU names) |
 | `ScatterplotLayer` | `radiusUnits`, `radiusScale`, `radiusMinPixels`, `radiusMaxPixels`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `stroked`, `filled`, `billboard`, `antialiasing`, `getPosition`, `getRadius`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPixelOffset` |
 | `LineLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getColor`, `getWidth` |
 | `ArcLayer` | `greatCircle`, `numSegments`, `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getSourceColor`, `getTargetColor`, `getWidth`, `getHeight`, `getTilt` |
@@ -147,7 +147,6 @@ Other effect types produce a warning and are skipped.
 | `IconLayer` | `iconAtlas`, `iconMapping`, `sizeUnits`, `sizeScale`, `sizeMinPixels`, `sizeMaxPixels`, `billboard`, `alphaCutoff`, `getPosition`, `getIcon`, `getColor`, `getSize`, `getAngle`, `getPixelOffset` |
 | `BitmapLayer` | `image`, `bounds` (`[left, bottom, right, top]` or four corners), `desaturate`, `transparentColor`, `tintColor` |
 
-Props deck.gl accepts but this port does not have yet (`extensions`, `parameters`, `transitions`,
-`pointType`, ...) produce a warning and are skipped, as are layer types that do not exist here
-yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
+Props deck.gl accepts but this port does not have yet (`extensions`, `transitions`, `pointType`,
+...) produce a warning and are skipped, as are layer types that do not exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
 have no meaning in a static description.

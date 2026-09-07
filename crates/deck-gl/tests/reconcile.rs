@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use deck_gl::luma_gl::device::create_headless_context;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, Layer, LayerContext, LayerProps, Result, Viewport};
+use deck_gl::{Deck, DeckProps, Layer, LayerContext, LayerProps, RenderParameters, Result, Viewport};
 
 /// A layer that counts how often it is initialized and which props it holds.
 struct Counter {
@@ -136,5 +136,39 @@ fn set_layers_reuses_layers_with_the_same_id_and_type() {
         initialized.load(Ordering::SeqCst),
         3,
         "a Counter replaced an Other"
+    );
+
+    // Render parameters and pickability are baked into pipelines: the layer is rebuilt
+    let with_base = |base: LayerProps| -> Box<dyn Layer> {
+        Box::new(Counter {
+            props: base,
+            value: 6,
+            initialized: initialized.clone(),
+            updates: updates.clone(),
+        })
+    };
+    deck.set_layers(vec![with_base(LayerProps {
+        parameters: RenderParameters {
+            depth_test: Some(false),
+            ..Default::default()
+        },
+        ..LayerProps::new("counter")
+    })]);
+    deck.update().unwrap();
+    assert_eq!(initialized.load(Ordering::SeqCst), 4, "new parameters");
+    deck.set_layers(vec![with_base(LayerProps {
+        pickable: true,
+        parameters: RenderParameters {
+            depth_test: Some(false),
+            ..Default::default()
+        },
+        ..LayerProps::new("counter")
+    })]);
+    deck.update().unwrap();
+    assert_eq!(initialized.load(Ordering::SeqCst), 5, "now pickable");
+    assert_eq!(
+        updates.load(Ordering::SeqCst),
+        2,
+        "neither change reused the layer"
     );
 }

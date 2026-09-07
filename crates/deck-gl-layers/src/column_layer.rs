@@ -285,6 +285,7 @@ impl Layer for ColumnLayer {
             let mut desc = ModelDescriptor::new(&label, &shader, &layouts, topology, ctx.target);
             desc.depth_bias = ctx.depth_bias();
             desc.pickable = props.base.pickable;
+            props.base.parameters.apply(&mut desc);
             let mut model = Model::new(&ctx.device, &desc)?;
             model.set_vertex_buffer("geometry", geometry_buffer.clone())?;
             Ok(model)

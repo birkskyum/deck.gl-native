@@ -224,6 +224,7 @@ impl Layer for SolidPolygonLayer {
         let modules = self.modules();
         let depth_bias = ctx.depth_bias();
         let pickable = self.props.base.pickable;
+        let parameters = self.props.base.parameters;
         let top_label = format!("{id}-top");
         let side_label = format!("{id}-side");
         let wireframe_label = format!("{id}-wireframe");
@@ -244,6 +245,7 @@ impl Layer for SolidPolygonLayer {
             );
             desc.depth_bias = depth_bias;
             desc.pickable = pickable;
+            parameters.apply(&mut desc);
             self.top = Some(Model::new(&ctx.device, &desc)?);
         }
 
@@ -267,6 +269,7 @@ impl Layer for SolidPolygonLayer {
             );
             desc.depth_bias = depth_bias;
             desc.pickable = pickable;
+            parameters.apply(&mut desc);
             let mut side = Model::new(&ctx.device, &desc)?;
             // top right - top left - bottom right - bottom left
             let side_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0];
@@ -287,6 +290,7 @@ impl Layer for SolidPolygonLayer {
                 );
                 desc.depth_bias = depth_bias;
                 desc.pickable = pickable;
+                parameters.apply(&mut desc);
                 let mut wireframe = Model::new(&ctx.device, &desc)?;
                 // top right - top left - bottom left - bottom right
                 let wire_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];

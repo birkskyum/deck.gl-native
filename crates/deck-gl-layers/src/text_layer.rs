@@ -465,6 +465,7 @@ impl TextLayer {
         desc.depth_bias = ctx.depth_bias();
         desc.depth_bias.constant += extra_bias;
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         let positions: [f32; 8] = [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
         model.set_vertex_buffer(
@@ -512,6 +513,7 @@ impl TextLayer {
         );
         desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         let positions: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         model.set_vertex_buffer(

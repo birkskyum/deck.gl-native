@@ -145,7 +145,7 @@ pub(crate) fn path_model(
     id: &str,
     shader_source: &str,
     extra_layouts: &[VertexBufferLayout],
-    pickable: bool,
+    base: &LayerProps,
 ) -> Result<Model> {
     let shader = assemble_shader(id, &STANDARD_MODULES, shader_source)?;
     let position_stride = 24 * 4;
@@ -187,7 +187,8 @@ pub(crate) fn path_model(
         ctx.target,
     );
     desc.depth_bias = ctx.depth_bias();
-    desc.pickable = pickable;
+    desc.pickable = base.pickable;
+    base.parameters.apply(&mut desc);
     let mut model = Model::new(&ctx.device, &desc)?;
 
     // [0] position on segment - 0: start, 1: end
@@ -238,7 +239,7 @@ impl Layer for PathLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = path_model(ctx, &self.props.base.id, SHADER, &[], self.props.base.pickable)?;
+        let model = path_model(ctx, &self.props.base.id, SHADER, &[], &self.props.base)?;
         self.model = Some(model);
         self.data_dirty = true;
         Ok(())

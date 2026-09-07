@@ -3,7 +3,7 @@
 use luma_gl::{RenderTarget, PICKING_FORMAT};
 
 use crate::constants::ClipDepthRange;
-use crate::layer::{decode_picking_color, Layer, LayerContext, LAYER_INDEX_STRIDE};
+use crate::layer::{decode_picking_color, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE};
 use crate::lighting::LightingEffect;
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
 use crate::{DeckError, Result};
@@ -188,7 +188,6 @@ impl Deck {
         self.ctx.lighting = lighting;
     }
 
-    /// Replace all layers. Layers are initialized lazily on the next `update`.
     /// Replace the layer list. Layers whose id matches an existing layer of the same type keep
     /// that layer's GPU resources and only take over the new props (see
     /// [`Layer::update_from`]); everything else is initialized on the next update.
@@ -202,7 +201,9 @@ impl Deck {
                     .find(|slot| slot.as_ref().is_some_and(|e| e.layer.id() == layer.id()))
                     .and_then(Option::take);
                 match existing {
-                    Some(mut entry) if entry.initialized => {
+                    Some(mut entry)
+                        if entry.initialized && same_pipelines(entry.layer.props(), layer.props()) =>
+                    {
                         if entry.layer.update_from(layer.as_mut()) {
                             entry
                         } else {
@@ -624,4 +625,11 @@ fn make_viewport(width: u32, height: u32, view_state: &ViewState) -> Viewport {
         bearing: view_state.bearing,
         ..Default::default()
     })
+}
+
+/// Whether an initialized layer can keep its models when it takes over these props. Picking
+/// pipelines and render parameters are baked into the pipelines, so a change there means the
+/// layer is initialized again.
+fn same_pipelines(current: &LayerProps, incoming: &LayerProps) -> bool {
+    current.pickable == incoming.pickable && !current.parameters.differs(&incoming.parameters)
 }

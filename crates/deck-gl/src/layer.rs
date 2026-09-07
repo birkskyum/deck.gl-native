@@ -6,6 +6,7 @@ use luma_gl::{Model, RenderTarget};
 use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::Color;
 use crate::lighting::{LightingEffect, Material};
+use crate::parameters::RenderParameters;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
 use crate::viewport::Viewport;
 use crate::Result;
@@ -28,6 +29,8 @@ pub struct LayerProps {
     pub highlight_color: Color,
     /// Reflectance of lit layers (extruded polygons, columns, point clouds)
     pub material: Material,
+    /// Pipeline state overrides (blending, depth test, culling), deck.gl's `parameters`
+    pub parameters: RenderParameters,
 }
 
 impl Default for LayerProps {
@@ -44,6 +47,7 @@ impl Default for LayerProps {
             highlighted_object_index: None,
             highlight_color: [0, 0, 128, 128],
             material: Material::default(),
+            parameters: RenderParameters::default(),
         }
     }
 }

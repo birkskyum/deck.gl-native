@@ -164,6 +164,7 @@ impl Layer for PointCloudLayer {
         );
         desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
+        self.props.base.parameters.apply(&mut desc);
         let mut model = Model::new(&ctx.device, &desc)?;
         // a triangle that minimally covers the unit circle
         let mut positions = Vec::with_capacity(9);
