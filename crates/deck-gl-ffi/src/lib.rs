@@ -15,7 +15,7 @@ use arrow_array::ffi::{from_ffi, FFI_ArrowArray, FFI_ArrowSchema};
 use arrow_array::{Array, RecordBatch, StructArray};
 
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{ClipDepthRange, Deck, DeckProps, Layer, Viewport, WebMercatorViewportOptions};
+use deck_gl::{ClipDepthRange, Deck, DeckProps, Layer, ViewState, Viewport, WebMercatorViewportOptions};
 use deck_gl_json::JsonConverter;
 
 mod debug;
@@ -52,6 +52,8 @@ pub struct DeckglHandle {
     pub(crate) pending_layers: Option<Vec<Box<dyn deck_gl::Layer>>>,
     /// Lighting from the last JSON description, applied to every deck
     pub(crate) lighting: Option<deck_gl::LightingEffect>,
+    /// `initialViewState` of the last JSON description, the camera of headless snapshots
+    pub(crate) view_state: Option<ViewState>,
     pub(crate) last_error: CString,
     /// Number of frames rendered so far
     pub(crate) frame: u64,
@@ -68,6 +70,7 @@ impl DeckglHandle {
             camera: None,
             pending_layers: None,
             lighting: None,
+            view_state: None,
             last_error: CString::default(),
             frame: 0,
         }
@@ -245,6 +248,9 @@ fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_js
                 }
                 handle.lighting = Some(lighting);
             }
+            if json.view_state.is_some() {
+                handle.view_state = json.view_state;
+            }
             0
         }
         Err(e) => handle.set_error(e.to_string()),
@@ -309,6 +315,92 @@ pub unsafe extern "C" fn deckgl_headless_create() -> *mut DeckglHandle {
             eprintln!("deck.gl-native: {e}");
             std::ptr::null_mut()
         }
+    }
+}
+
+impl DeckglHandle {
+    /// Render a frame of `width` x `height` pixels and read it back. With a host camera the
+    /// deck keeps that camera and the size must match it; otherwise the last JSON description's
+    /// `initialViewState` (or a default view) is used at the given size.
+    pub(crate) fn snapshot(&mut self, width: u32, height: u32) -> Result<deck_gl::Snapshot, String> {
+        let target = self.target.unwrap_or_default();
+        self.ensure_deck(target)?;
+        match self.camera {
+            Some(camera) => {
+                let expected = (camera.width.max(1), camera.height.max(1));
+                if expected != (width, height) {
+                    return Err(format!(
+                        "deckgl_snapshot: size {width}x{height} does not match the camera's {}x{}",
+                        expected.0, expected.1
+                    ));
+                }
+                self.apply_camera();
+            }
+            None => {
+                let deck = self.deck.as_mut().expect("ensured");
+                deck.set_device_pixel_ratio(1.0);
+                deck.set_size(width, height);
+                deck.set_view_state(self.view_state.unwrap_or_default());
+            }
+        }
+        let deck = self.deck.as_mut().expect("ensured");
+        deck.snapshot(None).map_err(|e| e.to_string())
+    }
+}
+
+/// Render the layers headlessly into `rgba`, which must hold `width * height * 4` bytes
+/// (rows top to bottom, transparent background). The camera is the one from
+/// `deckgl_set_camera`, whose size must then match, or else the last JSON description's
+/// `initialViewState` at the given size. Returns 0 on success.
+///
+/// # Safety
+/// `deck` must be a valid handle and `rgba` writable for `width * height * 4` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_snapshot(
+    deck: *mut DeckglHandle,
+    width: u32,
+    height: u32,
+    rgba: *mut u8,
+) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    if rgba.is_null() || width == 0 || height == 0 {
+        return handle.set_error("deckgl_snapshot: rgba is null or the size is zero");
+    }
+    match handle.snapshot(width, height) {
+        Ok(snapshot) => {
+            let out = unsafe { std::slice::from_raw_parts_mut(rgba, (width * height * 4) as usize) };
+            out.copy_from_slice(&snapshot.rgba);
+            0
+        }
+        Err(e) => handle.set_error(e),
+    }
+}
+
+/// Like `deckgl_snapshot`, written as a PNG file. Returns 0 on success.
+///
+/// # Safety
+/// `deck` must be a valid handle and `path` a C string.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_snapshot_png(
+    deck: *mut DeckglHandle,
+    width: u32,
+    height: u32,
+    path: *const c_char,
+) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let Some(path) = (unsafe { c_string(path) }) else {
+        return handle.set_error("deckgl_snapshot_png: path is null");
+    };
+    match handle
+        .snapshot(width, height)
+        .and_then(|s| s.save_png(&path).map_err(|e| e.to_string()))
+    {
+        Ok(()) => 0,
+        Err(e) => handle.set_error(e),
     }
 }
 

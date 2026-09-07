@@ -74,9 +74,18 @@ int32_t deckgl_set_arrow_table(DeckglHandle* deck,
 /** Forget a registered table. Layers already built keep their data. */
 int32_t deckgl_remove_arrow_table(DeckglHandle* deck, const char* name);
 
-/** Create a deck on a headless GPU device, on any platform, for tooling and tests that only
- *  convert layers and data. Returns NULL without a GPU adapter. */
+/** Create a deck on a headless GPU device, on any platform, for tooling, tests and
+ *  snapshots. Returns NULL without a GPU adapter. */
 DeckglHandle* deckgl_headless_create(void);
+
+/** Render the layers into `rgba`, which must hold width * height * 4 bytes (rows top to
+ *  bottom, transparent background). Uses the camera from deckgl_set_camera, whose size must
+ *  then match, or else the last JSON description's initialViewState at the given size.
+ *  Works on any deck, headless or host bound. Returns 0 on success. */
+int32_t deckgl_snapshot(DeckglHandle* deck, uint32_t width, uint32_t height, uint8_t* rgba);
+
+/** Like deckgl_snapshot, written as a PNG file. Returns 0 on success. */
+int32_t deckgl_snapshot_png(DeckglHandle* deck, uint32_t width, uint32_t height, const char* path);
 
 void deckgl_set_camera(DeckglHandle* deck, const DeckglCamera* camera);
 

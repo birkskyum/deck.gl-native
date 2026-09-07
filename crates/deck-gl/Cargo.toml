@@ -18,3 +18,9 @@ arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-buffer = { workspace = true }
 serde_json = { workspace = true }
+image = { workspace = true, optional = true }
+
+[features]
+default = []
+# `Snapshot::save_png`
+png = ["dep:image"]

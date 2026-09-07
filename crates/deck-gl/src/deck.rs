@@ -2,6 +2,8 @@
 
 use luma_gl::{RenderTarget, PICKING_FORMAT};
 
+use luma_gl::device::{create_render_texture, read_texture_rgba8};
+
 use crate::constants::ClipDepthRange;
 use crate::layer::{decode_picking_color, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE};
 use crate::lighting::LightingEffect;
@@ -486,6 +488,52 @@ impl Deck {
         Ok(())
     }
 
+    /// Render one frame into deck owned textures and read the pixels back. The image is the
+    /// deck's size times its device pixel ratio; `clear_color` fills the background and `None`
+    /// leaves it transparent. Blocks until the GPU is done, so this is for tools and tests
+    /// rather than interactive frames.
+    pub fn snapshot(&mut self, clear_color: Option<wgpu::Color>) -> Result<Snapshot> {
+        let ratio = self.ctx.device_pixel_ratio.max(f32::EPSILON);
+        let width = ((self.width as f32 * ratio).round() as u32).max(1);
+        let height = ((self.height as f32 * ratio).round() as u32).max(1);
+        let target = self.ctx.target;
+        let color = create_render_texture(
+            &self.ctx.device,
+            "snapshot color",
+            width,
+            height,
+            target.color_format,
+        );
+        let depth = target
+            .depth_format
+            .map(|format| create_render_texture(&self.ctx.device, "snapshot depth", width, height, format));
+        let color_view = color.create_view(&Default::default());
+        let depth_view = depth.as_ref().map(|t| t.create_view(&Default::default()));
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("snapshot"),
+            });
+        self.render(
+            &mut encoder,
+            &color_view,
+            depth_view.as_ref(),
+            Some(clear_color.unwrap_or(wgpu::Color::TRANSPARENT)),
+        )?;
+        self.ctx.queue.submit([encoder.finish()]);
+        let mut rgba = read_texture_rgba8(&self.ctx.device, &self.ctx.queue, &color)?;
+        if matches!(
+            target.color_format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        ) {
+            for pixel in rgba.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        Ok(Snapshot { width, height, rgba })
+    }
+
     /// Convenience: update, then begin a render pass on the given views and draw.
     ///
     /// `clear_color` clears the color attachment first; `None` loads the existing contents so
@@ -625,6 +673,36 @@ fn make_viewport(width: u32, height: u32, view_state: &ViewState) -> Viewport {
         bearing: view_state.bearing,
         ..Default::default()
     })
+}
+
+/// Pixels read back by [`Deck::snapshot`]: RGBA, 8 bits per channel, rows top to bottom.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl Snapshot {
+    /// The pixel at `x`, `y` (origin top left).
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * self.width + x) * 4) as usize;
+        [self.rgba[i], self.rgba[i + 1], self.rgba[i + 2], self.rgba[i + 3]]
+    }
+
+    /// Write the image as a PNG, creating parent directories. Needs the `png` feature.
+    #[cfg(feature = "png")]
+    pub fn save_png(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| DeckError::Render(format!("cannot create {}: {e}", parent.display())))?;
+            }
+        }
+        image::save_buffer(path, &self.rgba, self.width, self.height, image::ColorType::Rgba8)
+            .map_err(|e| DeckError::Render(format!("cannot write {}: {e}", path.display())))
+    }
 }
 
 /// Whether an initialized layer can keep its models when it takes over these props. Picking

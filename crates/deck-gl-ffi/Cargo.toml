@@ -12,7 +12,7 @@ name = "deckgl"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-deck-gl = { workspace = true }
+deck-gl = { workspace = true, features = ["png"] }
 deck-gl-layers = { workspace = true }
 deck-gl-json = { workspace = true }
 arrow-array = { workspace = true, features = ["ffi"] }

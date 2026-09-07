@@ -715,6 +715,39 @@ fn render_parameters_override_depth_test_and_blending() {
 }
 
 #[test]
+fn snapshot_reads_back_the_rendered_frame() {
+    let Some(ctx) = context() else { return };
+    let layer = || {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new("disk"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(8.0),
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let pixels = render(&ctx, vec![layer()]);
+    let mut deck = make_deck(&ctx, vec![layer()]);
+    let snapshot = deck.snapshot(None).unwrap();
+    assert_eq!((snapshot.width, snapshot.height), (SIZE, SIZE));
+    assert_eq!(snapshot.rgba, pixels, "snapshot matches a manual render");
+    assert_eq!(snapshot.pixel(SIZE / 2, SIZE / 2), [255, 0, 0, 255]);
+    // A clear colour fills the background and the deck can be snapshotted again
+    let cleared = deck
+        .snapshot(Some(wgpu::Color {
+            r: 0.0,
+            g: 0.0,
+            b: 1.0,
+            a: 1.0,
+        }))
+        .unwrap();
+    assert_eq!(cleared.pixel(1, 1), [0, 0, 255, 255]);
+    assert_eq!(cleared.pixel(SIZE / 2, SIZE / 2), [255, 0, 0, 255]);
+}
+
+#[test]
 fn point_cloud_layer_draws_lit_points() {
     let Some(ctx) = context() else { return };
     let layer = PointCloudLayer::new(PointCloudLayerProps {
