@@ -9,23 +9,36 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["fetch"]
+default = ["fetch", "parquet", "flatgeobuf"]
 # Load `data`, `image` and `iconAtlas` props from http(s) URLs.
 fetch = ["dep:ureq", "deck-gl-layers/fetch"]
+# `data` from Parquet and GeoParquet files.
+parquet = ["dep:parquet", "dep:arrow-select", "dep:bytes", "dep:arrow-schema"]
+# `data` from FlatGeobuf files.
+flatgeobuf = ["dep:flatgeobuf", "dep:geozero"]
 
 [dependencies]
 tracing = { workspace = true }
 deck-gl = { workspace = true }
 deck-gl-layers = { workspace = true }
 arrow-array = { workspace = true }
+arrow-schema = { workspace = true, optional = true }
 glam = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 csv = "1"
 ureq = { version = "3", optional = true }
+parquet = { workspace = true, optional = true }
+bytes = { version = "1", optional = true }
+arrow-select = { workspace = true, optional = true }
+flatgeobuf = { workspace = true, optional = true }
+geozero = { workspace = true, optional = true }
 
 [dev-dependencies]
 arrow-schema = { workspace = true }
+parquet = { workspace = true }
+flatgeobuf = { workspace = true }
+geozero = { workspace = true }
 luma-gl = { workspace = true }
 wgpu = { workspace = true }

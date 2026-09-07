@@ -19,6 +19,7 @@ use deck_gl_layers::{
 use serde_json::Value;
 
 use crate::data;
+use crate::geo;
 use crate::props::{convert, Props, TABLE_IDENTIFIER, TYPE_KEY};
 use crate::{ConvertOptions, JsonConverter, JsonError, Result};
 
@@ -569,6 +570,20 @@ fn load_rows(props: &mut Props, options: &ConvertOptions) -> Result<LayerData> {
         props.set_table();
         return Ok(LayerData::from_batch(batch.clone()));
     }
+    if let Some((source, format)) = geo_source(value) {
+        match geo::load_geo(source, format, options).map_err(|e| in_layer(props, e))? {
+            geo::GeoData::Table(batch) => {
+                props.set_table();
+                return Ok(LayerData::from_batch(batch));
+            }
+            geo::GeoData::Features(collection) => {
+                let rows: Vec<Value> = collection.features.iter().map(geo::feature_to_value).collect();
+                let length = rows.len();
+                props.set_rows(Arc::new(rows));
+                return Ok(LayerData::with_length(length));
+            }
+        }
+    }
     let rows = data::load_json(value, options)
         .and_then(data::rows_from_value)
         .map_err(|e| in_layer(props, e))?;
@@ -577,11 +592,31 @@ fn load_rows(props: &mut Props, options: &ConvertOptions) -> Result<LayerData> {
     Ok(LayerData::with_length(length))
 }
 
+/// A `data` source in one of the geospatial file formats, by its extension.
+fn geo_source(value: &Value) -> Option<(&str, geo::GeoFormat)> {
+    let source = value.as_str()?;
+    geo::GeoFormat::from_source(source).map(|format| (source, format))
+}
+
 fn load_geojson(props: &mut Props, options: &ConvertOptions) -> Result<Arc<FeatureCollection>> {
     let (collection, rows) = match props.get("data") {
         None | Some(Value::Null) => (Arc::new(FeatureCollection::default()), Arc::new(Vec::new())),
         Some(value) if table_for(props, value, options)?.is_some() => {
             return Err(props.error("data", "GeoJsonLayer takes GeoJSON, not an Arrow table"));
+        }
+        Some(value) if geo_source(value).is_some() => {
+            let Some((source, format)) = geo_source(value) else {
+                return Err(props.error("data", "not a geospatial file"));
+            };
+            match geo::load_geo(source, format, options).map_err(|e| in_layer(props, e))? {
+                geo::GeoData::Features(collection) => {
+                    let rows: Vec<Value> = collection.features.iter().map(geo::feature_to_value).collect();
+                    (collection, Arc::new(rows))
+                }
+                geo::GeoData::Table(_) => {
+                    return Err(props.error("data", "the Parquet file has no GeoParquet geometry column"))
+                }
+            }
         }
         Some(value) => data::load_json(value, options)
             .and_then(data::geojson_from_value)

@@ -50,7 +50,8 @@ Working today, headless and verified pixel by pixel in tests:
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
   example (4,600 extruded polygons) parses and renders in under 50 ms
 - JSON descriptions in the `@deck.gl/json` and pydeck format, with `@@=` accessor expressions
-  and data from inline rows, files, URLs or named Arrow tables. See [docs/json.md](docs/json.md).
+  and data from inline rows, files, URLs or named Arrow tables, including GeoJSON, CSV,
+  NDJSON, GeoParquet, Parquet and FlatGeobuf files. See [docs/json.md](docs/json.md).
 - A C API that takes JSON layers and Arrow tables through the Arrow C Data Interface, so a host
   in any language can feed columnar data without copying it.
 

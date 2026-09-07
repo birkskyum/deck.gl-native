@@ -41,6 +41,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arrow-array = "59"
 arrow-schema = "59"
 arrow-buffer = "59"
+arrow-select = "59"
+parquet = { version = "59", default-features = false, features = ["arrow", "snap", "zstd", "lz4", "brotli", "flate2-zlib-rs"] }
+flatgeobuf = { version = "6", default-features = false }
+geozero = { version = "0.15", default-features = false, features = ["with-geojson"] }
 earcutr = "0.5"
 fontdue = "0.9"
 serde = { version = "1", features = ["derive"] }

@@ -38,6 +38,7 @@ use serde_json::Value;
 
 pub mod data;
 pub mod expression;
+pub mod geo;
 mod layers;
 pub mod props;
 pub mod tabular;

@@ -65,6 +65,16 @@ extension; a header row names the fields and cells become numbers, booleans, `nu
 newline delimited JSON (`.ndjson`, `.jsonl`). URLs need the crate's default `fetch` feature. `image` (BitmapLayer) and `iconAtlas` (IconLayer) are PNG or JPEG files or URLs, and
 `iconMapping` is an inline object or a JSON file.
 
+### GeoParquet, Parquet and FlatGeobuf
+
+A `data` string ending in `.parquet` (or `.geoparquet`), or `.fgb`, is read as a file or
+URL. GeoParquet and FlatGeobuf files become GeoJSON features: a `GeoJsonLayer` draws them as
+they are, and every other layer sees one row per feature with `geometry` and `properties`
+for its accessors (`"getPosition": "@@=geometry.coordinates"`). Geometries are decoded from
+WKB, with Z and M coordinates and EWKB SRIDs accepted. A Parquet file without GeoParquet
+metadata is an Arrow table, read with `@@column:` accessors like the named tables below. The
+`parquet` and `flatgeobuf` cargo features of `deck-gl-json` (on by default) provide this.
+
 ## Arrow tables
 
 Large data should not go through JSON. A converter can carry named Arrow record batches, and
