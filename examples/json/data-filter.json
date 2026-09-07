@@ -1,0 +1,3241 @@
+{
+  "initialViewState": {
+    "longitude": -122.42,
+    "latitude": 37.775,
+    "zoom": 11.5
+  },
+  "layers": [
+    {
+      "@@type": "ScatterplotLayer",
+      "id": "filtered-points",
+      "data": [
+        {
+          "position": [
+            -122.43356,
+            37.79584
+          ],
+          "value": 65.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36871,
+            37.79431
+          ],
+          "value": 36.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36809,
+            37.79023
+          ],
+          "value": 3.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43885,
+            37.78142
+          ],
+          "value": 9.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4831,
+            37.79992
+          ],
+          "value": 12.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40966,
+            37.82186
+          ],
+          "value": 94.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46347,
+            37.7574
+          ],
+          "value": 97.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.3508,
+            37.79104
+          ],
+          "value": 29.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40349,
+            37.79121
+          ],
+          "value": 30.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40662,
+            37.75166
+          ],
+          "value": 58.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45059,
+            37.74695
+          ],
+          "value": 54.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40242,
+            37.78063
+          ],
+          "value": 20.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4416,
+            37.73946
+          ],
+          "value": 31.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4651,
+            37.75432
+          ],
+          "value": 30.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40205,
+            37.72677
+          ],
+          "value": 24.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47046,
+            37.7554
+          ],
+          "value": 87.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42539,
+            37.74307
+          ],
+          "value": 98.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38282,
+            37.80121
+          ],
+          "value": 75.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38849,
+            37.80925
+          ],
+          "value": 3.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45352,
+            37.72931
+          ],
+          "value": 57.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38901,
+            37.75131
+          ],
+          "value": 69.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46926,
+            37.74947
+          ],
+          "value": 45.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37939,
+            37.72576
+          ],
+          "value": 47.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42987,
+            37.76232
+          ],
+          "value": 70.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46682,
+            37.72727
+          ],
+          "value": 82.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43045,
+            37.81139
+          ],
+          "value": 66.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36753,
+            37.78076
+          ],
+          "value": 16.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40596,
+            37.78478
+          ],
+          "value": 76.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39331,
+            37.79668
+          ],
+          "value": 39.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4047,
+            37.76269
+          ],
+          "value": 44.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4898,
+            37.75776
+          ],
+          "value": 81.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39298,
+            37.75112
+          ],
+          "value": 41.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.46631,
+            37.81875
+          ],
+          "value": 95.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40091,
+            37.79546
+          ],
+          "value": 23.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41432,
+            37.81655
+          ],
+          "value": 58.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4204,
+            37.77883
+          ],
+          "value": 41.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45998,
+            37.80806
+          ],
+          "value": 95.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44045,
+            37.7349
+          ],
+          "value": 61.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42811,
+            37.76253
+          ],
+          "value": 90.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40635,
+            37.71988
+          ],
+          "value": 79.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45843,
+            37.79872
+          ],
+          "value": 10.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43293,
+            37.76382
+          ],
+          "value": 6.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41195,
+            37.79837
+          ],
+          "value": 34.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41887,
+            37.7753
+          ],
+          "value": 15.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3822,
+            37.79653
+          ],
+          "value": 2.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37696,
+            37.74161
+          ],
+          "value": 14.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42065,
+            37.81036
+          ],
+          "value": 36.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3685,
+            37.81356
+          ],
+          "value": 99.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47302,
+            37.78385
+          ],
+          "value": 8.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38343,
+            37.79603
+          ],
+          "value": 26.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4051,
+            37.75379
+          ],
+          "value": 2.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36598,
+            37.76178
+          ],
+          "value": 14.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43236,
+            37.77236
+          ],
+          "value": 52.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.34819,
+            37.76749
+          ],
+          "value": 69.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4233,
+            37.81124
+          ],
+          "value": 16.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41218,
+            37.73163
+          ],
+          "value": 77.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43768,
+            37.79986
+          ],
+          "value": 81.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.3483,
+            37.76976
+          ],
+          "value": 80.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39207,
+            37.72807
+          ],
+          "value": 22.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.46623,
+            37.77104
+          ],
+          "value": 2.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.3794,
+            37.78054
+          ],
+          "value": 25.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44696,
+            37.7201
+          ],
+          "value": 44.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.34846,
+            37.75201
+          ],
+          "value": 95.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44416,
+            37.79617
+          ],
+          "value": 22.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40841,
+            37.80062
+          ],
+          "value": 62.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36207,
+            37.74276
+          ],
+          "value": 47.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45993,
+            37.73101
+          ],
+          "value": 8.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45963,
+            37.72657
+          ],
+          "value": 78.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.41995,
+            37.73352
+          ],
+          "value": 17.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40905,
+            37.74144
+          ],
+          "value": 80.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.3717,
+            37.76831
+          ],
+          "value": 40.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.35727,
+            37.75824
+          ],
+          "value": 17.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39883,
+            37.7917
+          ],
+          "value": 90.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40963,
+            37.75349
+          ],
+          "value": 82.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.35725,
+            37.769
+          ],
+          "value": 35.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44692,
+            37.76846
+          ],
+          "value": 1.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.35818,
+            37.7662
+          ],
+          "value": 52.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37303,
+            37.75899
+          ],
+          "value": 87.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4035,
+            37.75053
+          ],
+          "value": 25.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4302,
+            37.80336
+          ],
+          "value": 58.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42297,
+            37.81377
+          ],
+          "value": 13.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38083,
+            37.75588
+          ],
+          "value": 45.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48423,
+            37.74647
+          ],
+          "value": 42.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37197,
+            37.754
+          ],
+          "value": 53.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43055,
+            37.77379
+          ],
+          "value": 44.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.418,
+            37.77844
+          ],
+          "value": 79.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39484,
+            37.81147
+          ],
+          "value": 72.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46176,
+            37.7631
+          ],
+          "value": 51.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48493,
+            37.75686
+          ],
+          "value": 10.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45613,
+            37.76394
+          ],
+          "value": 27.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41225,
+            37.73267
+          ],
+          "value": 56.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41532,
+            37.7178
+          ],
+          "value": 44.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.46217,
+            37.74729
+          ],
+          "value": 51.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43847,
+            37.73723
+          ],
+          "value": 53.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.49496,
+            37.78301
+          ],
+          "value": 69.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36595,
+            37.73422
+          ],
+          "value": 26.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.49052,
+            37.75371
+          ],
+          "value": 84.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40229,
+            37.79088
+          ],
+          "value": 44.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38564,
+            37.78796
+          ],
+          "value": 7.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45347,
+            37.72853
+          ],
+          "value": 89.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38271,
+            37.81689
+          ],
+          "value": 66.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37435,
+            37.8191
+          ],
+          "value": 96.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40554,
+            37.83249
+          ],
+          "value": 39.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.49736,
+            37.77977
+          ],
+          "value": 83.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39294,
+            37.80847
+          ],
+          "value": 51.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43833,
+            37.79749
+          ],
+          "value": 31.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4219,
+            37.76675
+          ],
+          "value": 55.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42976,
+            37.77795
+          ],
+          "value": 33.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45974,
+            37.74484
+          ],
+          "value": 6.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.35105,
+            37.77001
+          ],
+          "value": 97.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38821,
+            37.79392
+          ],
+          "value": 4.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41265,
+            37.74431
+          ],
+          "value": 13.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48576,
+            37.80188
+          ],
+          "value": 81.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42163,
+            37.79815
+          ],
+          "value": 91.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47896,
+            37.75345
+          ],
+          "value": 8.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.35947,
+            37.7926
+          ],
+          "value": 42.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.35213,
+            37.80054
+          ],
+          "value": 63.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41281,
+            37.75854
+          ],
+          "value": 85.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.3538,
+            37.79765
+          ],
+          "value": 45.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45082,
+            37.8128
+          ],
+          "value": 92.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42314,
+            37.79643
+          ],
+          "value": 52.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41813,
+            37.7948
+          ],
+          "value": 16.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3867,
+            37.78339
+          ],
+          "value": 31.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44303,
+            37.8242
+          ],
+          "value": 29.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4529,
+            37.77499
+          ],
+          "value": 34.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38122,
+            37.77842
+          ],
+          "value": 1.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42614,
+            37.73071
+          ],
+          "value": 18.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.49446,
+            37.78416
+          ],
+          "value": 10.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39848,
+            37.7392
+          ],
+          "value": 49.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39521,
+            37.74257
+          ],
+          "value": 50.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44948,
+            37.72002
+          ],
+          "value": 34.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38759,
+            37.73115
+          ],
+          "value": 63.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45798,
+            37.79494
+          ],
+          "value": 5.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40578,
+            37.78662
+          ],
+          "value": 74.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42111,
+            37.79923
+          ],
+          "value": 8.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38052,
+            37.72797
+          ],
+          "value": 67.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42765,
+            37.80394
+          ],
+          "value": 29.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44996,
+            37.781
+          ],
+          "value": 44.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42636,
+            37.83364
+          ],
+          "value": 97.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45689,
+            37.76635
+          ],
+          "value": 96.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43702,
+            37.80835
+          ],
+          "value": 0.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45955,
+            37.80299
+          ],
+          "value": 50.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4032,
+            37.81562
+          ],
+          "value": 0.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42208,
+            37.7929
+          ],
+          "value": 40.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4087,
+            37.77733
+          ],
+          "value": 30.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41357,
+            37.82065
+          ],
+          "value": 52.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.41979,
+            37.72635
+          ],
+          "value": 71.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.3847,
+            37.74921
+          ],
+          "value": 32.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38998,
+            37.77278
+          ],
+          "value": 72.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43015,
+            37.76517
+          ],
+          "value": 83.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37192,
+            37.74516
+          ],
+          "value": 73.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40891,
+            37.7543
+          ],
+          "value": 52.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.49125,
+            37.77349
+          ],
+          "value": 80.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39247,
+            37.73433
+          ],
+          "value": 89.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44658,
+            37.72942
+          ],
+          "value": 23.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39209,
+            37.77926
+          ],
+          "value": 36.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36363,
+            37.8086
+          ],
+          "value": 55.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.46288,
+            37.74085
+          ],
+          "value": 68.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42448,
+            37.77523
+          ],
+          "value": 79.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4206,
+            37.73245
+          ],
+          "value": 53.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43082,
+            37.76202
+          ],
+          "value": 73.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42029,
+            37.79137
+          ],
+          "value": 26.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42458,
+            37.74805
+          ],
+          "value": 74.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36582,
+            37.7686
+          ],
+          "value": 38.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48393,
+            37.78152
+          ],
+          "value": 76.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46639,
+            37.74274
+          ],
+          "value": 7.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39639,
+            37.79917
+          ],
+          "value": 74.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43971,
+            37.81759
+          ],
+          "value": 1.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38246,
+            37.78657
+          ],
+          "value": 67.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44278,
+            37.7289
+          ],
+          "value": 29.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.47288,
+            37.77076
+          ],
+          "value": 46.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36578,
+            37.81344
+          ],
+          "value": 19.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.34524,
+            37.76705
+          ],
+          "value": 1.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48829,
+            37.78885
+          ],
+          "value": 96.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45841,
+            37.78471
+          ],
+          "value": 21.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38627,
+            37.76577
+          ],
+          "value": 58.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38449,
+            37.80877
+          ],
+          "value": 95.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37249,
+            37.81522
+          ],
+          "value": 50.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37043,
+            37.74217
+          ],
+          "value": 23.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37647,
+            37.74993
+          ],
+          "value": 2.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36532,
+            37.77595
+          ],
+          "value": 45.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42938,
+            37.79632
+          ],
+          "value": 34.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44884,
+            37.82533
+          ],
+          "value": 0.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41967,
+            37.72004
+          ],
+          "value": 12.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36105,
+            37.7524
+          ],
+          "value": 90.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43179,
+            37.81047
+          ],
+          "value": 39.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36013,
+            37.77465
+          ],
+          "value": 36.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45681,
+            37.78875
+          ],
+          "value": 4.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3628,
+            37.80769
+          ],
+          "value": 28.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.3842,
+            37.7632
+          ],
+          "value": 26.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45391,
+            37.7732
+          ],
+          "value": 37.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.34942,
+            37.75966
+          ],
+          "value": 81.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47072,
+            37.73298
+          ],
+          "value": 94.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48303,
+            37.75951
+          ],
+          "value": 4.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4258,
+            37.73496
+          ],
+          "value": 75.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44568,
+            37.7497
+          ],
+          "value": 4.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39506,
+            37.76549
+          ],
+          "value": 47.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44363,
+            37.80223
+          ],
+          "value": 73.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38066,
+            37.77046
+          ],
+          "value": 65.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43828,
+            37.81753
+          ],
+          "value": 39.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40443,
+            37.79594
+          ],
+          "value": 20.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37433,
+            37.75143
+          ],
+          "value": 22.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.35526,
+            37.74173
+          ],
+          "value": 45.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39812,
+            37.79524
+          ],
+          "value": 9.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43286,
+            37.79017
+          ],
+          "value": 23.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42309,
+            37.82022
+          ],
+          "value": 88.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42011,
+            37.73645
+          ],
+          "value": 41.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46733,
+            37.76943
+          ],
+          "value": 33.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38199,
+            37.78701
+          ],
+          "value": 96.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38108,
+            37.80527
+          ],
+          "value": 63.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.3964,
+            37.75384
+          ],
+          "value": 27.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41952,
+            37.81293
+          ],
+          "value": 44.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.35113,
+            37.75923
+          ],
+          "value": 87.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40613,
+            37.77647
+          ],
+          "value": 71.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37746,
+            37.74984
+          ],
+          "value": 58.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37119,
+            37.77504
+          ],
+          "value": 92.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38701,
+            37.72565
+          ],
+          "value": 97.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41975,
+            37.79481
+          ],
+          "value": 15.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48378,
+            37.76806
+          ],
+          "value": 94.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43109,
+            37.72748
+          ],
+          "value": 76.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.47586,
+            37.7868
+          ],
+          "value": 4.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.41242,
+            37.74666
+          ],
+          "value": 92.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44624,
+            37.74881
+          ],
+          "value": 12.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4207,
+            37.82286
+          ],
+          "value": 69.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40424,
+            37.78531
+          ],
+          "value": 52.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46215,
+            37.7564
+          ],
+          "value": 22.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42642,
+            37.77136
+          ],
+          "value": 30.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.49406,
+            37.78936
+          ],
+          "value": 64.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37994,
+            37.74741
+          ],
+          "value": 23.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41859,
+            37.8338
+          ],
+          "value": 70.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42406,
+            37.78329
+          ],
+          "value": 49.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4431,
+            37.74041
+          ],
+          "value": 25.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45723,
+            37.7249
+          ],
+          "value": 22.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37569,
+            37.78242
+          ],
+          "value": 42.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43427,
+            37.75066
+          ],
+          "value": 79.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42378,
+            37.73247
+          ],
+          "value": 20.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37723,
+            37.76869
+          ],
+          "value": 82.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41558,
+            37.80303
+          ],
+          "value": 76.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4412,
+            37.83122
+          ],
+          "value": 49.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40585,
+            37.80118
+          ],
+          "value": 41.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45855,
+            37.72464
+          ],
+          "value": 14.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44823,
+            37.79218
+          ],
+          "value": 97.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40884,
+            37.78563
+          ],
+          "value": 6.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47793,
+            37.81032
+          ],
+          "value": 88.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42844,
+            37.71543
+          ],
+          "value": 93.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43604,
+            37.79771
+          ],
+          "value": 93.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42032,
+            37.76429
+          ],
+          "value": 66.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45448,
+            37.80035
+          ],
+          "value": 33.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.41797,
+            37.77781
+          ],
+          "value": 28.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46538,
+            37.82213
+          ],
+          "value": 12.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38537,
+            37.76892
+          ],
+          "value": 35.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38926,
+            37.72601
+          ],
+          "value": 43.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36888,
+            37.78757
+          ],
+          "value": 37.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39002,
+            37.76223
+          ],
+          "value": 36.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40917,
+            37.7687
+          ],
+          "value": 41.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39413,
+            37.72638
+          ],
+          "value": 4.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40095,
+            37.77826
+          ],
+          "value": 92.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42297,
+            37.82682
+          ],
+          "value": 89.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44161,
+            37.80153
+          ],
+          "value": 95.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44963,
+            37.7544
+          ],
+          "value": 71.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43661,
+            37.80379
+          ],
+          "value": 0.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41735,
+            37.7176
+          ],
+          "value": 63.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40862,
+            37.77174
+          ],
+          "value": 23.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.49537,
+            37.78411
+          ],
+          "value": 95.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44956,
+            37.79467
+          ],
+          "value": 43.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.49508,
+            37.77737
+          ],
+          "value": 18.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.39826,
+            37.72623
+          ],
+          "value": 82.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41132,
+            37.72872
+          ],
+          "value": 32.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43986,
+            37.8077
+          ],
+          "value": 78.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38954,
+            37.78769
+          ],
+          "value": 75.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41966,
+            37.79026
+          ],
+          "value": 3.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.46211,
+            37.76389
+          ],
+          "value": 98.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36234,
+            37.73514
+          ],
+          "value": 26.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39908,
+            37.78439
+          ],
+          "value": 49.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43304,
+            37.73616
+          ],
+          "value": 23.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.47324,
+            37.79858
+          ],
+          "value": 67.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42091,
+            37.71979
+          ],
+          "value": 66.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36822,
+            37.81296
+          ],
+          "value": 29.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.46349,
+            37.76005
+          ],
+          "value": 73.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40782,
+            37.80334
+          ],
+          "value": 24.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37814,
+            37.82133
+          ],
+          "value": 57.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44265,
+            37.8085
+          ],
+          "value": 99.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.45748,
+            37.77367
+          ],
+          "value": 80.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.46432,
+            37.72596
+          ],
+          "value": 10.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48971,
+            37.78357
+          ],
+          "value": 84.1,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40654,
+            37.76882
+          ],
+          "value": 29.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39513,
+            37.79279
+          ],
+          "value": 97.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48518,
+            37.74611
+          ],
+          "value": 37.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38515,
+            37.74503
+          ],
+          "value": 26.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40683,
+            37.71754
+          ],
+          "value": 10.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.47054,
+            37.74817
+          ],
+          "value": 21.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4399,
+            37.79157
+          ],
+          "value": 20.4,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42186,
+            37.82143
+          ],
+          "value": 65.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4176,
+            37.78113
+          ],
+          "value": 32.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43461,
+            37.75176
+          ],
+          "value": 31.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.39993,
+            37.82623
+          ],
+          "value": 54.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3971,
+            37.7824
+          ],
+          "value": 39.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47929,
+            37.76014
+          ],
+          "value": 9.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38643,
+            37.81786
+          ],
+          "value": 41.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42899,
+            37.80755
+          ],
+          "value": 95.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44242,
+            37.81674
+          ],
+          "value": 35.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48275,
+            37.80296
+          ],
+          "value": 99.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44271,
+            37.79512
+          ],
+          "value": 72.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41828,
+            37.77941
+          ],
+          "value": 90.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.48269,
+            37.80005
+          ],
+          "value": 40.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38076,
+            37.74765
+          ],
+          "value": 16.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.36232,
+            37.77915
+          ],
+          "value": 64.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40037,
+            37.76539
+          ],
+          "value": 62.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45814,
+            37.80591
+          ],
+          "value": 14.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43169,
+            37.81737
+          ],
+          "value": 92.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37765,
+            37.80154
+          ],
+          "value": 80.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.3861,
+            37.76949
+          ],
+          "value": 12.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.34783,
+            37.75425
+          ],
+          "value": 48.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.34912,
+            37.794
+          ],
+          "value": 38.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36936,
+            37.74825
+          ],
+          "value": 82.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.38305,
+            37.81996
+          ],
+          "value": 22.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.47922,
+            37.80617
+          ],
+          "value": 82.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40511,
+            37.80057
+          ],
+          "value": 40.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.468,
+            37.77083
+          ],
+          "value": 12.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41877,
+            37.82608
+          ],
+          "value": 89.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36345,
+            37.78649
+          ],
+          "value": 75.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.35063,
+            37.78803
+          ],
+          "value": 11.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4669,
+            37.74895
+          ],
+          "value": 62.7,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43749,
+            37.81149
+          ],
+          "value": 58.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47654,
+            37.79691
+          ],
+          "value": 44.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.43104,
+            37.77847
+          ],
+          "value": 61.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45775,
+            37.77692
+          ],
+          "value": 76.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41011,
+            37.7351
+          ],
+          "value": 18.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.44516,
+            37.77829
+          ],
+          "value": 12.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44141,
+            37.78267
+          ],
+          "value": 44.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43572,
+            37.77423
+          ],
+          "value": 63.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36192,
+            37.80039
+          ],
+          "value": 77.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43812,
+            37.77399
+          ],
+          "value": 50.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47474,
+            37.81562
+          ],
+          "value": 13.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37149,
+            37.72816
+          ],
+          "value": 73.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40637,
+            37.75076
+          ],
+          "value": 98.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.49619,
+            37.778
+          ],
+          "value": 91.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.38479,
+            37.82087
+          ],
+          "value": 93.1,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.37766,
+            37.78922
+          ],
+          "value": 75.6,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.37994,
+            37.82273
+          ],
+          "value": 27.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40816,
+            37.75417
+          ],
+          "value": 50.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.38881,
+            37.76179
+          ],
+          "value": 26.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46403,
+            37.77372
+          ],
+          "value": 3.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40704,
+            37.79693
+          ],
+          "value": 93.6,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45156,
+            37.72368
+          ],
+          "value": 16.9,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41425,
+            37.75513
+          ],
+          "value": 53.1,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.45065,
+            37.74781
+          ],
+          "value": 87.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.47587,
+            37.75947
+          ],
+          "value": 88.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.35847,
+            37.81153
+          ],
+          "value": 63.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.47485,
+            37.80804
+          ],
+          "value": 26.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36084,
+            37.77228
+          ],
+          "value": 36.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41524,
+            37.73527
+          ],
+          "value": 17.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42069,
+            37.76183
+          ],
+          "value": 82.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42143,
+            37.82296
+          ],
+          "value": 98.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.47452,
+            37.74989
+          ],
+          "value": 31.3,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40566,
+            37.77512
+          ],
+          "value": 14.9,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.45824,
+            37.74872
+          ],
+          "value": 51.3,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39755,
+            37.7617
+          ],
+          "value": 22.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42666,
+            37.76765
+          ],
+          "value": 0.3,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43559,
+            37.79046
+          ],
+          "value": 35.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.4104,
+            37.82024
+          ],
+          "value": 58.9,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.40251,
+            37.82044
+          ],
+          "value": 47.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36999,
+            37.8185
+          ],
+          "value": 24.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40573,
+            37.78998
+          ],
+          "value": 63.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37237,
+            37.73661
+          ],
+          "value": 40.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42075,
+            37.78141
+          ],
+          "value": 64.5,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46267,
+            37.76144
+          ],
+          "value": 64.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.49084,
+            37.7951
+          ],
+          "value": 73.4,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4193,
+            37.83203
+          ],
+          "value": 4.4,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.46873,
+            37.76748
+          ],
+          "value": 23.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.35574,
+            37.79399
+          ],
+          "value": 1.2,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.49182,
+            37.75669
+          ],
+          "value": 14.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40103,
+            37.81945
+          ],
+          "value": 50.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4643,
+            37.73297
+          ],
+          "value": 17.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.43558,
+            37.80562
+          ],
+          "value": 4.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.367,
+            37.74099
+          ],
+          "value": 71.5,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.34838,
+            37.7772
+          ],
+          "value": 74.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.48558,
+            37.78619
+          ],
+          "value": 45.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41619,
+            37.79425
+          ],
+          "value": 23.2,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.37616,
+            37.78339
+          ],
+          "value": 75.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.44425,
+            37.72308
+          ],
+          "value": 71.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.42582,
+            37.81943
+          ],
+          "value": 43.6,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.4065,
+            37.73286
+          ],
+          "value": 26.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.4681,
+            37.72911
+          ],
+          "value": 21.7,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.41298,
+            37.76993
+          ],
+          "value": 26.0,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.41414,
+            37.82655
+          ],
+          "value": 94.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.42108,
+            37.74071
+          ],
+          "value": 88.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.43807,
+            37.80084
+          ],
+          "value": 90.8,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.46424,
+            37.73844
+          ],
+          "value": 66.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.36702,
+            37.76959
+          ],
+          "value": 84.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44335,
+            37.72242
+          ],
+          "value": 43.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42935,
+            37.73026
+          ],
+          "value": 30.8,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.40543,
+            37.821
+          ],
+          "value": 7.8,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.39488,
+            37.76287
+          ],
+          "value": 2.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.36109,
+            37.81092
+          ],
+          "value": 34.5,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.41169,
+            37.78291
+          ],
+          "value": 4.2,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.44191,
+            37.7303
+          ],
+          "value": 69.7,
+          "kind": "bus"
+        },
+        {
+          "position": [
+            -122.42166,
+            37.75967
+          ],
+          "value": 59.0,
+          "kind": "tram"
+        },
+        {
+          "position": [
+            -122.46611,
+            37.81605
+          ],
+          "value": 82.0,
+          "kind": "metro"
+        },
+        {
+          "position": [
+            -122.40446,
+            37.76527
+          ],
+          "value": 86.8,
+          "kind": "bus"
+        }
+      ],
+      "getPosition": "@@=position",
+      "getFillColor": "@@=[value * 2.55, 120, 255 - value * 2.55]",
+      "getRadius": 120,
+      "radiusMinPixels": 2,
+      "pickable": true,
+      "extensions": [
+        {
+          "@@type": "DataFilterExtension",
+          "filterSize": 1,
+          "categorySize": 1
+        }
+      ],
+      "getFilterValue": "@@=value",
+      "filterRange": [
+        20,
+        80
+      ],
+      "filterSoftRange": [
+        30,
+        70
+      ],
+      "getFilterCategory": "@@=kind",
+      "filterCategories": [
+        "bus",
+        "metro"
+      ]
+    }
+  ]
+}

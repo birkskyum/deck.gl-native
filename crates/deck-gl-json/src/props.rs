@@ -1,12 +1,16 @@
 //! Typed readers for the camelCase props of a JSON layer object, including `@@=` accessors.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use deck_gl::glam::DMat4;
 use deck_gl::wgpu;
-use deck_gl::{Accessor, Color, CoordinateSystem, CullMode, LayerProps, Material, RenderParameters, Unit};
+use deck_gl::{
+    Accessor, Color, CoordinateSystem, CullMode, Extensions, LayerExtension, LayerProps, Material,
+    RenderParameters, Unit,
+};
+use deck_gl_layers::{DataFilterExtension, FilterCategories, FilterValues};
 use serde_json::{Map, Value};
 
 use crate::expression::Expr;
@@ -371,7 +375,237 @@ impl<'a> Props<'a> {
                 (index >= 0.0).then_some(index as u32)
             }
         };
+        base.extensions = self.extensions()?;
         Ok(base)
+    }
+
+    /// deck.gl's `extensions` prop: `{"@@type": "DataFilterExtension", ...options}` objects,
+    /// with the extension's props (`getFilterValue`, `filterRange`, ...) on the layer itself.
+    fn extensions(&self) -> Result<Extensions> {
+        let list = match self.get("extensions") {
+            None | Some(Value::Null) => return Ok(Extensions::default()),
+            Some(Value::Array(list)) => list,
+            Some(other) => {
+                return Err(self.error(
+                    "extensions",
+                    format!("expected an array, got {}", describe(other)),
+                ))
+            }
+        };
+        let mut extensions: Vec<Arc<dyn LayerExtension>> = Vec::new();
+        for entry in list {
+            let (kind, options) = match entry {
+                Value::String(name) => (
+                    name.trim_start_matches(CONSTANT_IDENTIFIER).to_string(),
+                    Map::new(),
+                ),
+                Value::Object(map) => (
+                    map.get(TYPE_KEY)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    map.clone(),
+                ),
+                other => {
+                    return Err(self.error(
+                        "extensions",
+                        format!("expected an object with {TYPE_KEY}, got {}", describe(other)),
+                    ))
+                }
+            };
+            match kind.as_str() {
+                "DataFilterExtension" => extensions.push(Arc::new(self.data_filter_extension(&options)?)),
+                "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
+                other => self.warn(format!(
+                    "extension `{other}` is not supported yet and was ignored"
+                )),
+            }
+        }
+        Ok(Extensions::new(extensions))
+    }
+
+    fn data_filter_extension(&self, options: &Map<String, Value>) -> Result<DataFilterExtension> {
+        let option = |key: &str, default: u32| -> Result<u32> {
+            match options.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(value) => convert::number(value)
+                    .map(|n| n as u32)
+                    .map_err(|m| self.error("extensions", format!("DataFilterExtension {key}: {m}"))),
+            }
+        };
+        for key in options.keys() {
+            if !["filterSize", "categorySize", "fp64", "countItems", TYPE_KEY].contains(&key.as_str()) {
+                self.warn(format!(
+                    "DataFilterExtension option `{key}` is unknown and was ignored"
+                ));
+            }
+        }
+        for key in ["fp64", "countItems"] {
+            if options.get(key).and_then(Value::as_bool) == Some(true) {
+                self.warn(format!(
+                    "DataFilterExtension `{key}` is not supported yet and was ignored"
+                ));
+            }
+        }
+        let filter_size = option("filterSize", 1)?;
+        let category_size = option("categorySize", 0)?;
+
+        let get_filter_value = match filter_size {
+            0 | 1 => {
+                FilterValues::One(self.accessor("getFilterValue", &Accessor::Constant(0.0), convert::f32)?)
+            }
+            2 => FilterValues::Two(self.accessor(
+                "getFilterValue",
+                &Accessor::Constant([0.0; 2]),
+                convert::vec2,
+            )?),
+            3 => FilterValues::Three(self.accessor(
+                "getFilterValue",
+                &Accessor::Constant([0.0; 3]),
+                convert::vec3,
+            )?),
+            4 => FilterValues::Four(self.accessor(
+                "getFilterValue",
+                &Accessor::Constant([0.0; 4]),
+                convert::vec4,
+            )?),
+            other => {
+                return Err(self.error(
+                    "extensions",
+                    format!("DataFilterExtension filterSize {other} is not 0 to 4"),
+                ))
+            }
+        };
+        let ranges = |key: &str| -> Result<Option<Vec<[f32; 2]>>> {
+            let pair = |value: &Value| convert::numbers(value, 2, 2).map(|n| [n[0] as f32, n[1] as f32]);
+            match self.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Array(items)) if items.first().is_some_and(Value::is_array) => items
+                    .iter()
+                    .map(pair)
+                    .collect::<std::result::Result<Vec<_>, String>>()
+                    .map(Some)
+                    .map_err(|m| self.error(key, m)),
+                Some(value) => pair(value).map(|p| Some(vec![p])).map_err(|m| self.error(key, m)),
+            }
+        };
+        let filter_range = ranges("filterRange")?.unwrap_or_else(|| vec![[-1.0, 1.0]]);
+        let filter_soft_range = ranges("filterSoftRange")?;
+        let (get_filter_category, filter_categories) = match category_size {
+            0 => (None, vec![vec![0]]),
+            1..=4 => {
+                let (categories, shown) = self.filter_categories(category_size as usize)?;
+                (Some(categories), shown)
+            }
+            other => {
+                return Err(self.error(
+                    "extensions",
+                    format!("DataFilterExtension categorySize {other} is not 0 to 4"),
+                ))
+            }
+        };
+        let defaults = DataFilterExtension::default();
+        Ok(DataFilterExtension {
+            get_filter_value,
+            filter_range,
+            filter_soft_range,
+            filter_enabled: self.bool("filterEnabled", defaults.filter_enabled)?,
+            filter_transform_size: self.bool("filterTransformSize", defaults.filter_transform_size)?,
+            filter_transform_color: self.bool("filterTransformColor", defaults.filter_transform_color)?,
+            get_filter_category,
+            filter_categories,
+        })
+    }
+
+    /// `getFilterCategory` and `filterCategories` with names or numbers as categories, mapped
+    /// to keys in order of appearance per channel, as deck.gl does.
+    fn filter_categories(&self, size: usize) -> Result<(FilterCategories, Vec<Vec<u32>>)> {
+        fn name(value: &Value) -> std::result::Result<String, String> {
+            match value {
+                Value::String(s) => Ok(s.clone()),
+                Value::Number(n) => Ok(n.to_string()),
+                Value::Bool(b) => Ok(b.to_string()),
+                other => Err(format!(
+                    "expected a category name or number, got {}",
+                    describe(other)
+                )),
+            }
+        }
+        fn names(value: &Value) -> std::result::Result<Vec<String>, String> {
+            match value {
+                Value::Array(items) => items.iter().map(name).collect(),
+                other => Ok(vec![name(other)?]),
+            }
+        }
+        let accessor = self.accessor(
+            "getFilterCategory",
+            &Accessor::Constant(vec!["0".to_string()]),
+            names,
+        )?;
+        let mut maps: Vec<HashMap<String, u32>> = vec![HashMap::new(); size];
+        let mut key_of = |channel: usize, name: &str| -> u32 {
+            let map = &mut maps[channel];
+            let next = map.len() as u32;
+            *map.entry(name.to_string()).or_insert(next)
+        };
+        let keys_of = |key_of: &mut dyn FnMut(usize, &str) -> u32, names: &[String]| -> [u32; 4] {
+            let mut keys = [0u32; 4];
+            for (channel, key) in keys.iter_mut().enumerate().take(size) {
+                *key = key_of(channel, names.get(channel).map(String::as_str).unwrap_or(""));
+            }
+            keys
+        };
+        let per_row: Vec<[u32; 4]> = match &accessor {
+            Accessor::Column(_) => {
+                return Err(self.error(
+                    "getFilterCategory",
+                    "category filters need `data` rows, not an Arrow table",
+                ))
+            }
+            Accessor::Constant(constant) => vec![keys_of(&mut key_of, constant)],
+            Accessor::Func(f) => (0..self.rows().map_or(0, |rows| rows.len()))
+                .map(|i| keys_of(&mut key_of, &f(i)))
+                .collect(),
+        };
+        let shown_key = "filterCategories";
+        let mut shown: Vec<Vec<u32>> = vec![Vec::new(); size];
+        match self.get(shown_key) {
+            None | Some(Value::Null) => shown[0].push(key_of(0, "0")),
+            Some(value) => {
+                let lists: Vec<Vec<String>> = match value {
+                    Value::Array(items) if size > 1 && items.iter().all(Value::is_array) => items
+                        .iter()
+                        .map(names)
+                        .collect::<std::result::Result<_, String>>()
+                        .map_err(|m| self.error(shown_key, m))?,
+                    other => vec![names(other).map_err(|m| self.error(shown_key, m))?],
+                };
+                for (channel, list) in lists.iter().enumerate().take(size) {
+                    shown[channel] = list.iter().map(|n| key_of(channel, n)).collect();
+                }
+            }
+        }
+        let constant = matches!(accessor, Accessor::Constant(_)) || per_row.is_empty();
+        let first = per_row.first().copied().unwrap_or_default();
+        let per_row = Arc::new(per_row);
+        let last = per_row.len().saturating_sub(1);
+        let categories = match size {
+            1 if constant => FilterCategories::One(Accessor::Constant(first[0])),
+            1 => FilterCategories::One(Accessor::func(move |i| per_row[i.min(last)][0])),
+            2 if constant => FilterCategories::Two(Accessor::Constant([first[0], first[1]])),
+            2 => FilterCategories::Two(Accessor::func(move |i| {
+                let k = per_row[i.min(last)];
+                [k[0], k[1]]
+            })),
+            3 if constant => FilterCategories::Three(Accessor::Constant([first[0], first[1], first[2]])),
+            3 => FilterCategories::Three(Accessor::func(move |i| {
+                let k = per_row[i.min(last)];
+                [k[0], k[1], k[2]]
+            })),
+            _ if constant => FilterCategories::Four(Accessor::Constant(first)),
+            _ => FilterCategories::Four(Accessor::func(move |i| per_row[i.min(last)])),
+        };
+        Ok((categories, shown))
     }
 
     fn coordinate_system(&self) -> Result<CoordinateSystem> {
@@ -628,6 +862,11 @@ pub mod convert {
     pub fn vec2(value: &Value) -> Result<[f32; 2], String> {
         let v = numbers(value, 2, 2)?;
         Ok([v[0] as f32, v[1] as f32])
+    }
+
+    pub fn vec4(value: &Value) -> Result<[f32; 4], String> {
+        let n = numbers(value, 4, 4)?;
+        Ok([n[0] as f32, n[1] as f32, n[2] as f32, n[3] as f32])
     }
 
     pub fn vec3(value: &Value) -> Result<[f32; 3], String> {

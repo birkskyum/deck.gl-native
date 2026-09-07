@@ -141,11 +141,37 @@ Other effect types produce a warning and are skipped.
 }
 ```
 
+## Extensions
+
+deck.gl's `extensions` prop takes a list of extension objects, and the extension's own props
+sit on the layer, as in pydeck:
+
+```json
+{
+  "@@type": "ScatterplotLayer",
+  "data": "...",
+  "extensions": [{"@@type": "DataFilterExtension", "filterSize": 1, "categorySize": 1}],
+  "getFilterValue": "@@=value",
+  "filterRange": [20, 80],
+  "filterSoftRange": [30, 70],
+  "getFilterCategory": "@@=kind",
+  "filterCategories": ["bus", "metro"]
+}
+```
+
+| Extension | Options and props |
+| --- | --- |
+| `DataFilterExtension` | options `filterSize` (0 to 4 values per object) and `categorySize` (0 to 4 categories per object); props `getFilterValue`, `filterRange` (`[min, max]`, or one pair per value), `filterSoftRange`, `filterEnabled`, `filterTransformSize`, `filterTransformColor`, `getFilterCategory` (names or numbers, mapped to keys in order of appearance), `filterCategories` (the categories shown, one list per category channel). `fp64` and `countItems` are accepted and ignored. `examples/json/data-filter.json` filters points by value and kind. |
+
+Extension attributes need a layer on the attribute manager (scatterplot, line, arc, point
+cloud, icon, column); the other layers report an error for them. See
+[docs/extensions.md](extensions.md) for the shader hook convention behind this.
+
 ## Supported layers and props
 
 | Layer | Props |
 | --- | --- |
-| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `autoHighlight`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`), `parameters` (`depthTest`, `depthWriteEnabled`, `depthCompare`, `cullMode`, `blend`, `blendColorOperation`, `blendColorSrcFactor`, `blendColorDstFactor`, `blendAlphaOperation`, `blendAlphaSrcFactor`, `blendAlphaDstFactor`, with luma.gl's WebGPU names) |
+| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `autoHighlight`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`), `parameters` (`depthTest`, `depthWriteEnabled`, `depthCompare`, `cullMode`, `blend`, `blendColorOperation`, `blendColorSrcFactor`, `blendColorDstFactor`, `blendAlphaOperation`, `blendAlphaSrcFactor`, `blendAlphaDstFactor`, with luma.gl's WebGPU names), `extensions` (see [Extensions](#extensions)) |
 | `ScatterplotLayer` | `radiusUnits`, `radiusScale`, `radiusMinPixels`, `radiusMaxPixels`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `stroked`, `filled`, `billboard`, `antialiasing`, `getPosition`, `getRadius`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPixelOffset` |
 | `LineLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getColor`, `getWidth` |
 | `ArcLayer` | `greatCircle`, `numSegments`, `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getSourceColor`, `getTargetColor`, `getWidth`, `getHeight`, `getTilt` |
@@ -170,6 +196,6 @@ Other effect types produce a warning and are skipped.
 | `IconLayer` | `iconAtlas`, `iconMapping`, `sizeUnits`, `sizeScale`, `sizeMinPixels`, `sizeMaxPixels`, `billboard`, `alphaCutoff`, `getPosition`, `getIcon`, `getColor`, `getSize`, `getAngle`, `getPixelOffset` |
 | `BitmapLayer` | `image`, `bounds` (`[left, bottom, right, top]` or four corners), `desaturate`, `transparentColor`, `tintColor` |
 
-Props deck.gl accepts but this port does not have yet (`extensions`, `transitions`, `pointType`,
-...) produce a warning and are skipped, as are layer types that do not exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
+Props deck.gl accepts but this port does not have yet (`transitions`, `pointType`, ...)
+produce a warning and are skipped, as are layer types that do not exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
 have no meaning in a static description.

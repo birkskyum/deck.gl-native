@@ -17,12 +17,13 @@ use deck_gl::{
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
-    BitmapLayerProps, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps, GeoJsonLayer,
-    GeoJsonLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps,
-    HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer,
-    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
-    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
+    BitmapLayerProps, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps,
+    DataFilterExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer, GridLayerProps,
+    HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas,
+    IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
+    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -2375,4 +2376,88 @@ fn extensions_add_attributes_varyings_uniforms_and_hook_code() {
     deck.set_layers(vec![tinted_circles(1.0)]);
     let snapshot = deck.snapshot(Some(wgpu::Color::TRANSPARENT)).expect("snapshot");
     assert_pixel(&snapshot.rgba, c - 16, c, [200, 100, 0, 255], 2);
+}
+
+fn filtered_circles(filter: DataFilterExtension) -> Box<dyn Layer> {
+    let d = 0.0007;
+    Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(filter),
+            ..LayerProps::new("filtered")
+        },
+        data: LayerData::with_length(3),
+        get_position: Accessor::func(move |i| [CENTER[0] + (i as f64 - 1.0) * d, CENTER[1], 0.0]),
+        get_radius: Accessor::Constant(6.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    }))
+}
+
+#[test]
+fn data_filter_extension_hides_and_fades_objects() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    // values 0, 1 and 2 with the range [0.5, 1.5]: only the middle circle is drawn
+    let value = Accessor::func(|i| i as f32);
+    let pixels = render(
+        &ctx,
+        vec![filtered_circles(DataFilterExtension::new(
+            value.clone(),
+            [0.5, 1.5],
+        ))],
+    );
+    assert_pixel(&pixels, c - 16, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [0, 0, 0, 0], 0);
+
+    // a soft range of [1, 1] inside [-1, 3] gives the outer circles a filter value of 0.5:
+    // half the opacity with the colour transform
+    let faded = DataFilterExtension {
+        filter_soft_range: Some(vec![[1.0, 1.0]]),
+        filter_transform_size: false,
+        ..DataFilterExtension::new(value.clone(), [-1.0, 3.0])
+    };
+    let pixels = render(&ctx, vec![filtered_circles(faded.clone())]);
+    assert_pixel(&pixels, c - 16, c, [128, 0, 0, 128], 2);
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [128, 0, 0, 128], 2);
+    // or half the radius with the size transform: 3 instead of 6 pixels
+    let shrunk = DataFilterExtension {
+        filter_transform_size: true,
+        filter_transform_color: false,
+        ..faded
+    };
+    let pixels = render(&ctx, vec![filtered_circles(shrunk)]);
+    assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c - 16 + 5, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c + 5, c, [255, 0, 0, 255], 0);
+
+    // disabled: everything is drawn
+    let pixels = render(
+        &ctx,
+        vec![filtered_circles(DataFilterExtension {
+            filter_enabled: false,
+            ..DataFilterExtension::new(value, [0.5, 1.5])
+        })],
+    );
+    assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
+}
+
+#[test]
+fn data_filter_extension_keeps_the_selected_categories() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let filter = DataFilterExtension {
+        get_filter_category: Some(FilterCategories::One(Accessor::func(|i| i as u32))),
+        filter_categories: vec![vec![0, 2]],
+        ..Default::default()
+    };
+    assert_eq!(filter.count_filtered(&LayerData::with_length(3)).unwrap(), 2);
+    let pixels = render(&ctx, vec![filtered_circles(filter)]);
+    assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
 }

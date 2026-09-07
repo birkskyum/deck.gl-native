@@ -301,6 +301,34 @@ pub fn resolve_vec2(data: &LayerData, accessor: &Accessor<[f32; 2]>) -> Result<V
 }
 
 /// Resolve RGBA colors. Columns must be `FixedSizeList<numeric>` of width 3 or 4 with
+/// Resolve 3-component vectors from a `FixedSizeList` column of width 3.
+pub fn resolve_vec3(data: &LayerData, accessor: &Accessor<[f32; 3]>) -> Result<Vec<[f32; 3]>> {
+    resolve_with(data, accessor, |column| {
+        let (values, width) = fixed_size_list_to_f64(column.as_ref())?;
+        if width != 3 {
+            return Err(DeckError::Data(format!("expected 3 components, got {width}")));
+        }
+        Ok(values
+            .chunks(3)
+            .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
+            .collect())
+    })
+}
+
+/// Resolve 4-component vectors from a `FixedSizeList` column of width 4.
+pub fn resolve_vec4(data: &LayerData, accessor: &Accessor<[f32; 4]>) -> Result<Vec<[f32; 4]>> {
+    resolve_with(data, accessor, |column| {
+        let (values, width) = fixed_size_list_to_f64(column.as_ref())?;
+        if width != 4 {
+            return Err(DeckError::Data(format!("expected 4 components, got {width}")));
+        }
+        Ok(values
+            .chunks(4)
+            .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32])
+            .collect())
+    })
+}
+
 /// components in 0..255. Missing alpha defaults to 255.
 pub fn resolve_colors(data: &LayerData, accessor: &Accessor<Color>) -> Result<Vec<Color>> {
     resolve_with(data, accessor, |column| {

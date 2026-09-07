@@ -10,6 +10,7 @@ use deck_gl::{
 };
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
+use deck_gl_layers::DataFilterExtension;
 use serde_json::{json, Value};
 
 fn props_with_rows(object: &Value, rows: Vec<Value>) -> (Props<'_>, LayerData) {
@@ -793,4 +794,66 @@ fn wms_layer_from_an_endpoint() {
         .unwrap_err()
         .to_string()
         .contains("srs"));
+}
+
+#[test]
+fn extensions_parse_the_data_filter_with_named_categories() {
+    let spec = json!({
+        "@@type": "ScatterplotLayer",
+        "id": "filtered",
+        "data": [
+            {"position": [1, 2], "value": 10, "kind": "bus"},
+            {"position": [1, 2], "value": 50, "kind": "tram"},
+            {"position": [1, 2], "value": 90, "kind": "metro"}
+        ],
+        "getPosition": "@@=position",
+        "extensions": [{"@@type": "DataFilterExtension", "filterSize": 1, "categorySize": 1}],
+        "getFilterValue": "@@=value",
+        "filterRange": [20, 80],
+        "filterSoftRange": [30, 70],
+        "getFilterCategory": "@@=kind",
+        "filterCategories": ["bus", "metro"],
+        "filterTransformSize": false
+    });
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(&json!([spec]), &mut warnings)
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let filter = layers[0]
+        .props()
+        .extensions
+        .get::<DataFilterExtension>()
+        .expect("data filter");
+    assert_eq!(filter.filter_range, vec![[20.0, 80.0]]);
+    assert_eq!(filter.filter_soft_range, Some(vec![[30.0, 70.0]]));
+    assert!(!filter.filter_transform_size);
+    let data = LayerData::with_length(3);
+    let values = filter.get_filter_value.resolve(&data).unwrap();
+    assert_eq!(
+        values.iter().map(|v| v[0]).collect::<Vec<_>>(),
+        [10.0, 50.0, 90.0]
+    );
+    // categories get keys in order of appearance: bus 0, tram 1, metro 2
+    let keys = filter
+        .get_filter_category
+        .as_ref()
+        .unwrap()
+        .resolve(&data)
+        .unwrap();
+    assert_eq!(keys.iter().map(|k| k[0]).collect::<Vec<_>>(), [0, 1, 2]);
+    assert_eq!(filter.filter_categories, vec![vec![0, 2]]);
+    // the range keeps the middle row only and the categories drop that one
+    assert_eq!(filter.count_filtered(&data).unwrap(), 0);
+
+    // an extension that does not exist yet warns and is skipped
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "BrushingExtension"}]}]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(layers[0].props().extensions.is_empty());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
 }

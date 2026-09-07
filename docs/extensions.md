@@ -102,3 +102,15 @@ Layers built on the `AttributeManager` (scatterplot, line, arc, point cloud, ico
 support extension attributes. The layers that still build their vertex buffers by hand (path,
 polygon, text, bitmap, screen grid) support modules, uniforms and injections, and return an
 error for extensions that declare attributes.
+
+## Built in extensions
+
+`deck_gl_layers::extensions` ports `@deck.gl/extensions`:
+
+- `DataFilterExtension`: hides objects whose one to four numeric values (`get_filter_value`,
+  a `FilterValues`) fall outside `filter_range`, fades them between `filter_soft_range` and
+  `filter_range` through their size and opacity, and keeps only the objects whose category keys
+  (`get_filter_category`, a `FilterCategories` of small integers) are listed in
+  `filter_categories`. `count_filtered` evaluates the same rules on the CPU, deck.gl's
+  `onFilteredItemsChange` count. In JSON, `extensions: [{"@@type": "DataFilterExtension"}]`
+  with the props on the layer, see [docs/json.md](json.md#extensions).

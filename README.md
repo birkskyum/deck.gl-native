@@ -30,6 +30,9 @@ Working today, headless and verified pixel by pixel in tests:
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`
 - Per-layer render `parameters`: blend state, depth test and writes, face culling
+- Shader hooks for WGSL and layer extensions (`LayerExtension`: shader modules, injections,
+  attributes and uniforms), with `DataFilterExtension` filtering objects by value ranges, soft
+  ranges and categories on the GPU. See [docs/extensions.md](docs/extensions.md).
 - Benchmarks for a million points, a hundred thousand polygons and ten thousand paths in `docs/benchmarks.md`
 - `Deck::stats` reports the last frame (layers, draw calls, instances, uploaded bytes, CPU time); logging goes through `tracing` (the examples and the C API print to stderr at the level of `DECKGL_LOG`)
 - `Deck::snapshot` reads a frame back as RGBA pixels (and saves PNGs with the `png` feature); the C API has `deckgl_snapshot` and `deckgl_snapshot_png`
