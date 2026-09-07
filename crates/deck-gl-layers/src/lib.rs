@@ -37,6 +37,8 @@ pub mod scenegraph_layer;
 pub mod screen_grid_layer;
 pub mod simple_mesh_layer;
 pub mod solid_polygon_layer;
+pub mod terrain;
+pub mod terrain_layer;
 pub mod text;
 pub mod text_layer;
 pub mod tile_layer;
@@ -81,6 +83,8 @@ pub use scenegraph_layer::{ScenegraphLayer, ScenegraphLayerProps, ScenegraphLigh
 pub use screen_grid_layer::{ScreenGridBin, ScreenGridLayer, ScreenGridLayerProps};
 pub use simple_mesh_layer::{transform_matrix, SimpleMeshLayer, SimpleMeshLayerProps};
 pub use solid_polygon_layer::{SolidPolygonLayer, SolidPolygonLayerProps};
+pub use terrain::{terrain_mesh, ElevationDecoder, HeightGrid, Martini};
+pub use terrain_layer::{TerrainLayer, TerrainLayerProps, TerrainTile};
 pub use text::{CharacterSet, FontAtlas, FontSettings, FontSource, WordBreak};
 pub use text_layer::{AlignmentBaseline, TextAnchor, TextLayer, TextLayerProps};
 pub use tile_layer::{

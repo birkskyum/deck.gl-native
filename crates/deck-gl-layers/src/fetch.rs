@@ -76,24 +76,31 @@ impl Request {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn finish(&self, status: FetchStatus, result: FetchResult) {
+    /// Settle the request, unless it already was; `true` when this call settled it.
+    fn finish(&self, status: FetchStatus, result: FetchResult) -> bool {
         let mut state = self.lock();
-        if !state.0.is_finished() {
+        let first = !state.0.is_finished();
+        if first {
             *state = (status, Some(result));
         }
         drop(state);
         self.finished.notify_all();
+        first
     }
 }
 
 /// A request handed out by [`Fetcher::fetch`].
 #[derive(Clone)]
-pub struct FetchHandle(Arc<Request>);
+pub struct FetchHandle {
+    request: Arc<Request>,
+    /// The fetcher, so cancelling a request that never started settles it right away
+    fetcher: Option<Arc<Inner>>,
+}
 
 impl std::fmt::Debug for FetchHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchHandle")
-            .field("url", &self.0.url)
+            .field("url", &self.request.url)
             .field("status", &self.status())
             .finish()
     }
@@ -101,49 +108,51 @@ impl std::fmt::Debug for FetchHandle {
 
 impl FetchHandle {
     pub fn url(&self) -> &str {
-        &self.0.url
+        &self.request.url
     }
 
     pub fn status(&self) -> FetchStatus {
-        self.0.lock().0
+        self.request.lock().0
     }
 
     /// The outcome, once the request finished.
     pub fn result(&self) -> Option<FetchResult> {
-        self.0.lock().1.clone()
+        self.request.lock().1.clone()
     }
 
     /// Block until the request finished.
     pub fn wait(&self) -> FetchResult {
-        let mut state = self.0.lock();
+        let mut state = self.request.lock();
         while !state.0.is_finished() {
-            state = self.0.finished.wait(state).unwrap_or_else(|e| e.into_inner());
+            state = self
+                .request
+                .finished
+                .wait(state)
+                .unwrap_or_else(|e| e.into_inner());
         }
         state
             .1
             .clone()
-            .unwrap_or_else(|| Err(format!("{}: no result", self.0.url)))
+            .unwrap_or_else(|| Err(format!("{}: no result", self.request.url)))
     }
 
     /// Give up on the result. The request is cancelled when no other handle wants it: a
     /// queued request never starts, a loading one stops at the next chunk.
     pub fn cancel(&self) {
-        if self.0.interest.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.0.cancel.cancel();
-            let cancelled = {
-                let mut state = self.0.lock();
-                if state.0 == FetchStatus::Queued {
-                    *state = (
-                        FetchStatus::Cancelled,
-                        Some(Err(format!("{}: cancelled", self.0.url))),
-                    );
-                    true
-                } else {
-                    false
-                }
-            };
-            if cancelled {
-                self.0.finished.notify_all();
+        if self.request.interest.fetch_sub(1, Ordering::SeqCst) != 1 {
+            return;
+        }
+        self.request.cancel.cancel();
+        // A request that never started is settled here, so it leaves the in flight set and
+        // counts as cancelled without waiting for a worker to reach it
+        if self.status() != FetchStatus::Queued {
+            return;
+        }
+        let result = Err(format!("{}: cancelled", self.request.url));
+        match &self.fetcher {
+            Some(fetcher) => fetcher.settle(&self.request, FetchStatus::Cancelled, result),
+            None => {
+                self.request.finish(FetchStatus::Cancelled, result);
             }
         }
     }
@@ -287,18 +296,18 @@ impl Inner {
 
     fn settle(&self, request: &Request, status: FetchStatus, result: FetchResult) {
         self.inflight().remove(&request.url);
-        {
+        let bytes = result.as_ref().map(|b| b.len() as u64).unwrap_or(0);
+        // A request settled twice (cancelled by its last handle, then met by a worker) is
+        // counted once
+        if request.finish(status, result) {
             let mut counters = self.counters();
             match status {
                 FetchStatus::Done => counters.completed += 1,
                 FetchStatus::Failed => counters.failed += 1,
                 _ => counters.cancelled += 1,
             }
-            if let Ok(bytes) = &result {
-                counters.bytes += bytes.len() as u64;
-            }
+            counters.bytes += bytes;
         }
-        request.finish(status, result);
         self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -406,12 +415,18 @@ impl Fetcher {
     pub fn fetch(&self, url: &str) -> FetchHandle {
         if let Some(bytes) = self.inner.cache().get(url) {
             self.inner.counters().cache_hits += 1;
-            return FetchHandle(Request::new(url, FetchStatus::Done, Some(Ok(bytes))));
+            return FetchHandle {
+                request: Request::new(url, FetchStatus::Done, Some(Ok(bytes))),
+                fetcher: None,
+            };
         }
         let mut inflight = self.inner.inflight();
         if let Some(request) = inflight.get(url) {
             request.interest.fetch_add(1, Ordering::SeqCst);
-            return FetchHandle(request.clone());
+            return FetchHandle {
+                request: request.clone(),
+                fetcher: Some(self.inner.clone()),
+            };
         }
         let request = Request::new(url, FetchStatus::Queued, None);
         inflight.insert(url.to_string(), request.clone());
@@ -419,7 +434,10 @@ impl Fetcher {
         self.spawn_workers();
         self.inner.queue().push_back(request.clone());
         self.inner.wake.notify_one();
-        FetchHandle(request)
+        FetchHandle {
+            request,
+            fetcher: Some(self.inner.clone()),
+        }
     }
 
     /// Ask for a URL and block until it arrived. Loads through the pool, so other requests
@@ -431,7 +449,7 @@ impl Fetcher {
     /// Like [`fetch_blocking`](Self::fetch_blocking), giving up when `cancel` is set.
     pub fn fetch_blocking_with(&self, url: &str, cancel: &CancelToken) -> FetchResult {
         let handle = self.fetch(url);
-        let mut state = handle.0.lock();
+        let mut state = handle.request.lock();
         while !state.0.is_finished() {
             if cancel.is_cancelled() {
                 drop(state);
@@ -439,7 +457,7 @@ impl Fetcher {
                 return Err(format!("{url}: cancelled"));
             }
             let (next, _) = handle
-                .0
+                .request
                 .finished
                 .wait_timeout(state, std::time::Duration::from_millis(20))
                 .unwrap_or_else(|e| e.into_inner());
@@ -496,7 +514,12 @@ impl Fetcher {
     pub fn wait_idle(&self) {
         let requests: Vec<Arc<Request>> = self.inner.inflight().values().cloned().collect();
         for request in requests {
-            FetchHandle(request).wait().ok();
+            FetchHandle {
+                request,
+                fetcher: None,
+            }
+            .wait()
+            .ok();
         }
     }
 
@@ -636,8 +659,12 @@ mod tests {
             .inner
             .inflight()
             .insert(request.url.clone(), request.clone());
-        let a = FetchHandle(request.clone());
-        let b = FetchHandle(request.clone());
+        let handle = |request: Arc<Request>| FetchHandle {
+            request,
+            fetcher: Some(fetcher.inner.clone()),
+        };
+        let a = handle(request.clone());
+        let b = handle(request.clone());
         request.interest.fetch_add(1, Ordering::SeqCst);
         a.cancel();
         assert_eq!(b.status(), FetchStatus::Queued, "b still wants it");

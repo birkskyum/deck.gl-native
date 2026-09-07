@@ -1234,3 +1234,58 @@ fn directional_lights_read_shadow_flags() {
     assert!(!plain.directional[0].shadow);
     assert_eq!(plain.shadow_color, [0.0, 0.0, 0.0, 1.0]);
 }
+
+#[test]
+fn terrain_layer_reads_tiles_decoders_and_bounds() {
+    use deck_gl_layers::{ElevationDecoder, TerrainLayer};
+    let mut deck = JsonConverter::new()
+        .convert(&json!([
+            {
+                "@@type": "TerrainLayer",
+                "id": "tiled",
+                "elevationData": "https://example.com/{z}/{x}/{y}.png",
+                "texture": "https://example.com/sat/{z}/{x}/{y}.jpg",
+                "elevationDecoder": "terrarium",
+                "meshMaxError": 6,
+                "maxZoom": 12,
+                "color": [200, 190, 180],
+                "wireframe": true
+            },
+            {
+                "@@type": "TerrainLayer",
+                "id": "single",
+                "elevationData": "https://example.com/height.png",
+                "bounds": [-122.5, 37.7, -122.3, 37.9],
+                "elevationDecoder": {"rScaler": 2, "offset": -100}
+            }
+        ]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let props = |layer: &mut Box<dyn deck_gl::Layer>| {
+        layer
+            .as_any_mut()
+            .downcast_mut::<TerrainLayer>()
+            .expect("a terrain layer")
+            .props()
+            .clone()
+    };
+    let tiled = props(&mut deck.layers[0]);
+    assert_eq!(tiled.elevation_decoder, ElevationDecoder::terrarium());
+    assert_eq!(tiled.mesh_max_error, 6.0);
+    assert_eq!(tiled.max_zoom, Some(12));
+    assert_eq!(tiled.color, [200, 190, 180, 255]);
+    assert!(tiled.wireframe);
+    assert_eq!(tiled.texture.len(), 1);
+    let single = props(&mut deck.layers[1]);
+    assert_eq!(single.bounds, Some([-122.5, 37.7, -122.3, 37.9]));
+    assert_eq!(single.elevation_decoder.r_scaler, 2.0);
+    assert_eq!(single.elevation_decoder.offset, -100.0);
+    assert_eq!(single.elevation_decoder.g_scaler, 0.0, "the default for the rest");
+    // A terrain layer without elevation data, or with an unknown decoder, is an error
+    for bad in [
+        json!([{"@@type": "TerrainLayer", "id": "x"}]),
+        json!([{"@@type": "TerrainLayer", "id": "x", "elevationData": "u", "elevationDecoder": "moon"}]),
+    ] {
+        assert!(JsonConverter::new().convert(&bad).is_err(), "{bad}");
+    }
+}

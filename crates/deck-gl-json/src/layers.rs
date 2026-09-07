@@ -7,15 +7,16 @@ use deck_gl::{Accessor, FeatureCollection, Layer, LayerData, Polygon};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
     BitmapLayerProps, CellKind, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
-    ContourLayerProps, ContourThreshold, FontSettings, FontSource, GeoCellLayer, GeoCellLayerProps,
-    GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HeatmapAggregation,
-    HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps,
-    LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
-    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer,
-    ScatterplotLayerProps, Scenegraph, ScenegraphLayer, ScenegraphLayerProps, ScenegraphLighting,
-    ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer,
-    TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
+    ContourLayerProps, ContourThreshold, ElevationDecoder, FontSettings, FontSource, GeoCellLayer,
+    GeoCellLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps,
+    HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas,
+    IconLayer, IconLayerProps, LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps,
+    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType,
+    ScatterplotLayer, ScatterplotLayerProps, Scenegraph, ScenegraphLayer, ScenegraphLayerProps,
+    ScenegraphLighting, ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps, TerrainLayer, TerrainLayerProps, TextAnchor, TextLayer,
+    TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer, WmsLayerProps,
+    WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -524,6 +525,7 @@ pub fn convert_layer(
             let data = load_rows(&mut props, options)?;
             Box::new(SimpleMeshLayer::new(simple_mesh(&props, data, options)?))
         }
+        "TerrainLayer" => Box::new(TerrainLayer::new(terrain(&props)?)),
         "ScenegraphLayer" => {
             let data = load_rows(&mut props, options)?;
             Box::new(ScenegraphLayer::new(scenegraph(&props, data, options)?))
@@ -918,6 +920,97 @@ fn scenegraph_prop(p: &Props, options: &ConvertOptions) -> Result<Option<Arc<Sce
     })
     .map_err(|e| p.error("scenegraph", format!("{source}: {e}")))?;
     Ok(Some(Arc::new(scene)))
+}
+
+/// deck.gl's `elevationDecoder`, or one of the names `mapbox` and `terrarium`.
+fn elevation_decoder(p: &Props, default: ElevationDecoder) -> Result<ElevationDecoder> {
+    match p.get("elevationDecoder") {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::String(name)) => match name.as_str() {
+            "mapbox" | "terrain-rgb" => Ok(ElevationDecoder::mapbox()),
+            "terrarium" | "mapzen" => Ok(ElevationDecoder::terrarium()),
+            other => Err(p.error(
+                "elevationDecoder",
+                format!("expected `mapbox` or `terrarium`, got `{other}`"),
+            )),
+        },
+        Some(Value::Object(map)) => {
+            let number = |key: &str, fallback: f32| -> Result<f32> {
+                match map.get(key) {
+                    None | Some(Value::Null) => Ok(fallback),
+                    Some(v) => convert::f32(v).map_err(|e| p.error("elevationDecoder", e)),
+                }
+            };
+            Ok(ElevationDecoder {
+                r_scaler: number("rScaler", default.r_scaler)?,
+                g_scaler: number("gScaler", default.g_scaler)?,
+                b_scaler: number("bScaler", default.b_scaler)?,
+                offset: number("offset", default.offset)?,
+            })
+        }
+        Some(other) => Err(p.error(
+            "elevationDecoder",
+            format!(
+                "expected an object or a name, got {}",
+                crate::props::describe(other)
+            ),
+        )),
+    }
+}
+
+fn terrain(p: &Props) -> Result<TerrainLayerProps> {
+    let d = TerrainLayerProps::default();
+    let urls = |key: &str| -> Result<Vec<String>> {
+        Ok(match p.get(key) {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::String(url)) => vec![url.clone()],
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|v| convert::string(v).map_err(|e| p.error(key, e)))
+                .collect::<Result<Vec<_>>>()?,
+            Some(other) => {
+                return Err(p.error(
+                    key,
+                    format!(
+                        "expected a URL or an array of them, got {}",
+                        crate::props::describe(other)
+                    ),
+                ))
+            }
+        })
+    };
+    let optional_zoom = |key: &str| -> Result<Option<u32>> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => convert::f32(v)
+                .map(|z| Some(z as u32))
+                .map_err(|m| p.error(key, m)),
+        }
+    };
+    let elevation_data = urls("elevationData")?;
+    if elevation_data.is_empty() {
+        return Err(p.error("elevationData", "a TerrainLayer needs elevationData"));
+    }
+    Ok(TerrainLayerProps {
+        base: p.base()?,
+        elevation_data,
+        texture: urls("texture")?,
+        elevation_decoder: elevation_decoder(p, d.elevation_decoder)?,
+        mesh_max_error: p.f32("meshMaxError", d.mesh_max_error)?,
+        bounds: match p.get("bounds").filter(|v| !v.is_null()) {
+            Some(value) => {
+                let numbers = convert::numbers(value, 4, 4).map_err(|e| p.error("bounds", e))?;
+                Some([numbers[0], numbers[1], numbers[2], numbers[3]])
+            }
+            None => d.bounds,
+        },
+        color: p.color("color", d.color)?,
+        wireframe: p.bool("wireframe", d.wireframe)?,
+        min_zoom: optional_zoom("minZoom")?.or(d.min_zoom),
+        max_zoom: optional_zoom("maxZoom")?.or(d.max_zoom),
+        tile_size: p.f32("tileSize", d.tile_size as f32)? as f64,
+        max_requests: p.u32("maxRequests", d.max_requests as u32)? as usize,
+    })
 }
 
 fn scenegraph(p: &Props, data: LayerData, options: &ConvertOptions) -> Result<ScenegraphLayerProps> {

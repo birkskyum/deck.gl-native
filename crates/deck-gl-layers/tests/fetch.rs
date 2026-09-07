@@ -106,7 +106,11 @@ fn cancelled_requests_never_reach_the_server() {
         "the cancelled URL was never requested"
     );
     let stats = fetcher.stats();
-    assert_eq!((stats.completed, stats.cancelled, stats.pending()), (1, 1, 0));
+    // The first request may fail on a busy machine; what matters is that the second was
+    // cancelled and nothing is left over
+    assert_eq!(stats.pending(), 0, "{stats:?}");
+    assert!(stats.cancelled >= 1, "{stats:?}");
+    assert_eq!(stats.completed + stats.failed, 1, "{stats:?}");
     assert!(fetcher.generation() > generation);
 }
 

@@ -65,7 +65,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     spec::apply_views(&mut deck, &json.views, &json.cameras);
 
-    deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
+    // Tiles and remote data load in the background: keep rendering until nothing is on its
+    // way any more, so tiled descriptions come out with their content
+    let fetcher = deck_gl_layers::Fetcher::global();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut generation = u64::MAX;
+    let mut snapshot = deck.snapshot(Some(scene::CLEAR_COLOR))?;
+    while std::time::Instant::now() < deadline {
+        let settled = fetcher.is_idle() && fetcher.generation() == generation;
+        generation = fetcher.generation();
+        if settled {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        snapshot = deck.snapshot(Some(scene::CLEAR_COLOR))?;
+    }
+    snapshot.save_png(&output)?;
     let stats = deck.stats();
     println!(
         "{} layers, {} draw calls, {} instances, {} KB uploaded, update {:.1} ms, draw {:.1} ms",
