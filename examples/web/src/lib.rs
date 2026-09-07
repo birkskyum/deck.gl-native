@@ -118,11 +118,7 @@ pub async fn create(canvas: HtmlCanvasElement) -> Result<DeckGl, JsValue> {
     )
     .map_err(err)?;
 
-    let controller = MapController::new(
-        ViewState::default(),
-        logical_width as f64,
-        logical_height as f64,
-    );
+    let controller = MapController::new(ViewState::default(), logical_width as f64, logical_height as f64);
     Ok(DeckGl {
         device,
         queue,
@@ -239,8 +235,9 @@ impl DeckGl {
         }
         self.deck.set_view_state(self.controller.view_state());
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                frame
+            }
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 return Ok(true);
@@ -251,14 +248,11 @@ impl DeckGl {
         let depth = self.depth.create_view(&Default::default());
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("deck.gl") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("deck.gl"),
+            });
         self.deck
-            .render(
-                &mut encoder,
-                &color,
-                Some(&depth),
-                Some(wgpu::Color::TRANSPARENT),
-            )
+            .render(&mut encoder, &color, Some(&depth), Some(wgpu::Color::TRANSPARENT))
             .map_err(err)?;
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
@@ -268,7 +262,11 @@ impl DeckGl {
     /// Which backend the frames go through, `"webgpu"` or `"webgl2"`.
     #[wasm_bindgen(getter)]
     pub fn backend(&self) -> String {
-        if WEBGL { "webgl2".into() } else { "webgpu".into() }
+        if WEBGL {
+            "webgl2".into()
+        } else {
+            "webgpu".into()
+        }
     }
 
     /// Build the layers from the description. `camera` places the camera at the

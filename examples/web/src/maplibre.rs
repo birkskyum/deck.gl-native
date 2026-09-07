@@ -42,10 +42,9 @@ pub struct DeckGlOverlay {
 pub async fn create_overlay(gl: WebGl2RenderingContext) -> Result<DeckGlOverlay, JsValue> {
     console_error_panic_hook::set_once();
 
-    let exposed = unsafe {
-        wgpu::hal::gles::Adapter::new_external(gl.clone(), wgpu::wgt::GlBackendOptions::default())
-    }
-    .ok_or_else(|| err("wgpu could not adopt the map's WebGL2 context"))?;
+    let exposed =
+        unsafe { wgpu::hal::gles::Adapter::new_external(gl.clone(), wgpu::wgt::GlBackendOptions::default()) }
+            .ok_or_else(|| err("wgpu could not adopt the map's WebGL2 context"))?;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::GL,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -141,8 +140,7 @@ impl DeckGlOverlay {
                 (size.0 as f32 / ratio).round().max(1.0) as u32,
                 (size.1 as f32 / ratio).round().max(1.0) as u32,
             );
-            self.depth =
-                crate::depth_texture(&self.device, &self.deck.context().target, size.0, size.1);
+            self.depth = crate::depth_texture(&self.device, &self.deck.context().target, size.0, size.1);
         }
         self.deck.set_view_state(ViewState {
             longitude,
@@ -166,7 +164,25 @@ impl DeckGlOverlay {
             .render(&mut encoder, &color_view, Some(&depth_view), None)
             .map_err(err)?;
         self.queue.submit([encoder.finish()]);
+        self.restore_pixel_store();
         Ok(())
+    }
+
+    /// Put the pixel store parameters back to what a GL context starts with.
+    ///
+    /// wgpu sets these while it uploads a texture and leaves them set. maplibre never touches
+    /// them, so it never sets them back either, and every texture it uploads afterwards, the
+    /// glyph and icon atlases a label needs, fails with `invalid unpack params combination`
+    /// and draws as a solid block. Only the symbols already uploaded when the layer first
+    /// drew survive, which is what makes it look like panning breaks them.
+    fn restore_pixel_store(&self) {
+        let gl = &self.gl;
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_ROW_LENGTH, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_SKIP_ROWS, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_SKIP_PIXELS, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_IMAGE_HEIGHT, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_SKIP_IMAGES, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_ALIGNMENT, 4);
     }
 
     /// The framebuffer maplibre has bound, as a texture the layers can be drawn into.
@@ -189,8 +205,7 @@ impl DeckGlOverlay {
                  share a depth buffer with; turn off terrain or globe",
             ));
         }
-        let hal_texture =
-            wgpu::hal::gles::Texture::default_framebuffer(wgpu::TextureFormat::Rgba8Unorm);
+        let hal_texture = wgpu::hal::gles::Texture::default_framebuffer(wgpu::TextureFormat::Rgba8Unorm);
         let descriptor = wgpu::TextureDescriptor {
             label: Some("maplibre framebuffer"),
             size: wgpu::Extent3d {

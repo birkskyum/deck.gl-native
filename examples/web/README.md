@@ -46,6 +46,12 @@ Two things that path needs:
 - The map is created with `antialias: false`. A multisampled default framebuffer cannot be
   drawn into this way.
 
+The layer also puts the pixel store parameters back to their defaults after drawing. wgpu sets
+`UNPACK_ROW_LENGTH` and friends while it uploads a texture and leaves them set; maplibre never
+touches them, so it never sets them back, and every atlas it uploads afterwards fails with
+`invalid unpack params combination` and draws as a solid block. The symbols already uploaded
+when the layer first drew keep working, which makes it look as though panning breaks them.
+
 The browser logs `INVALID_OPERATION: drawBuffers: BACK or NONE` once per frame: wgpu's GL
 backend names a colour attachment where WebGL2 wants `BACK` for a default framebuffer. WebGL
 ignores the call and the draw buffer stays where it should be, so it is noise rather than a
