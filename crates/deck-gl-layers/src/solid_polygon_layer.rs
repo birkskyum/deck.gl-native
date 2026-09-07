@@ -1,5 +1,6 @@
 //! Port of `@deck.gl/layers/src/solid-polygon-layer/solid-polygon-layer.ts`.
 
+use deck_gl::attribute_manager::AttributeManager;
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons};
 use deck_gl::layer::{position_bounds, set_model_picking_active, update_standard_uniforms};
 use deck_gl::math_gl::web_mercator::lng_lat_to_world;
@@ -88,7 +89,11 @@ pub struct SolidPolygonLayer {
     side: Option<Model>,
     wireframe: Option<Model>,
     data_dirty: bool,
+    models_dirty: bool,
     bounds: Option<[f64; 4]>,
+    /// Extension attributes expanded per vertex (top) and per side instance
+    top_extensions: AttributeManager,
+    side_extensions: AttributeManager,
 }
 
 impl SolidPolygonLayer {
@@ -99,7 +104,10 @@ impl SolidPolygonLayer {
             side: None,
             wireframe: None,
             data_dirty: true,
+            models_dirty: false,
             bounds: None,
+            top_extensions: AttributeManager::new(Vec::new()),
+            side_extensions: AttributeManager::new(Vec::new()),
         }
     }
 
@@ -112,7 +120,16 @@ impl SolidPolygonLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base)
+            || self.props.filled != props.filled
+            || self.props.extruded != props.extruded
+            || self.props.wireframe != props.wireframe
+        {
+            self.models_dirty = true;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -228,6 +245,26 @@ impl SolidPolygonLayer {
             }
             model.set_instance_count(vertex_count.saturating_sub(1) as u32);
         }
+
+        // Extension attributes: one value per polygon, expanded to the tessellated vertices
+        let sources = props.base.extensions.sources(data)?;
+        if let Some(top) = &mut self.top {
+            self.top_extensions
+                .update_expanded(device, &mut [top], data, &sources, &tesselated.row_index)?;
+        }
+        let mut sides: Vec<&mut Model> = [&mut self.side, &mut self.wireframe]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !sides.is_empty() {
+            self.side_extensions.update_expanded(
+                device,
+                &mut sides,
+                data,
+                &sources,
+                &tesselated.row_index,
+            )?;
+        }
         Ok(())
     }
 }
@@ -238,6 +275,9 @@ impl Layer for SolidPolygonLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
+        self.top = None;
+        self.side = None;
+        self.wireframe = None;
         let id = self.props.base.id.clone();
         let modules = self.modules();
         let base = self.props.base.clone();
@@ -246,16 +286,16 @@ impl Layer for SolidPolygonLayer {
         let wireframe_label = format!("{id}-wireframe");
 
         if self.props.filled {
-            let top_shader = self.props.base.extensions.assemble_without_attributes(
-                &top_label,
-                &modules,
-                &format!("{COMMON}\n{TOP}"),
-            )?;
-            let layouts = [
+            let top_shader = base
+                .extensions
+                .assemble(&top_label, &modules, &format!("{COMMON}\n{TOP}"))?;
+            self.top_extensions = AttributeManager::new(base.extensions.vertex_buffer_specs(&top_shader)?);
+            let mut layouts = vec![
                 VertexBufferLayout::vertex("vertexPositions", 0, VertexFormat::Float32x3),
                 VertexBufferLayout::vertex("vertexPositions64Low", 1, VertexFormat::Float32x3),
                 vertex_data_layout(wgpu::VertexStepMode::Vertex, [2, 3, 4, 5]),
             ];
+            layouts.extend(self.top_extensions.layouts());
             let mut desc = ModelDescriptor::new(
                 &top_label,
                 &top_shader,
@@ -268,12 +308,11 @@ impl Layer for SolidPolygonLayer {
         }
 
         if self.props.extruded {
-            let side_shader = self.props.base.extensions.assemble_without_attributes(
-                &side_label,
-                &modules,
-                &format!("{COMMON}\n{SIDE}"),
-            )?;
-            let layouts = [
+            let side_shader =
+                base.extensions
+                    .assemble(&side_label, &modules, &format!("{COMMON}\n{SIDE}"))?;
+            self.side_extensions = AttributeManager::new(base.extensions.buffer_specs(&side_shader)?);
+            let mut layouts = vec![
                 VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
                 VertexBufferLayout::instance("vertexPositions", 1, VertexFormat::Float32x3),
                 VertexBufferLayout::instance("vertexPositions64Low", 2, VertexFormat::Float32x3),
@@ -282,6 +321,7 @@ impl Layer for SolidPolygonLayer {
                 VertexBufferLayout::instance("vertexValid", 5, VertexFormat::Float32),
                 vertex_data_layout(wgpu::VertexStepMode::Instance, [6, 7, 8, 9]),
             ];
+            layouts.extend(self.side_extensions.layouts());
             let mut desc = ModelDescriptor::new(
                 &side_label,
                 &side_shader,
@@ -321,10 +361,14 @@ impl Layer for SolidPolygonLayer {
             }
         }
         self.data_dirty = true;
+        self.models_dirty = false;
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.models_dirty {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

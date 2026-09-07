@@ -119,7 +119,7 @@ impl PointCloudLayer {
             ("normal", AttributeSource::Vec3(props.get_normal.clone())),
             ("color", AttributeSource::Colors(props.get_color.clone())),
         ];
-        sources.extend(props.base.extensions.sources());
+        sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes.update(&ctx.device, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())

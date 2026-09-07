@@ -305,7 +305,7 @@ impl IconLayer {
             ),
             ("rowIndex", AttributeSource::RowIndex),
         ];
-        sources.extend(props.base.extensions.sources());
+        sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes.update(&ctx.device, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())

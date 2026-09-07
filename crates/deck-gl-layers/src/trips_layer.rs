@@ -1,6 +1,7 @@
 //! Port of `@deck.gl/geo-layers` TripsLayer: paths with a timestamp per vertex, showing the
 //! part travelled before `current_time` with a fading trail.
 
+use deck_gl::attribute_manager::AttributeManager;
 use deck_gl::data::resolve_f32_lists;
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::{
@@ -107,6 +108,7 @@ pub struct TripsLayer {
     model: Option<Model>,
     data_dirty: bool,
     bounds: Option<[f64; 4]>,
+    extensions: AttributeManager,
 }
 
 impl TripsLayer {
@@ -116,6 +118,7 @@ impl TripsLayer {
             model: None,
             data_dirty: true,
             bounds: None,
+            extensions: AttributeManager::new(Vec::new()),
         }
     }
 
@@ -141,7 +144,8 @@ impl TripsLayer {
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let model = initialized(self.model.as_mut(), &self.props.path.base.id)?;
-        let (tesselated, bounds) = upload_path_attributes(model, ctx, &self.props.path)?;
+        let (tesselated, bounds) =
+            upload_path_attributes(model, &mut self.extensions, ctx, &self.props.path)?;
         self.bounds = bounds;
         let timestamps = resolve_f32_lists(&self.props.path.data, &self.props.get_timestamps)?;
         let mut packed = Vec::with_capacity(tesselated.instance_count());
@@ -170,13 +174,14 @@ impl Layer for TripsLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = path_model(
+        let (model, extensions) = path_model(
             ctx,
             &self.props.path.base.id,
             &trips_shaders(),
             &self.props.path.base,
         )?;
         self.model = Some(model);
+        self.extensions = extensions;
         self.data_dirty = true;
         Ok(())
     }

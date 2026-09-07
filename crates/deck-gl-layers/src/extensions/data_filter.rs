@@ -370,12 +370,12 @@ impl LayerExtension for DataFilterExtension {
         }
     }
 
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
+    fn attributes(&self, _data: &LayerData) -> Result<Vec<(&'static str, AttributeSource)>> {
         let mut sources = vec![("filterValues", self.get_filter_value.source())];
         if let Some(categories) = &self.get_filter_category {
             sources.push(("filterCategoryValues", categories.source()));
         }
-        sources
+        Ok(sources)
     }
 
     fn update_uniforms(

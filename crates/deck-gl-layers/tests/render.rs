@@ -2319,8 +2319,11 @@ impl LayerExtension for TintExtension {
         }
     }
 
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
-        vec![("tintValues", AttributeSource::Floats(self.get_tint.clone()))]
+    fn attributes(&self, _data: &LayerData) -> deck_gl::Result<Vec<(&'static str, AttributeSource)>> {
+        Ok(vec![(
+            "tintValues",
+            AttributeSource::Floats(self.get_tint.clone()),
+        )])
     }
 
     fn update_uniforms(
@@ -2650,4 +2653,60 @@ fn collision_filter_extension_keeps_the_highest_priority_object() {
     // without the filter the later object draws on top
     let pixels = render(&ctx, vec![circles(false)]);
     assert_pixel(&pixels, c, c, [0, 0, 255, 255], 0);
+}
+
+#[test]
+fn extension_attributes_expand_over_tessellated_paths_and_polygons() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    // two horizontal paths, the lower one filtered out
+    let paths = PathLayer::new(PathLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(DataFilterExtension::new(
+                Accessor::func(|i| i as f32),
+                [-0.5, 0.5],
+            )),
+            ..LayerProps::new("paths")
+        },
+        data: LayerData::with_length(2),
+        get_path: Accessor::func(move |i| {
+            let y = CENTER[1] + if i == 0 { d } else { -d };
+            vec![[CENTER[0] - 2.0 * d, y, 0.0], [CENTER[0] + 2.0 * d, y, 0.0]]
+        }),
+        get_width: Accessor::Constant(4.0),
+        width_units: Unit::Pixels,
+        get_color: Accessor::Constant([255, 0, 0, 255]),
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(paths)]);
+    assert_pixel(&pixels, c, c - 16, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c, c + 16, [0, 0, 0, 0], 0);
+
+    // two squares side by side, the right one filtered out, through the composite polygon layer
+    let squares = PolygonLayer::new(PolygonLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(DataFilterExtension::new(
+                Accessor::func(|i| i as f32),
+                [-0.5, 0.5],
+            )),
+            ..LayerProps::new("squares")
+        },
+        data: LayerData::with_length(2),
+        get_polygon: Accessor::func(move |i| {
+            let x = CENTER[0] + if i == 0 { -d } else { d };
+            vec![vec![
+                [x - d / 2.0, CENTER[1] - d / 2.0, 0.0],
+                [x + d / 2.0, CENTER[1] - d / 2.0, 0.0],
+                [x + d / 2.0, CENTER[1] + d / 2.0, 0.0],
+                [x - d / 2.0, CENTER[1] + d / 2.0, 0.0],
+            ]]
+        }),
+        get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+        stroked: false,
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(squares)]);
+    assert_pixel(&pixels, c - 16, c, [0, 0, 255, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [0, 0, 0, 0], 0);
 }

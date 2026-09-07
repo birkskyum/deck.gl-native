@@ -6,8 +6,8 @@ use std::any::Any;
 use deck_gl::attribute_manager::AttributeSource;
 use deck_gl::luma_gl::{Model, ShaderInjection, ShaderModuleSource};
 use deck_gl::{
-    same_extension, Accessor, DeckError, ExtensionAttribute, ExtensionShaders, LayerContext, LayerExtension,
-    LayerProps, Result, Viewport,
+    same_extension, Accessor, DeckError, ExtensionAttribute, ExtensionShaders, LayerContext, LayerData,
+    LayerExtension, LayerProps, Result, Viewport,
 };
 use wgpu::VertexFormat;
 
@@ -71,11 +71,11 @@ impl LayerExtension for CollisionFilterExtension {
         }
     }
 
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
-        vec![(
+    fn attributes(&self, _data: &LayerData) -> Result<Vec<(&'static str, AttributeSource)>> {
+        Ok(vec![(
             "collisionPriorities",
             AttributeSource::Floats(self.get_collision_priority.clone()),
-        )]
+        )])
     }
 
     fn update_uniforms(

@@ -15,6 +15,7 @@ use luma_gl::{AssembledShader, Model, ShaderModuleSource};
 use wgpu::VertexFormat;
 
 use crate::attribute_manager::{AttributeSource, BufferSpec};
+use crate::data::LayerData;
 use crate::layer::{LayerContext, LayerProps};
 use crate::shaderlib::HOOKS;
 use crate::viewport::Viewport;
@@ -46,9 +47,10 @@ pub trait LayerExtension: Send + Sync + fmt::Debug {
     fn shaders(&self) -> ExtensionShaders;
 
     /// Values for the attributes declared in [`LayerExtension::shaders`], resolved against the
-    /// layer's data like the layer's own accessors.
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
-        Vec::new()
+    /// layer's data like the layer's own accessors. `data` is there for extensions that derive
+    /// attributes from other values of the rows (a pattern name looked up in an atlas).
+    fn attributes(&self, _data: &LayerData) -> Result<Vec<(&'static str, AttributeSource)>> {
+        Ok(Vec::new())
     }
 
     /// Write the extension's uniforms. Called on every layer update, before the upload, with
@@ -143,21 +145,7 @@ impl Extensions {
         modules: &[ShaderModuleSource],
         main: &str,
     ) -> Result<AssembledShader> {
-        self.assemble_own(label, modules, main, &ExtensionShaders::default())
-    }
-
-    /// [`Extensions::assemble_without_attributes`] plus `own`, shader contributions of the
-    /// layer itself (a layer built on another layer's shader, like the trips layer on the path
-    /// shader). Attributes in `own` are allowed: the layer binds their buffers.
-    pub fn assemble_own(
-        &self,
-        label: &str,
-        modules: &[ShaderModuleSource],
-        main: &str,
-        own: &ExtensionShaders,
-    ) -> Result<AssembledShader> {
-        let mut shaders = self.shaders();
-        if let Some(attribute) = shaders.attributes.first() {
+        if let Some(attribute) = self.shaders().attributes.first() {
             return Err(DeckError::Layer {
                 layer: label.to_string(),
                 message: format!(
@@ -166,6 +154,19 @@ impl Extensions {
                 ),
             });
         }
+        self.assemble(label, modules, main)
+    }
+
+    /// [`Extensions::assemble`] plus `own`, shader contributions of the layer itself (a layer
+    /// built on another layer's shader, like the trips layer on the path shader).
+    pub fn assemble_own(
+        &self,
+        label: &str,
+        modules: &[ShaderModuleSource],
+        main: &str,
+        own: &ExtensionShaders,
+    ) -> Result<AssembledShader> {
+        let mut shaders = self.shaders();
         for module in &own.modules {
             if !shaders.modules.iter().any(|m| m.name == module.name) {
                 shaders.modules.push(*module);
@@ -213,6 +214,16 @@ impl Extensions {
 
     /// One instance buffer per extension attribute, at the locations the assembler chose.
     pub fn buffer_specs(&self, shader: &AssembledShader) -> Result<Vec<BufferSpec>> {
+        self.specs(shader, false)
+    }
+
+    /// One buffer per extension attribute with one entry per vertex, for layers that expand
+    /// their attributes per tessellated vertex.
+    pub fn vertex_buffer_specs(&self, shader: &AssembledShader) -> Result<Vec<BufferSpec>> {
+        self.specs(shader, true)
+    }
+
+    fn specs(&self, shader: &AssembledShader, per_vertex: bool) -> Result<Vec<BufferSpec>> {
         self.shaders()
             .attributes
             .iter()
@@ -226,7 +237,11 @@ impl Extensions {
                             a.name
                         ),
                     })?;
-                Ok(BufferSpec::instance(a.name, a.name, location, a.format))
+                Ok(if per_vertex {
+                    BufferSpec::vertex(a.name, a.name, location, a.format)
+                } else {
+                    BufferSpec::instance(a.name, a.name, location, a.format)
+                })
             })
             .collect()
     }
@@ -238,8 +253,12 @@ impl Extensions {
     }
 
     /// The attribute values of every extension, to append to the layer's own sources.
-    pub fn sources(&self) -> Vec<(&'static str, AttributeSource)> {
-        self.0.iter().flat_map(|e| e.attributes()).collect()
+    pub fn sources(&self, data: &LayerData) -> Result<Vec<(&'static str, AttributeSource)>> {
+        let mut sources = Vec::new();
+        for extension in &self.0 {
+            sources.extend(extension.attributes(data)?);
+        }
+        Ok(sources)
     }
 
     pub fn update_uniforms(

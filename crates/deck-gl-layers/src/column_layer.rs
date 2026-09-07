@@ -261,7 +261,7 @@ impl ColumnLayer {
             ("lineColor", AttributeSource::Colors(props.get_line_color.clone())),
             ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
         ];
-        sources.extend(props.base.extensions.sources());
+        sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes
             .update_many(&ctx.device, &mut models, data, &sources)?;
         for model in models {

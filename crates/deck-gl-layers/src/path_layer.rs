@@ -1,5 +1,6 @@
 //! Port of `@deck.gl/layers/src/path-layer/path-layer.ts`.
 
+use deck_gl::attribute_manager::AttributeManager;
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
 use deck_gl::layer::{initialized, position_bounds, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
@@ -71,6 +72,8 @@ pub struct PathLayer {
     model: Option<Model>,
     data_dirty: bool,
     bounds: Option<[f64; 4]>,
+    /// Extension attributes expanded per path segment
+    extensions: AttributeManager,
 }
 
 impl PathLayer {
@@ -80,6 +83,7 @@ impl PathLayer {
             model: None,
             data_dirty: true,
             bounds: None,
+            extensions: AttributeManager::new(Vec::new()),
         }
     }
 
@@ -92,7 +96,12 @@ impl PathLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base) {
+            self.model = None;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -116,7 +125,7 @@ impl PathLayer {
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-        self.bounds = upload_path_attributes(model, ctx, &self.props)?.1;
+        self.bounds = upload_path_attributes(model, &mut self.extensions, ctx, &self.props)?.1;
         Ok(())
     }
 }
@@ -125,6 +134,7 @@ impl PathLayer {
 /// extend the path shader, such as [`TripsLayer`](crate::TripsLayer).
 pub(crate) fn upload_path_attributes(
     model: &mut Model,
+    extensions: &mut AttributeManager,
     ctx: &LayerContext,
     props: &PathLayerProps,
 ) -> Result<(TesselatedPaths, Option<[f64; 4]>)> {
@@ -161,18 +171,23 @@ pub(crate) fn upload_path_attributes(
         create_vertex_buffer_from(device, "instanceData", &instance_data),
     )?;
     model.set_instance_count(tesselated.instance_count() as u32);
+    // Extension attributes: one value per path, expanded to the segments
+    let sources = props.base.extensions.sources(data)?;
+    extensions.update_expanded(device, &mut [model], data, &sources, &tesselated.row_index)?;
     Ok((tesselated, bounds))
 }
 
 /// A model with the path shader and the path layer's vertex buffer layouts, plus the shader
-/// contributions and instance buffers a layer built on the path layer adds (`own`).
+/// contributions and instance buffers a layer built on the path layer adds (`own`), and the
+/// attribute manager for the extension attributes.
 pub(crate) fn path_model(
     ctx: &LayerContext,
     id: &str,
     own: &ExtensionShaders,
     base: &LayerProps,
-) -> Result<Model> {
+) -> Result<(Model, AttributeManager)> {
     let shader = base.extensions.assemble_own(id, &STANDARD_MODULES, SHADER, own)?;
+    let extensions = AttributeManager::new(base.extensions.buffer_specs(&shader)?);
     let position_stride = 24 * 4;
     let mut layouts = vec![
         VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
@@ -216,6 +231,7 @@ pub(crate) fn path_model(
             attribute.format,
         ));
     }
+    layouts.extend(extensions.layouts());
     let mut desc = ModelDescriptor::new(
         id,
         &shader,
@@ -251,7 +267,7 @@ pub(crate) fn path_model(
         wgpu::IndexFormat::Uint32,
         12,
     );
-    Ok(model)
+    Ok((model, extensions))
 }
 
 /// Write the `path` uniform block from the props.
@@ -274,18 +290,22 @@ impl Layer for PathLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = path_model(
+        let (model, extensions) = path_model(
             ctx,
             &self.props.base.id,
             &ExtensionShaders::default(),
             &self.props.base,
         )?;
         self.model = Some(model);
+        self.extensions = extensions;
         self.data_dirty = true;
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.model.is_none() {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

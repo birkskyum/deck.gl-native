@@ -167,9 +167,9 @@ sit on the layer, as in pydeck:
 | `MaskExtension` | `maskId` (the id of a layer with `"operation": "mask"`), `maskByInstance` (same default as `clipByInstance`), `maskInverted` |
 | `CollisionFilterExtension` | `getCollisionPriority` (-1000 to 1000, higher wins), `collisionEnabled`, `collisionGroup` (`collisionTestProps` is accepted and ignored) |
 
-Extension attributes need a layer on the attribute manager (scatterplot, line, arc, point
-cloud, icon, column); the other layers report an error for them. See
-[docs/extensions.md](extensions.md) for the shader hook convention behind this.
+Extension attributes work on every layer but the text, bitmap and screen grid layers, which
+report an error for them. See [docs/extensions.md](extensions.md) for the shader hook
+convention behind this.
 
 ## Supported layers and props
 

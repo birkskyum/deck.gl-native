@@ -114,7 +114,7 @@ impl LineLayer {
             ("color", AttributeSource::Colors(props.get_color.clone())),
             ("width", AttributeSource::Floats(props.get_width.clone())),
         ];
-        sources.extend(props.base.extensions.sources());
+        sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes
             .update(&ctx.device, model, &props.data, &sources)?;
         model.set_instance_count(props.data.len() as u32);

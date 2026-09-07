@@ -7,8 +7,8 @@ use deck_gl::attribute_manager::AttributeSource;
 use deck_gl::glam::{DVec2, Vec2};
 use deck_gl::luma_gl::{Model, ShaderField, ShaderInjection, ShaderModuleSource};
 use deck_gl::{
-    same_extension, Accessor, ExtensionAttribute, ExtensionShaders, LayerContext, LayerExtension, LayerProps,
-    Result, Viewport,
+    same_extension, Accessor, ExtensionAttribute, ExtensionShaders, LayerContext, LayerData, LayerExtension,
+    LayerProps, Result, Viewport,
 };
 use wgpu::VertexFormat;
 
@@ -105,11 +105,11 @@ impl LayerExtension for BrushingExtension {
         }
     }
 
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
-        vec![(
+    fn attributes(&self, _data: &LayerData) -> Result<Vec<(&'static str, AttributeSource)>> {
+        Ok(vec![(
             "brushingTargets",
             AttributeSource::Vec2(self.get_brushing_target.clone()),
-        )]
+        )])
     }
 
     fn update_uniforms(

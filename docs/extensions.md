@@ -81,8 +81,8 @@ impl LayerExtension for TintExtension {
             varyings: vec![ShaderField { name: "tint_value", ty: "f32" }],
         }
     }
-    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
-        vec![("tintValues", AttributeSource::Floats(self.get_tint.clone()))]
+    fn attributes(&self, _: &LayerData) -> deck_gl::Result<Vec<(&'static str, AttributeSource)>> {
+        Ok(vec![("tintValues", AttributeSource::Floats(self.get_tint.clone()))])
     }
     fn update_uniforms(&self, model: &mut Model, _: &LayerContext, _: &Viewport, _: &LayerProps) -> deck_gl::Result<()> {
         model.uniforms("tint")?.set_f32("scale", self.scale)
@@ -99,9 +99,11 @@ contributions differ rebuilds the layer's model; changing only its accessors or 
 re-uploads the attributes and uniforms.
 
 Layers built on the `AttributeManager` (scatterplot, line, arc, point cloud, icon, column)
-support extension attributes. The layers that still build their vertex buffers by hand (path,
-polygon, text, bitmap, screen grid) support modules, uniforms and injections, and return an
-error for extensions that declare attributes.
+support extension attributes, and so do the path, polygon, trips, GeoJSON and cell layers,
+which expand one value per object over their tessellated segments or vertices
+(`AttributeManager::update_expanded`). The text, bitmap and screen grid layers support
+modules, uniforms and injections, and return an error for extensions that declare
+attributes.
 
 ## Built in extensions
 

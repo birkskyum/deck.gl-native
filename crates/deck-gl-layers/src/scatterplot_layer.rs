@@ -134,7 +134,7 @@ impl ScatterplotLayer {
             ),
             ("rowIndex", AttributeSource::RowIndex),
         ];
-        sources.extend(props.base.extensions.sources());
+        sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes
             .update(&ctx.device, model, &props.data, &sources)?;
         model.set_instance_count(props.data.len() as u32);

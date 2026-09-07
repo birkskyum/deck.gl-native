@@ -111,6 +111,17 @@ impl BufferSpec {
         }
     }
 
+    /// One attribute per vertex in its own buffer (for layers whose attributes are expanded per
+    /// tessellated vertex).
+    pub fn vertex(name: &'static str, attribute: &'static str, location: u32, format: VertexFormat) -> Self {
+        Self {
+            name,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            stride: format_size(format),
+            fields: vec![Field::new(attribute, location, format, 0)],
+        }
+    }
+
     /// The low part of a position attribute in its own buffer.
     pub fn instance_low(name: &'static str, attribute: &'static str, location: u32) -> Self {
         Self {
@@ -218,6 +229,32 @@ impl AttributeManager {
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
     ) -> Result<usize> {
+        self.update_impl(device, models, data, sources, None)
+    }
+
+    /// Build every buffer with one entry per element of `expand`, the data row of each
+    /// tessellated vertex or segment (deck.gl's `startIndices` expansion), for layers whose
+    /// geometry is built by hand. Always rebuilds, so call it when the geometry was.
+    pub fn update_expanded(
+        &mut self,
+        device: &wgpu::Device,
+        models: &mut [&mut Model],
+        data: &LayerData,
+        sources: &[(&'static str, AttributeSource)],
+        expand: &[u32],
+    ) -> Result<usize> {
+        self.force = true;
+        self.update_impl(device, models, data, sources, Some(expand))
+    }
+
+    fn update_impl(
+        &mut self,
+        device: &wgpu::Device,
+        models: &mut [&mut Model],
+        data: &LayerData,
+        sources: &[(&'static str, AttributeSource)],
+        expand: Option<&[u32]>,
+    ) -> Result<usize> {
         let data_changed = self.force || self.previous_data.as_ref() != Some(data);
         let changed = |attribute: &str| -> bool {
             let now = sources
@@ -232,7 +269,7 @@ impl AttributeManager {
             if !data_changed && !buffer.fields.iter().any(|f| changed(f.attribute)) {
                 continue;
             }
-            let gpu_buffer = build_buffer(device, buffer, data, sources, &mut resolved)?;
+            let gpu_buffer = build_buffer(device, buffer, data, sources, &mut resolved, expand)?;
             for model in models.iter_mut() {
                 model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
             }
@@ -301,10 +338,11 @@ fn build_buffer(
     data: &LayerData,
     sources: &[(&'static str, AttributeSource)],
     resolved: &mut HashMap<&'static str, Resolved>,
+    expand: Option<&[u32]>,
 ) -> Result<wgpu::Buffer> {
     // Single field buffers can take an Arrow column's bytes as they are
     if let [field] = spec.fields.as_slice() {
-        if field.offset == 0 && spec.stride == format_size(field.format) {
+        if expand.is_none() && field.offset == 0 && spec.stride == format_size(field.format) {
             match (source_of(sources, field.attribute)?, field.part) {
                 (AttributeSource::Positions(accessor), Part::High) => {
                     if let Some(values) = f32x3_column(data, accessor) {
@@ -333,7 +371,8 @@ fn build_buffer(
             }
         }
     }
-    let rows = data.len();
+    let rows = expand.map_or(data.len(), <[u32]>::len);
+    let source_row = |row: usize| data.source_row(expand.map_or(row, |e| e[row] as usize));
     for field in &spec.fields {
         if !resolved.contains_key(field.attribute) {
             let values = match source_of(sources, field.attribute)? {
@@ -348,6 +387,10 @@ fn build_buffer(
                     Err(DeckError::Data("vec4 columns are not supported yet".into()))
                 })?),
                 AttributeSource::RowIndex => Resolved::RowIndex,
+            };
+            let values = match expand {
+                Some(indices) => values.gather(indices),
+                None => values,
             };
             resolved.insert(field.attribute, values);
         }
@@ -366,7 +409,7 @@ fn build_buffer(
                 (Resolved::Vec3(v), _) => buffer(bytemuck::cast_slice(v)),
                 (Resolved::Vec4(v), _) => buffer(bytemuck::cast_slice(v)),
                 (Resolved::RowIndex, _) => {
-                    let indices: Vec<u32> = (0..rows).map(|i| data.source_row(i)).collect();
+                    let indices: Vec<u32> = (0..rows).map(source_row).collect();
                     buffer(bytemuck::cast_slice(&indices))
                 }
             });
@@ -395,7 +438,7 @@ fn build_buffer(
                 (Resolved::Vec2(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
                 (Resolved::Vec3(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
                 (Resolved::Vec4(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
-                (Resolved::RowIndex, _) => out.copy_from_slice(&data.source_row(row).to_ne_bytes()),
+                (Resolved::RowIndex, _) => out.copy_from_slice(&source_row(row).to_ne_bytes()),
             }
         }
     };
@@ -415,6 +458,27 @@ fn build_buffer(
 
 /// Rows above which packing runs on all cores.
 const PARALLEL_ROWS: usize = 16_384;
+
+impl Resolved {
+    /// The values of the rows in `indices`, in that order (out of range rows take the last).
+    fn gather(self, indices: &[u32]) -> Self {
+        fn pick<T: Copy>(values: &[T], indices: &[u32]) -> Vec<T> {
+            let Some(last) = values.len().checked_sub(1) else {
+                return Vec::new();
+            };
+            indices.iter().map(|&i| values[(i as usize).min(last)]).collect()
+        }
+        match self {
+            Self::Positions(v) => Self::Positions(pick(&v, indices)),
+            Self::Colors(v) => Self::Colors(pick(&v, indices)),
+            Self::Floats(v) => Self::Floats(pick(&v, indices)),
+            Self::Vec2(v) => Self::Vec2(pick(&v, indices)),
+            Self::Vec3(v) => Self::Vec3(pick(&v, indices)),
+            Self::Vec4(v) => Self::Vec4(pick(&v, indices)),
+            Self::RowIndex => Self::RowIndex,
+        }
+    }
+}
 
 fn high_part(p: Position) -> [f32; 3] {
     [p[0] as f32, p[1] as f32, p[2] as f32]
