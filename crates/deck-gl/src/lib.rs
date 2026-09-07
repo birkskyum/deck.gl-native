@@ -50,7 +50,8 @@ pub use mask::{MaskChannel, MaskMaps};
 pub use orbit_controller::{OrbitConstraints, OrbitController};
 pub use parameters::{CullMode, RenderParameters};
 pub use transition::{
-    TransitionDuration, TransitionInterpolator, TransitionInterruption, TransitionProps, ViewStateTransition,
+    EasingKind, PropTransition, PropTransitions, TransitionDuration, TransitionInterpolator,
+    TransitionInterruption, TransitionProps, ViewStateTransition,
 };
 pub use viewport::{
     FirstPersonViewportOptions, GlobeViewportOptions, OrbitViewportOptions, OrthographicViewportOptions,

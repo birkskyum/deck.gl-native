@@ -974,3 +974,46 @@ fn path_style_extension_props_and_target() {
     let rings = layers[1].props().extensions.get::<PathStyleExtension>().unwrap();
     assert_eq!(rings.target, PathStyleTarget::Scatterplot);
 }
+
+#[test]
+fn transitions_prop_parses_durations_easings_and_springs() {
+    use deck_gl::{EasingKind, PropTransition};
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([{
+                "@@type": "ScatterplotLayer", "id": "animated", "data": [],
+                "transitions": {
+                    "getRadius": 300,
+                    "radiusScale": {"duration": 500, "easing": "easeInOut"},
+                    "getPosition": {"type": "spring", "stiffness": 0.1}
+                }
+            }]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let transitions = &layers[0].props().transitions;
+    assert_eq!(
+        transitions.get("getRadius"),
+        Some(&PropTransition::interpolation(300.0))
+    );
+    assert_eq!(
+        transitions.get("radiusScale"),
+        Some(&PropTransition::Interpolation {
+            duration_ms: 500.0,
+            easing: EasingKind::EaseInOut
+        })
+    );
+    assert_eq!(
+        transitions.get("getPosition"),
+        Some(&PropTransition::Spring {
+            stiffness: 0.1,
+            damping: 0.5
+        })
+    );
+    assert_eq!(
+        transitions.for_attribute("radius"),
+        Some(PropTransition::interpolation(300.0))
+    );
+}

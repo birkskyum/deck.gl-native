@@ -450,6 +450,13 @@ impl Layer for SolidPolygonLayer {
         self.bounds
     }
 
+    fn in_transition(&self) -> bool {
+        [&self.top, &self.side, &self.wireframe]
+            .into_iter()
+            .flatten()
+            .any(Model::in_transition)
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use deck_gl::glam::DMat4;
 use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, Color, CoordinateSystem, CullMode, Extensions, LayerExtension, LayerProps, Material, Operation,
-    RenderParameters, Unit,
+    Accessor, Color, CoordinateSystem, CullMode, EasingKind, Extensions, LayerExtension, LayerProps,
+    Material, Operation, PropTransition, PropTransitions, RenderParameters, Unit,
 };
 use deck_gl_layers::{
     BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
@@ -389,6 +389,7 @@ impl<'a> Props<'a> {
             }
         };
         base.extensions = self.extensions()?;
+        base.transitions = self.transitions()?;
         base.operation = match self.string("operation")?.as_deref() {
             None | Some("draw") => Operation::DRAW,
             Some("mask") => Operation::MASK,
@@ -403,6 +404,81 @@ impl<'a> Props<'a> {
             }
         };
         Ok(base)
+    }
+
+    /// deck.gl's `transitions` prop: `{"getRadius": 300, "opacity": {"duration": 500,
+    /// "easing": "easeInOut"}, "getPosition": {"type": "spring", "stiffness": 0.05,
+    /// "damping": 0.5}}`.
+    fn transitions(&self) -> Result<PropTransitions> {
+        let key = "transitions";
+        let map = match self.get(key) {
+            None | Some(Value::Null) => return Ok(PropTransitions::default()),
+            Some(Value::Object(map)) => map,
+            Some(other) => {
+                return Err(self.error(key, format!("expected an object, got {}", describe(other))));
+            }
+        };
+        let mut transitions = PropTransitions::default();
+        for (prop, value) in map {
+            let transition = match value {
+                Value::Number(n) => PropTransition::interpolation(n.as_f64().unwrap_or(0.0)),
+                Value::Object(settings) => {
+                    let number = |name: &str, default: f64| -> Result<f64> {
+                        match settings.get(name) {
+                            None | Some(Value::Null) => Ok(default),
+                            Some(v) => {
+                                convert::number(v).map_err(|m| self.error(key, format!("{prop}.{name}: {m}")))
+                            }
+                        }
+                    };
+                    let kind = settings
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("interpolation");
+                    match kind {
+                        "spring" => PropTransition::Spring {
+                            stiffness: number("stiffness", 0.05)?,
+                            damping: number("damping", 0.5)?,
+                        },
+                        "interpolation" => {
+                            let easing = match settings.get("easing").and_then(Value::as_str) {
+                                None | Some("linear") => EasingKind::Linear,
+                                Some("easeIn") | Some("ease-in") => EasingKind::EaseIn,
+                                Some("easeOut") | Some("ease-out") => EasingKind::EaseOut,
+                                Some("easeInOut") | Some("ease-in-out") => EasingKind::EaseInOut,
+                                Some(other) => {
+                                    self.warn(format!(
+                                        "transitions.{prop}: easing `{other}` is unknown, using linear"
+                                    ));
+                                    EasingKind::Linear
+                                }
+                            };
+                            PropTransition::Interpolation {
+                                duration_ms: number("duration", 0.0)?,
+                                easing,
+                            }
+                        }
+                        other => {
+                            return Err(self.error(
+                                key,
+                                format!("{prop}: transition type `{other}` is not interpolation or spring"),
+                            ));
+                        }
+                    }
+                }
+                other => {
+                    return Err(self.error(
+                        key,
+                        format!(
+                            "{prop}: expected a duration or an object, got {}",
+                            describe(other)
+                        ),
+                    ))
+                }
+            };
+            transitions.0.insert(prop.clone(), transition);
+        }
+        Ok(transitions)
     }
 
     /// deck.gl decides clipping and masking by instance for layers with an `instancePositions`

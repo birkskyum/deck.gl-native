@@ -17,6 +17,7 @@ use crate::data::{
     Position,
 };
 use crate::layer::{position_bounds, union_bounds};
+use crate::transition::{PropTransition, PropTransitions};
 use crate::{DeckError, Result};
 
 /// Where an attribute's values come from, typed.
@@ -153,6 +154,7 @@ impl BufferSpec {
 }
 
 /// Resolved values of one attribute, shared by the fields that read it.
+#[derive(Clone, Debug)]
 enum Resolved {
     Positions(Vec<Position>),
     Colors(Vec<Color>),
@@ -174,6 +176,134 @@ pub struct AttributeManager {
     position_bounds: HashMap<&'static str, Option<[f64; 4]>>,
     /// The GPU buffer of every spec, written into again when its size does not change
     gpu: HashMap<&'static str, wgpu::Buffer>,
+    /// deck.gl's `transitions` for the attributes
+    transitions: PropTransitions,
+    /// The values of every attribute as last uploaded, kept while transitions are configured
+    last_values: HashMap<&'static str, Resolved>,
+    animations: HashMap<&'static str, AttributeAnimation>,
+    time: f64,
+}
+
+/// A running attribute transition: values move from `from` to `to`.
+#[derive(Debug)]
+struct AttributeAnimation {
+    transition: PropTransition,
+    shape: Shape,
+    from: Vec<f64>,
+    to: Vec<f64>,
+    current: Vec<f64>,
+    velocity: Vec<f64>,
+    start: f64,
+    last_step: f64,
+}
+
+/// The typed layout of a flattened attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape {
+    Positions,
+    Colors,
+    Floats,
+    Vec2,
+    Vec3,
+    Vec4,
+}
+
+impl AttributeAnimation {
+    /// The values at `time`; `false` once settled on the target.
+    fn advance(&mut self, time: f64) -> bool {
+        match self.transition {
+            PropTransition::Interpolation { duration_ms, easing } => {
+                let t = if duration_ms > 0.0 {
+                    ((time - self.start) * 1000.0 / duration_ms).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let eased = easing.function()(t).clamp(0.0, 1.0);
+                lerp_into(&mut self.current, &self.from, &self.to, eased);
+                t < 1.0
+            }
+            PropTransition::Spring { stiffness, damping } => {
+                if time == self.last_step {
+                    return true;
+                }
+                self.last_step = time;
+                let mut settled = true;
+                for ((current, velocity), to) in self.current.iter_mut().zip(&mut self.velocity).zip(&self.to)
+                {
+                    *velocity = *velocity * damping + (to - *current) * stiffness;
+                    *current += *velocity;
+                    if (to - *current).abs() > 1e-6 || velocity.abs() > 1e-6 {
+                        settled = false;
+                    }
+                }
+                if settled {
+                    self.current.clone_from(&self.to);
+                }
+                !settled
+            }
+        }
+    }
+}
+
+fn lerp_into(out: &mut [f64], from: &[f64], to: &[f64], t: f64) {
+    if out.len() >= PARALLEL_ROWS {
+        use rayon::prelude::*;
+        out.par_iter_mut()
+            .zip(from.par_iter())
+            .zip(to.par_iter())
+            .for_each(|((o, a), b)| *o = a + (b - a) * t);
+    } else {
+        for ((o, a), b) in out.iter_mut().zip(from).zip(to) {
+            *o = a + (b - a) * t;
+        }
+    }
+}
+
+impl Resolved {
+    /// The values flattened to numbers, for interpolation.
+    fn components(&self) -> Option<(Shape, Vec<f64>)> {
+        Some(match self {
+            Self::Positions(v) => (Shape::Positions, v.iter().flatten().copied().collect()),
+            Self::Colors(v) => (Shape::Colors, v.iter().flatten().map(|c| *c as f64).collect()),
+            Self::Floats(v) => (Shape::Floats, v.iter().map(|f| *f as f64).collect()),
+            Self::Vec2(v) => (Shape::Vec2, v.iter().flatten().map(|f| *f as f64).collect()),
+            Self::Vec3(v) => (Shape::Vec3, v.iter().flatten().map(|f| *f as f64).collect()),
+            Self::Vec4(v) => (Shape::Vec4, v.iter().flatten().map(|f| *f as f64).collect()),
+            Self::RowIndex => return None,
+        })
+    }
+
+    /// Values back from their flattened numbers.
+    fn from_components(shape: Shape, values: &[f64]) -> Self {
+        match shape {
+            Shape::Positions => Self::Positions(values.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()),
+            Shape::Colors => Self::Colors(
+                values
+                    .chunks_exact(4)
+                    .map(|c| [c[0], c[1], c[2], c[3]].map(|v| v.round().clamp(0.0, 255.0) as u8))
+                    .collect(),
+            ),
+            Shape::Floats => Self::Floats(values.iter().map(|v| *v as f32).collect()),
+            Shape::Vec2 => Self::Vec2(
+                values
+                    .chunks_exact(2)
+                    .map(|c| [c[0] as f32, c[1] as f32])
+                    .collect(),
+            ),
+            Shape::Vec3 => Self::Vec3(
+                values
+                    .chunks_exact(3)
+                    .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
+                    .collect(),
+            ),
+            Shape::Vec4 => Self::Vec4(
+                values
+                    .chunks_exact(4)
+                    .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32])
+                    .collect(),
+            ),
+        }
+    }
 }
 
 impl AttributeManager {
@@ -185,7 +315,87 @@ impl AttributeManager {
             force: true,
             position_bounds: HashMap::new(),
             gpu: HashMap::new(),
+            transitions: PropTransitions::default(),
+            last_values: HashMap::new(),
+            animations: HashMap::new(),
+            time: 0.0,
         }
+    }
+
+    /// deck.gl's `transitions` prop: the attributes named in it (by accessor name, `getRadius`)
+    /// animate from their old to their new values when their source changes.
+    pub fn set_transitions(&mut self, transitions: &PropTransitions) {
+        if self.transitions != *transitions {
+            self.transitions = transitions.clone();
+            if transitions.is_empty() {
+                self.last_values.clear();
+                self.animations.clear();
+            }
+        }
+    }
+
+    /// Whether an attribute is still moving towards its values.
+    pub fn in_transition(&self) -> bool {
+        !self.animations.is_empty()
+    }
+
+    /// Advance the running attribute transitions to `time` and upload the buffers they touch.
+    /// Returns whether any is still running.
+    pub fn animate(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        models: &mut [&mut Model],
+        data: &LayerData,
+        time: f64,
+    ) -> Result<bool> {
+        if self.animations.is_empty() {
+            return Ok(false);
+        }
+        let mut resolved: HashMap<&'static str, Resolved> = HashMap::new();
+        let mut finished = Vec::new();
+        for (name, animation) in &mut self.animations {
+            let running = animation.advance(time);
+            let values = Resolved::from_components(animation.shape, &animation.current);
+            resolved.insert(name, values);
+            if !running {
+                finished.push(*name);
+            }
+        }
+        let animated: Vec<&'static str> = resolved.keys().copied().collect();
+        for buffer in &self.buffers {
+            if !buffer.fields.iter().any(|f| animated.contains(&f.attribute)) {
+                continue;
+            }
+            // the other attributes of the buffer come from the last upload
+            for field in &buffer.fields {
+                if let Some(values) = self.last_values.get(field.attribute) {
+                    resolved.entry(field.attribute).or_insert_with(|| values.clone());
+                }
+            }
+            let sources: Vec<(&'static str, AttributeSource)> = self
+                .previous
+                .iter()
+                .map(|(name, source)| (*name, source.clone()))
+                .collect();
+            let existing = self.gpu.get(buffer.name);
+            let upload =
+                |bytes: &[u8]| write_or_create_vertex_buffer(device, queue, existing, buffer.name, bytes);
+            let gpu_buffer = build_buffer(&upload, buffer, data, &sources, &mut resolved, None)?;
+            for model in models.iter_mut() {
+                model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
+            }
+            self.gpu.insert(buffer.name, gpu_buffer);
+        }
+        for name in &animated {
+            if let Some(values) = resolved.remove(name) {
+                self.last_values.insert(name, values);
+            }
+        }
+        for name in finished {
+            self.animations.remove(name);
+        }
+        Ok(!self.animations.is_empty())
     }
 
     /// The bounds of the position attributes, `[min x, min y, max x, max y]`, once they were
@@ -210,6 +420,11 @@ impl AttributeManager {
     /// Upload every buffer on the next update (after the model was recreated).
     pub fn invalidate_all(&mut self) {
         self.force = true;
+    }
+
+    /// The time of the frame, what a transition that starts in the next update begins at.
+    pub fn set_time(&mut self, time: f64) {
+        self.time = time;
     }
 
     /// Upload the buffers whose sources or data changed; returns how many were uploaded.
@@ -272,6 +487,62 @@ impl AttributeManager {
         };
         let mut resolved: HashMap<&'static str, Resolved> = HashMap::new();
         let mut uploaded = 0;
+        let same_rows = self.previous_data.as_ref().is_some_and(|d| d.len() == data.len());
+        // Attributes with a transition start moving from their last values instead of jumping
+        if !self.transitions.is_empty() && same_rows && expand.is_none() {
+            let mut starting: Vec<(&'static str, AttributeAnimation)> = Vec::new();
+            for buffer in &self.buffers {
+                for field in &buffer.fields {
+                    let name = field.attribute;
+                    if starting.iter().any(|(n, _)| *n == name) || !changed(name) && !data_changed {
+                        continue;
+                    }
+                    let (Some(transition), Some(last)) =
+                        (self.transitions.for_attribute(name), self.last_values.get(name))
+                    else {
+                        continue;
+                    };
+                    let Some((shape, from)) = self
+                        .animations
+                        .get(name)
+                        .map(|a| (a.shape, a.current.clone()))
+                        .or_else(|| last.components())
+                    else {
+                        continue;
+                    };
+                    let source = source_of(sources, name)?;
+                    let target = resolve_source(data, source)?;
+                    let Some((target_shape, to)) = target.components() else {
+                        continue;
+                    };
+                    if target_shape != shape || to.len() != from.len() {
+                        continue;
+                    }
+                    let velocity = self
+                        .animations
+                        .get(name)
+                        .map(|a| a.velocity.clone())
+                        .unwrap_or_else(|| vec![0.0; from.len()]);
+                    resolved.insert(name, Resolved::from_components(shape, &from));
+                    starting.push((
+                        name,
+                        AttributeAnimation {
+                            transition,
+                            shape,
+                            current: from.clone(),
+                            from,
+                            to,
+                            velocity,
+                            start: self.time,
+                            last_step: f64::NAN,
+                        },
+                    ));
+                }
+            }
+            for (name, animation) in starting {
+                self.animations.insert(name, animation);
+            }
+        }
         for buffer in &self.buffers {
             if !data_changed && !buffer.fields.iter().any(|f| changed(f.attribute)) {
                 continue;
@@ -289,6 +560,17 @@ impl AttributeManager {
         for (name, values) in &resolved {
             if let Resolved::Positions(positions) = values {
                 self.position_bounds.insert(name, parallel_bounds(positions));
+            }
+        }
+        if self.transitions.is_empty() {
+            self.last_values.clear();
+        } else {
+            if !same_rows {
+                self.last_values.clear();
+                self.animations.clear();
+            }
+            for (name, values) in resolved {
+                self.last_values.insert(name, values);
             }
         }
         self.previous = sources
@@ -352,7 +634,11 @@ fn build_buffer(
 ) -> Result<wgpu::Buffer> {
     // Single field buffers can take an Arrow column's bytes as they are
     if let [field] = spec.fields.as_slice() {
-        if expand.is_none() && field.offset == 0 && spec.stride == format_size(field.format) {
+        if expand.is_none()
+            && !resolved.contains_key(field.attribute)
+            && field.offset == 0
+            && spec.stride == format_size(field.format)
+        {
             match (source_of(sources, field.attribute)?, field.part) {
                 (AttributeSource::Positions(accessor), Part::High) => {
                     if let Some(values) = f32x3_column(data, accessor) {
@@ -377,19 +663,7 @@ fn build_buffer(
     let source_row = |row: usize| data.source_row(expand.map_or(row, |e| e[row] as usize));
     for field in &spec.fields {
         if !resolved.contains_key(field.attribute) {
-            let values = match source_of(sources, field.attribute)? {
-                AttributeSource::Positions(a) => Resolved::Positions(resolve_positions(data, a)?),
-                AttributeSource::Colors(a) => Resolved::Colors(resolve_colors(data, a)?),
-                AttributeSource::Floats(a) => Resolved::Floats(resolve_f32(data, a)?),
-                AttributeSource::Vec2(a) => Resolved::Vec2(resolve_vec2(data, a)?),
-                AttributeSource::Vec3(a) => Resolved::Vec3(resolve_with(data, a, |_| {
-                    Err(DeckError::Data("vec3 columns are not supported yet".into()))
-                })?),
-                AttributeSource::Vec4(a) => Resolved::Vec4(resolve_with(data, a, |_| {
-                    Err(DeckError::Data("vec4 columns are not supported yet".into()))
-                })?),
-                AttributeSource::RowIndex => Resolved::RowIndex,
-            };
+            let values = resolve_source(data, source_of(sources, field.attribute)?)?;
             let values = match expand {
                 Some(indices) => values.gather(indices),
                 None => values,
@@ -456,6 +730,23 @@ fn build_buffer(
         }
     }
     Ok(upload(&bytes))
+}
+
+/// The values of a source for every row of the data.
+fn resolve_source(data: &LayerData, source: &AttributeSource) -> Result<Resolved> {
+    Ok(match source {
+        AttributeSource::Positions(a) => Resolved::Positions(resolve_positions(data, a)?),
+        AttributeSource::Colors(a) => Resolved::Colors(resolve_colors(data, a)?),
+        AttributeSource::Floats(a) => Resolved::Floats(resolve_f32(data, a)?),
+        AttributeSource::Vec2(a) => Resolved::Vec2(resolve_vec2(data, a)?),
+        AttributeSource::Vec3(a) => Resolved::Vec3(resolve_with(data, a, |_| {
+            Err(DeckError::Data("vec3 columns are not supported yet".into()))
+        })?),
+        AttributeSource::Vec4(a) => Resolved::Vec4(resolve_with(data, a, |_| {
+            Err(DeckError::Data("vec4 columns are not supported yet".into()))
+        })?),
+        AttributeSource::RowIndex => Resolved::RowIndex,
+    })
 }
 
 /// Rows above which packing runs on all cores.

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::pipeline_cache::{PipelineCache, PipelineKey};
 use crate::shader::{AssembledShader, ResourceBinding, ResourceKind, UniformBinding};
 use crate::uniform::UniformBlock;
+use crate::uniform::UniformTransition;
 use crate::{LumaError, Result};
 
 /// Format of the attachments a model will render into.
@@ -414,6 +415,35 @@ impl Model {
         self.uniforms
             .get_mut(name)
             .ok_or_else(|| LumaError::Uniform(format!("{}: no uniform block `{name}`", self.label)))
+    }
+
+    /// The time animated uniform fields are evaluated at, for every block.
+    pub fn set_time(&mut self, time: f64) {
+        for block in self.uniforms.values_mut() {
+            block.set_time(time);
+        }
+    }
+
+    /// Animate the uniform fields named in `transitions` (fields the shader does not have are
+    /// ignored) and stop animating every other field.
+    pub fn set_uniform_transitions(&mut self, transitions: &[(&str, UniformTransition)]) {
+        for block in self.uniforms.values_mut() {
+            let names: Vec<String> = block.layout().fields.iter().map(|f| f.name.clone()).collect();
+            for name in names {
+                let transition = transitions
+                    .iter()
+                    .find(|(field, _)| *field == name)
+                    .map(|(_, t)| *t);
+                if transition.is_some() || block.has_transition(&name) {
+                    block.set_transition(&name, transition);
+                }
+            }
+        }
+    }
+
+    /// Whether a uniform field is still moving towards its value.
+    pub fn in_transition(&self) -> bool {
+        self.uniforms.values().any(UniformBlock::in_transition)
     }
 
     pub fn has_uniforms(&self, name: &str) -> bool {

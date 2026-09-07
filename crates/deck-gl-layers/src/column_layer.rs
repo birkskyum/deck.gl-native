@@ -347,9 +347,21 @@ impl Layer for ColumnLayer {
         if self.models_dirty {
             self.initialize(ctx)?;
         }
+        self.attributes.set_time(ctx.time);
+        self.attributes.set_transitions(&self.props.base.transitions);
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;
+        }
+        {
+            let mut models: Vec<&mut Model> = [&mut self.fill, &mut self.stroke, &mut self.wireframe]
+                .into_iter()
+                .flatten()
+                .collect();
+            if !models.is_empty() {
+                self.attributes
+                    .animate(&ctx.device, &ctx.queue, &mut models, &self.props.data, ctx.time)?;
+            }
         }
         let props = self.props.clone();
         let edge_distance = (std::f32::consts::PI / props.disk_resolution.max(3) as f32).cos();
@@ -419,6 +431,14 @@ impl Layer for ColumnLayer {
 
     fn bounds(&self) -> Option<[f64; 4]> {
         self.attributes.bounds()
+    }
+
+    fn in_transition(&self) -> bool {
+        self.attributes.in_transition()
+            || [&self.fill, &self.stroke, &self.wireframe]
+                .into_iter()
+                .flatten()
+                .any(Model::in_transition)
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

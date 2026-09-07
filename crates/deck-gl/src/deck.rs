@@ -161,6 +161,10 @@ pub struct Deck {
     collisions: Arc<CollisionMaps>,
     /// One colour and depth target per collision group, kept across frames
     collision_targets: HashMap<String, CollisionTarget>,
+    /// When the deck was created, the origin of its own clock
+    created: std::time::Instant,
+    /// The time of the last `tick`, which replaces the deck's own clock once used
+    now: Option<f64>,
 }
 
 impl Deck {
@@ -186,6 +190,7 @@ impl Deck {
             masks: Some(masks.clone()),
             collisions: Some(collisions.clone()),
             pipelines: PipelineCache::new(),
+            time: 0.0,
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -221,6 +226,8 @@ impl Deck {
             mask_textures: HashMap::new(),
             collisions,
             collision_targets: HashMap::new(),
+            created: std::time::Instant::now(),
+            now: None,
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -446,8 +453,9 @@ impl Deck {
     /// Advance a transition started with [`Deck::transition_to`]; returns true while the
     /// camera is still moving.
     pub fn tick(&mut self, now: f64) -> bool {
+        self.now = Some(now);
         let Some(transition) = self.transition else {
-            return false;
+            return self.animating();
         };
         let view = transition.at(now);
         self.view_state = view;
@@ -909,6 +917,7 @@ impl Deck {
     /// operation is `mask` are updated first and rendered into the mask textures, so that the
     /// layers sampling them see this frame's masks.
     pub fn update(&mut self) -> Result<()> {
+        self.ctx.time = self.time();
         self.update_layers(true)?;
         self.update_masks()?;
         self.update_layers(false)?;
@@ -1068,6 +1077,22 @@ impl Deck {
             drawing_to_map,
         });
         self.ctx.collisions = Some(self.collisions.clone());
+    }
+
+    /// The time transitions run on, in seconds: the last [`Deck::tick`], or the deck's own
+    /// clock since its creation when the host never ticks.
+    pub fn time(&self) -> f64 {
+        self.now.unwrap_or_else(|| self.created.elapsed().as_secs_f64())
+    }
+
+    /// Whether a view state, prop or attribute transition is still running, so the host
+    /// should keep drawing frames (and ticking).
+    pub fn animating(&self) -> bool {
+        self.transition.is_some()
+            || self
+                .layers
+                .iter()
+                .any(|e| e.initialized && e.layer.in_transition())
     }
 
     /// Initialize and update the layers whose operation is (`masks`) or is not `mask`.

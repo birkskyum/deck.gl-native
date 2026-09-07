@@ -14,6 +14,7 @@ use crate::lighting::{LightingEffect, Material};
 use crate::mask::MaskMaps;
 use crate::parameters::RenderParameters;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
+use crate::transition::PropTransitions;
 use crate::viewport::Viewport;
 use crate::Result;
 
@@ -131,6 +132,8 @@ pub struct LayerProps {
     pub extensions: Extensions,
     /// Whether the layer draws on screen or into a mask, see [`Operation`].
     pub operation: Operation,
+    /// How prop changes animate, see [`PropTransitions`].
+    pub transitions: PropTransitions,
 }
 
 impl Default for LayerProps {
@@ -153,6 +156,7 @@ impl Default for LayerProps {
             on_click: None,
             extensions: Extensions::default(),
             operation: Operation::DRAW,
+            transitions: PropTransitions::default(),
         }
     }
 }
@@ -206,6 +210,9 @@ pub struct LayerContext {
     pub collisions: Option<Arc<CollisionMaps>>,
     /// Shader modules and pipelines shared by every model of the deck.
     pub pipelines: PipelineCache,
+    /// The time of the frame in seconds, from `Deck::tick` or the deck's own clock; what
+    /// transitions are evaluated at.
+    pub time: f64,
 }
 
 /// Attachments of the mask pass: one red channel texture and no depth buffer.
@@ -329,6 +336,11 @@ pub trait Layer {
         None
     }
 
+    /// Whether a prop or attribute transition is still running, so the deck keeps drawing.
+    fn in_transition(&self) -> bool {
+        false
+    }
+
     /// For downcasting in [`Layer::update_from`].
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 
@@ -428,6 +440,11 @@ impl SubLayers {
         }
     }
 
+    /// Whether any sub layer is still animating.
+    pub fn in_transition(&self) -> bool {
+        self.layers.iter().any(|(layer, _)| layer.in_transition())
+    }
+
     /// The bounds of all sub layers together.
     pub fn bounds(&self) -> Option<[f64; 4]> {
         self.layers
@@ -468,6 +485,8 @@ pub fn update_standard_uniforms(
     props: &LayerProps,
 ) -> Result<()> {
     model.set_uniform_slot(ctx.uniform_slot);
+    model.set_time(ctx.time);
+    model.set_uniform_transitions(&props.transitions.uniforms());
     let project = get_uniforms_from_viewport(&project_props(ctx, viewport, props));
     project.write(model.uniforms("project")?)?;
 

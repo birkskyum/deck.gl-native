@@ -751,6 +751,13 @@ impl Layer for TextLayer {
         self.props.base.highlighted_object_index = index;
     }
 
+    fn in_transition(&self) -> bool {
+        [&self.background, &self.characters, &self.fill_pass]
+            .into_iter()
+            .flatten()
+            .any(Model::in_transition)
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

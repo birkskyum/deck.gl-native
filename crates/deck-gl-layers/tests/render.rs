@@ -14,7 +14,8 @@ use deck_gl::wgpu;
 use deck_gl::{
     same_extension, Accessor, ClickCallback, Deck, DeckProps, ExtensionAttribute, ExtensionShaders,
     Extensions, HoverCallback, Layer, LayerContext, LayerData, LayerExtension, LayerProps, Material,
-    Operation, Path, PickingInfo, RenderParameters, Unit, ViewState, Viewport,
+    Operation, Path, PickingInfo, PropTransition, PropTransitions, RenderParameters, Unit, ViewState,
+    Viewport,
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
@@ -3031,4 +3032,91 @@ fn high_zoom_positions_keep_pixel_precision() {
     assert_eq!(shot.pixel(c - 14, c)[3], 0);
     assert_eq!(shot.pixel(c + 14, c)[3], 0);
     assert_eq!(shot.pixel(c, c - 4)[3], 0);
+}
+
+#[test]
+fn uniform_transitions_animate_prop_changes() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    // a circle whose radius scale moves over one second
+    let circle = |radius_scale: f32| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                transitions: PropTransitions::new()
+                    .with("radiusScale", PropTransition::interpolation(1000.0)),
+                ..LayerProps::new("growing")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_radius: Accessor::Constant(4.0),
+            radius_scale,
+            radius_units: Unit::Pixels,
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            antialiasing: false,
+            ..Default::default()
+        }))
+    };
+    let mut deck = make_deck(&ctx, vec![circle(1.0)]);
+    deck.tick(0.0);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c + 2, c)[3], 255);
+    assert_eq!(shot.pixel(c + 6, c)[3], 0);
+    assert!(!deck.animating());
+    // the transition starts at the first update after the change; halfway through it the
+    // radius is halfway between 4 and 12 pixels
+    deck.set_layers(vec![circle(3.0)]);
+    deck.tick(0.0);
+    deck.update().unwrap();
+    deck.tick(0.5);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c + 6, c)[3], 255, "grown past 6 px");
+    assert_eq!(shot.pixel(c + 10, c)[3], 0, "not yet 10 px");
+    assert!(deck.animating());
+    deck.tick(2.0);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c + 10, c)[3], 255);
+    assert!(!deck.animating());
+}
+
+#[test]
+fn attribute_transitions_move_objects_between_positions() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    let circle = |x: f64| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                transitions: PropTransitions::new()
+                    .with("getPosition", PropTransition::interpolation(1000.0)),
+                ..LayerProps::new("moving")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant([x, CENTER[1], 0.0]),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            antialiasing: false,
+            ..Default::default()
+        }))
+    };
+    let mut deck = make_deck(&ctx, vec![circle(CENTER[0] - d)]);
+    deck.tick(0.0);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c - 16, c)[3], 255);
+    // move 32 pixels to the right over one second from the first update after the change:
+    // halfway it sits in the middle
+    deck.set_layers(vec![circle(CENTER[0] + d)]);
+    deck.tick(0.0);
+    deck.update().unwrap();
+    deck.tick(0.5);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c)[3], 255, "in the middle");
+    assert_eq!(shot.pixel(c - 16, c)[3], 0);
+    assert_eq!(shot.pixel(c + 16, c)[3], 0);
+    assert!(deck.animating());
+    deck.tick(1.5);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c + 16, c)[3], 255);
+    assert_eq!(shot.pixel(c, c)[3], 0);
+    assert!(!deck.animating());
 }

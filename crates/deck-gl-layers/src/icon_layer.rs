@@ -353,9 +353,15 @@ impl Layer for IconLayer {
         if self.model.is_none() {
             self.initialize(ctx)?;
         }
+        self.attributes.set_time(ctx.time);
+        self.attributes.set_transitions(&self.props.base.transitions);
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;
+        }
+        if let Some(model) = self.model.as_mut() {
+            self.attributes
+                .animate(&ctx.device, &ctx.queue, &mut [model], &self.props.data, ctx.time)?;
         }
         let props = &self.props;
         let texture_size = self.texture_size;
@@ -401,6 +407,10 @@ impl Layer for IconLayer {
 
     fn bounds(&self) -> Option<[f64; 4]> {
         self.attributes.bounds()
+    }
+
+    fn in_transition(&self) -> bool {
+        self.attributes.in_transition() || self.model.as_ref().is_some_and(Model::in_transition)
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

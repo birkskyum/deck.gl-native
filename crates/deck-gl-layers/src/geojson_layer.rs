@@ -275,6 +275,10 @@ impl Layer for GeoJsonLayer {
         self.sub_layers.bounds()
     }
 
+    fn in_transition(&self) -> bool {
+        self.sub_layers.in_transition()
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

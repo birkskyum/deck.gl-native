@@ -28,7 +28,7 @@ pub use shader::{
     assemble, assemble_shader, AssembledShader, ShaderAssembly, ShaderField, ShaderHook, ShaderInjection,
     ShaderModuleSource,
 };
-pub use uniform::UniformBlock;
+pub use uniform::{UniformBlock, UniformTransition};
 pub use wgpu;
 
 /// Errors produced by luma-gl.

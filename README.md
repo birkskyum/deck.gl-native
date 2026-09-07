@@ -47,6 +47,10 @@ Working today, headless and verified pixel by pixel in tests:
   the windowing library; the window example wires it to winit.
 - `Deck::set_layers` reconciles by id: a layer re-sent with the same id and type keeps its GPU
   resources, and attributes are only rebuilt when its props changed
+- deck.gl's `transitions` prop: uniform props (`radiusScale`, `opacity`, ...) and attributes
+  (`getPosition`, `getFillColor`, ...) animate from their old to their new values with a
+  duration and easing or as a spring; `Deck::tick` drives the clock and `Deck::animating`
+  says whether to keep drawing
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
   example (4,600 extruded polygons) parses and renders in under 50 ms
 - JSON descriptions in the `@deck.gl/json` and pydeck format, with `@@=` accessor expressions

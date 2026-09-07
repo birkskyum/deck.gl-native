@@ -223,6 +223,10 @@ impl Layer for BitmapLayer {
         self.props.base.highlighted_object_index = index;
     }
 
+    fn in_transition(&self) -> bool {
+        self.model.as_ref().is_some_and(Model::in_transition)
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }

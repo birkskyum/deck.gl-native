@@ -187,7 +187,7 @@ convention behind this.
 
 | Layer | Props |
 | --- | --- |
-| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `autoHighlight`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`), `parameters` (`depthTest`, `depthWriteEnabled`, `depthCompare`, `cullMode`, `blend`, `blendColorOperation`, `blendColorSrcFactor`, `blendColorDstFactor`, `blendAlphaOperation`, `blendAlphaSrcFactor`, `blendAlphaDstFactor`, with luma.gl's WebGPU names), `extensions` (see [Extensions](#extensions)), `operation` (`draw`, or `mask` for a layer that only defines a mask) |
+| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `autoHighlight`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`), `parameters` (`depthTest`, `depthWriteEnabled`, `depthCompare`, `cullMode`, `blend`, `blendColorOperation`, `blendColorSrcFactor`, `blendColorDstFactor`, `blendAlphaOperation`, `blendAlphaSrcFactor`, `blendAlphaDstFactor`, with luma.gl's WebGPU names), `extensions` (see [Extensions](#extensions)), `operation` (`draw`, or `mask` for a layer that only defines a mask), `transitions` (`{"getRadius": 300, "opacity": {"duration": 500, "easing": "easeInOut"}, "getPosition": {"type": "spring", "stiffness": 0.05, "damping": 0.5}}`: animate attribute and uniform prop changes) |
 | `ScatterplotLayer` | `radiusUnits`, `radiusScale`, `radiusMinPixels`, `radiusMaxPixels`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `stroked`, `filled`, `billboard`, `antialiasing`, `getPosition`, `getRadius`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPixelOffset` |
 | `LineLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getColor`, `getWidth` |
 | `ArcLayer` | `greatCircle`, `numSegments`, `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getSourceColor`, `getTargetColor`, `getWidth`, `getHeight`, `getTilt` |
@@ -212,6 +212,6 @@ convention behind this.
 | `IconLayer` | `iconAtlas`, `iconMapping`, `sizeUnits`, `sizeScale`, `sizeMinPixels`, `sizeMaxPixels`, `billboard`, `alphaCutoff`, `getPosition`, `getIcon`, `getColor`, `getSize`, `getAngle`, `getPixelOffset` |
 | `BitmapLayer` | `image`, `bounds` (`[left, bottom, right, top]` or four corners), `desaturate`, `transparentColor`, `tintColor` |
 
-Props deck.gl accepts but this port does not have yet (`transitions`, `pointType`, ...)
-produce a warning and are skipped, as are layer types that do not exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
+Props deck.gl accepts but this port does not have yet (`pointType`, ...) produce a warning
+and are skipped, as are layer types that do not exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
 have no meaning in a static description.

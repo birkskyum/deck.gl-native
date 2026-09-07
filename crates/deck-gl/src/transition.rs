@@ -1,6 +1,10 @@
 //! View state transitions: deck.gl's `LinearInterpolator`, `FlyToInterpolator` and the part of
-//! `TransitionManager` that advances a transition each frame.
+//! `TransitionManager` that advances a transition each frame. Also the `transitions` prop of
+//! layers, which animates uniform and attribute changes.
 
+use std::collections::HashMap;
+
+use luma_gl::uniform::UniformTransition;
 use math_gl::fly_to::{fly_to_viewport, get_fly_to_duration, FlyToOptions, FlyToProps};
 
 use crate::deck::ViewState;
@@ -87,6 +91,122 @@ impl TransitionProps {
 
 pub fn linear(t: f64) -> f64 {
     t
+}
+
+/// The ease in cubic curve.
+pub fn ease_in_cubic(t: f64) -> f64 {
+    t * t * t
+}
+
+/// The ease out cubic curve.
+pub fn ease_out_cubic(t: f64) -> f64 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+/// A named easing, for props and JSON.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EasingKind {
+    #[default]
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl EasingKind {
+    pub fn function(self) -> Easing {
+        match self {
+            Self::Linear => linear,
+            Self::EaseIn => ease_in_cubic,
+            Self::EaseOut => ease_out_cubic,
+            Self::EaseInOut => ease_in_out_cubic,
+        }
+    }
+}
+
+/// How one prop of a layer animates when it changes, deck.gl's `transitions` entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PropTransition {
+    /// Move from the old to the new value over `duration_ms` along an easing
+    Interpolation { duration_ms: f64, easing: EasingKind },
+    /// A spring: every frame `velocity = velocity * damping + (target - value) * stiffness`
+    /// and the value moves by the velocity, until it settles
+    Spring { stiffness: f64, damping: f64 },
+}
+
+impl PropTransition {
+    pub fn interpolation(duration_ms: f64) -> Self {
+        Self::Interpolation {
+            duration_ms,
+            easing: EasingKind::Linear,
+        }
+    }
+
+    /// deck.gl's spring defaults.
+    pub fn spring() -> Self {
+        Self::Spring {
+            stiffness: 0.05,
+            damping: 0.5,
+        }
+    }
+
+    /// The same transition for luma's uniform blocks, in seconds.
+    pub fn uniform(self) -> UniformTransition {
+        match self {
+            Self::Interpolation { duration_ms, easing } => UniformTransition::Interpolation {
+                duration: duration_ms / 1000.0,
+                easing: easing.function(),
+            },
+            Self::Spring { stiffness, damping } => UniformTransition::Spring { stiffness, damping },
+        }
+    }
+}
+
+/// deck.gl's `transitions` prop: which props of a layer animate when they change, by prop
+/// name. Attribute props use their accessor name (`getRadius`, `getPosition`), uniform props
+/// their prop name (`radiusScale`, `opacity`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PropTransitions(pub HashMap<String, PropTransition>);
+
+impl PropTransitions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a transition for a prop.
+    pub fn with(mut self, prop: impl Into<String>, transition: PropTransition) -> Self {
+        self.0.insert(prop.into(), transition);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn get(&self, prop: &str) -> Option<&PropTransition> {
+        self.0.get(prop)
+    }
+
+    /// The transition of an attribute known by its source name (`fillColor` is deck.gl's
+    /// `getFillColor`).
+    pub fn for_attribute(&self, source: &str) -> Option<PropTransition> {
+        if let Some(transition) = self.0.get(source) {
+            return Some(*transition);
+        }
+        let mut chars = source.chars();
+        let first = chars.next()?;
+        let accessor = format!("get{}{}", first.to_ascii_uppercase(), chars.as_str());
+        self.0.get(&accessor).copied()
+    }
+
+    /// Every transition as a uniform transition by prop name, for a model to match against
+    /// its uniform fields.
+    pub fn uniforms(&self) -> Vec<(&str, UniformTransition)> {
+        self.0
+            .iter()
+            .map(|(name, t)| (name.as_str(), t.uniform()))
+            .collect()
+    }
 }
 
 /// The ease in and out cubic curve, a common `transitionEasing`.
