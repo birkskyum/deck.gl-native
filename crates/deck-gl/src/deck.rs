@@ -1,6 +1,6 @@
 //! Port of `@deck.gl/core/src/lib/deck.ts`, reduced to what a native host needs.
 
-use luma_gl::{RenderTarget, PICKING_FORMAT};
+use luma_gl::{PipelineCache, RenderTarget, PICKING_FORMAT};
 
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
@@ -185,6 +185,7 @@ impl Deck {
             pointer: None,
             masks: Some(masks.clone()),
             collisions: Some(collisions.clone()),
+            pipelines: PipelineCache::new(),
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),

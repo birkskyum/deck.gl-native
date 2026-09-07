@@ -137,6 +137,29 @@ fn bench_layers(c: &mut Criterion) {
         group.finish();
     }
 
+    // Two hundred small layers: shader compilation and pipelines are shared between them
+    let mut group = c.benchmark_group("many_layers");
+    group.sample_size(10);
+    group.bench_function(BenchmarkId::new("init", 200), |b| {
+        b.iter(|| {
+            let layers: Vec<Box<dyn Layer>> = (0..200)
+                .map(|i| {
+                    Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+                        base: LayerProps::new(format!("points-{i}")),
+                        data: LayerData::with_length(10),
+                        get_position: Accessor::func(move |j| position(i * 10 + j, 0.5)),
+                        get_radius: Accessor::Constant(3.0),
+                        radius_units: Unit::Pixels,
+                        ..Default::default()
+                    })) as Box<dyn Layer>
+                })
+                .collect();
+            let mut deck = deck(&ctx, layers);
+            deck.snapshot(None).expect("frame");
+        });
+    });
+    group.finish();
+
     // A million points from Arrow columns in the GPU layout: positions and colours upload as
     // they are
     let mut group = c.benchmark_group("scatterplot_arrow");

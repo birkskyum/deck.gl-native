@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use crate::pipeline_cache::{PipelineCache, PipelineKey};
 use crate::shader::{AssembledShader, ResourceBinding, ResourceKind, UniformBinding};
 use crate::uniform::UniformBlock;
 use crate::{LumaError, Result};
@@ -101,6 +102,8 @@ pub struct ModelDescriptor<'a> {
     /// Also build a picking pipeline: same shader, an RGBA8 target, and alpha taken from the
     /// blend constant so a pass can tag every layer with an id. See [`Model::draw_picking`].
     pub pickable: bool,
+    /// Share shader modules and pipelines with other models built through the same cache.
+    pub cache: Option<PipelineCache>,
 }
 
 impl<'a> ModelDescriptor<'a> {
@@ -124,6 +127,7 @@ impl<'a> ModelDescriptor<'a> {
             depth_bias: wgpu::DepthBiasState::default(),
             cull_mode: None,
             pickable: false,
+            cache: None,
         }
     }
 }
@@ -202,10 +206,8 @@ pub struct Model {
 impl Model {
     pub fn new(device: &wgpu::Device, desc: &ModelDescriptor<'_>) -> Result<Self> {
         let shader = desc.shader;
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(desc.label),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&shader.wgsl)),
-        });
+        let cache = desc.cache.clone().unwrap_or_default();
+        let module = cache.shader_module(device, desc.label, &shader.wgsl);
 
         // Uniform blocks and the bind group layout are derived from the shader. Textures and
         // samplers start as placeholders so the bind group is always complete.
@@ -260,10 +262,7 @@ impl Model {
                 }
             }
         }
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(desc.label),
-            entries: &layout_entries,
-        });
+        let (bind_group_layout, pipeline_layout) = cache.layouts(device, desc.label, &layout_entries);
         let buffers: HashMap<&str, &wgpu::Buffer> = uniforms
             .iter()
             .map(|(name, block)| (name.as_str(), block.buffer()))
@@ -278,12 +277,6 @@ impl Model {
             &textures,
             &samplers,
         );
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(desc.label),
-            bind_group_layouts: &[Some(&bind_group_layout)],
-            immediate_size: 0,
-        });
-
         let buffers: Vec<Option<wgpu::VertexBufferLayout<'_>>> = desc
             .vertex_layouts
             .iter()
@@ -301,51 +294,76 @@ impl Model {
             wgpu::PrimitiveTopology::TriangleList | wgpu::PrimitiveTopology::TriangleStrip => desc.depth_bias,
             _ => wgpu::DepthBiasState::default(),
         };
+        let wgsl = crate::pipeline_cache::wgsl_hash(&shader.wgsl);
         let make_pipeline =
             |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>, sample_count: u32| {
+                let key = PipelineKey {
+                    wgsl,
+                    vertex_layouts: desc
+                        .vertex_layouts
+                        .iter()
+                        .map(|l| (l.stride, l.step_mode, l.attributes.clone()))
+                        .collect(),
+                    bind_group_layout: layout_entries.clone(),
+                    topology: desc.topology,
+                    color_format: format,
+                    depth_format: desc.target.depth_format,
+                    sample_count,
+                    blend,
+                    depth_write_enabled: desc.depth_write_enabled,
+                    depth_compare: desc.depth_compare,
+                    depth_bias: (
+                        depth_bias.constant,
+                        depth_bias.slope_scale.to_bits(),
+                        depth_bias.clamp.to_bits(),
+                    ),
+                    cull_mode: desc.cull_mode,
+                };
                 let color_target = wgpu::ColorTargetState {
                     format,
                     blend,
                     write_mask: wgpu::ColorWrites::ALL,
                 };
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &module,
-                        entry_point: Some("vertexMain"),
-                        compilation_options: Default::default(),
-                        buffers: &buffers,
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: desc.topology,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: desc.cull_mode,
-                        unclipped_depth: false,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        conservative: false,
-                    },
-                    depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
-                        format,
-                        depth_write_enabled: Some(desc.depth_write_enabled),
-                        depth_compare: Some(desc.depth_compare),
-                        stencil: wgpu::StencilState::default(),
-                        bias: depth_bias,
-                    }),
-                    multisample: wgpu::MultisampleState {
-                        count: sample_count,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &module,
-                        entry_point: Some("fragmentMain"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(color_target)],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
+                cache.render_pipeline(key, || {
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some(label),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &module,
+                            entry_point: Some("vertexMain"),
+                            compilation_options: Default::default(),
+                            buffers: &buffers,
+                        },
+                        primitive: wgpu::PrimitiveState {
+                            topology: desc.topology,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: desc.cull_mode,
+                            unclipped_depth: false,
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            conservative: false,
+                        },
+                        depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+                            format,
+                            depth_write_enabled: Some(desc.depth_write_enabled),
+                            depth_compare: Some(desc.depth_compare),
+                            stencil: wgpu::StencilState::default(),
+                            bias: depth_bias,
+                        }),
+                        multisample: wgpu::MultisampleState {
+                            count: sample_count,
+                            mask: !0,
+                            alpha_to_coverage_enabled: false,
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &module,
+                            entry_point: Some("fragmentMain"),
+                            compilation_options: Default::default(),
+                            targets: &[Some(color_target)],
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    })
                 })
             };
         let pipeline = make_pipeline(
@@ -559,6 +577,12 @@ impl Model {
 
     pub fn is_pickable(&self) -> bool {
         self.picking_pipeline.is_some()
+    }
+
+    /// Whether two models draw with the same render pipeline object (shared through a
+    /// [`PipelineCache`]).
+    pub fn shares_pipeline(&self, other: &Model) -> bool {
+        self.pipeline == other.pipeline
     }
 
     fn draw_with(&self, pipeline: &wgpu::RenderPipeline, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {

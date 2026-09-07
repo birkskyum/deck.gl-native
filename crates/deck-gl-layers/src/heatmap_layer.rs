@@ -479,7 +479,6 @@ impl Layer for HeatmapLayer {
             wgpu::PrimitiveTopology::TriangleStrip,
             ctx.target,
         );
-        desc.depth_bias = ctx.depth_bias();
         desc.depth_write_enabled = false;
         RenderParameters::apply(&self.props.base.parameters, &mut desc);
         let mut triangle = Model::new(&ctx.device, &desc)?;

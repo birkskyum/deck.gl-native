@@ -14,6 +14,7 @@
 pub mod buffer;
 pub mod device;
 pub mod model;
+pub mod pipeline_cache;
 pub mod shader;
 pub mod stats;
 pub mod uniform;
@@ -22,6 +23,7 @@ pub use model::{
     create_rgba8_texture, default_sampler, Model, ModelDescriptor, RenderTarget, VertexBufferLayout,
     PICKING_FORMAT,
 };
+pub use pipeline_cache::{PipelineCache, PipelineKey};
 pub use shader::{
     assemble, assemble_shader, AssembledShader, ShaderAssembly, ShaderField, ShaderHook, ShaderInjection,
     ShaderModuleSource,

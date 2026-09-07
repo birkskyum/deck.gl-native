@@ -2912,3 +2912,30 @@ fn text_layer_takes_extension_attributes_per_glyph() {
         count(&pixels, false)
     );
 }
+
+#[test]
+fn layers_of_one_type_share_shader_modules_and_pipelines() {
+    let Some(ctx) = context() else { return };
+    let circle = |id: &str, pickable: bool| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                pickable,
+                ..LayerProps::new(id)
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_radius: Accessor::Constant(6.0),
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        }))
+    };
+    let mut deck = make_deck(
+        &ctx,
+        vec![circle("a", false), circle("b", false), circle("c", true)],
+    );
+    deck.update().expect("update");
+    let cache = &deck.context().pipelines;
+    // one pipeline for the three layers plus the picking pipeline of the pickable one
+    assert_eq!(cache.builds(), 2, "pipelines built");
+    assert_eq!(cache.len(), 2);
+}

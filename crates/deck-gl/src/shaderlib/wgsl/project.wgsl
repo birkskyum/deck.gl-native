@@ -279,6 +279,10 @@ fn project_common_position_to_clipspace_with_projection(position: vec4<f32>, vie
   if (project.depthRange == 0) {
     clipPosition.z = (clipPosition.z + clipPosition.w) * 0.5;
   }
+  // The layer's polygon offset, applied here rather than as pipeline state so that layers
+  // share pipelines: one unit is one step of a 24 bit depth buffer over the clip range.
+  let depthUnit = select(exp2(-23.0), exp2(-24.0), project.depthRange == 0);
+  clipPosition.z = clipPosition.z + layer.depthBias * depthUnit * clipPosition.w;
   return clipPosition;
 }
 

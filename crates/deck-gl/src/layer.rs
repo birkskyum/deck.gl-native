@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use glam::DMat4;
-use luma_gl::{Model, ModelDescriptor, RenderTarget};
+use luma_gl::{Model, ModelDescriptor, PipelineCache, RenderTarget};
 
 use crate::collision::CollisionMaps;
 use crate::constants::{ClipDepthRange, CoordinateSystem};
@@ -204,6 +204,8 @@ pub struct LayerContext {
     /// The collision maps of this frame, for the collision filter extension. `None` outside
     /// a `Deck`.
     pub collisions: Option<Arc<CollisionMaps>>,
+    /// Shader modules and pipelines shared by every model of the deck.
+    pub pipelines: PipelineCache,
 }
 
 /// Attachments of the mask pass: one red channel texture and no depth buffer.
@@ -229,6 +231,8 @@ pub fn mask_blend() -> wgpu::BlendState {
 
 impl LayerContext {
     /// Depth bias for the current layer: deck.gl's per layer polygon offset plus the base.
+    /// Applied through the `layer.depthBias` uniform (see [`update_standard_uniforms`]), not
+    /// as pipeline state, so that layers of one type share pipelines.
     pub fn depth_bias(&self) -> wgpu::DepthBiasState {
         let mut bias = depth_bias_for_layer(self.layer_index);
         bias.constant += self.depth_bias_base;
@@ -239,7 +243,9 @@ impl LayerContext {
     /// picking variant and render parameters, and the mask pass state when its operation is
     /// `mask`.
     pub fn configure(&self, desc: &mut ModelDescriptor<'_>, props: &LayerProps) {
-        desc.depth_bias = self.depth_bias();
+        desc.cache = Some(self.pipelines.clone());
+        // the depth bias is a uniform, see `depth_bias`
+        desc.depth_bias = wgpu::DepthBiasState::default();
         // the collision pass draws layers with their picking pipeline
         desc.pickable = props.pickable || props.extensions.collision_group().is_some();
         props.parameters.apply(desc);
@@ -467,7 +473,9 @@ pub fn update_standard_uniforms(
 
     // apply gamma to opacity to make it visually "linear"
     let opacity = props.opacity.clamp(0.0, 1.0).powf(1.0 / 2.2) as f32;
-    model.uniforms("layer")?.set_f32("opacity", opacity)?;
+    let layer = model.uniforms("layer")?;
+    layer.set_f32("opacity", opacity)?;
+    layer.set_f32("depthBias", ctx.depth_bias().constant as f32)?;
 
     let picking = model.uniforms("picking")?;
     picking.set_f32("isActive", 0.0)?;
@@ -506,6 +514,13 @@ pub fn update_standard_uniforms(
     props.extensions.update_uniforms(model, ctx, viewport, props)?;
 
     model.upload_uniforms(&ctx.queue);
+    Ok(())
+}
+
+/// Give a model a depth bias other than its layer's (a sub model drawn above the others), in
+/// the units of [`LayerContext::depth_bias`]. Call after [`update_standard_uniforms`].
+pub fn set_depth_bias(model: &mut Model, units: i32) -> Result<()> {
+    model.uniforms("layer")?.set_f32("depthBias", units as f32)?;
     Ok(())
 }
 

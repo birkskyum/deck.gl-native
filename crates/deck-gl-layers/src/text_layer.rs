@@ -8,7 +8,7 @@ use deck_gl::attribute_manager::AttributeManager;
 use deck_gl::data::{
     resolve_colors, resolve_f32, resolve_positions, resolve_strings, resolve_vec2, resolve_with,
 };
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{set_depth_bias, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, DeckError, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -487,12 +487,7 @@ impl TextLayer {
         Ok(())
     }
 
-    fn create_character_model(
-        &self,
-        ctx: &LayerContext,
-        id: &str,
-        extra_bias: i32,
-    ) -> Result<(Model, AttributeManager)> {
+    fn create_character_model(&self, ctx: &LayerContext, id: &str) -> Result<(Model, AttributeManager)> {
         let shader = self
             .props
             .base
@@ -533,7 +528,6 @@ impl TextLayer {
             ctx.target,
         );
         ctx.configure(&mut desc, &self.props.base);
-        desc.depth_bias.constant += extra_bias;
         let mut model = Model::new(&ctx.device, &desc)?;
         let positions: [f32; 8] = [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
         model.set_vertex_buffer(
@@ -648,12 +642,12 @@ impl Layer for TextLayer {
         self.background = Some(background);
         self.background_extensions = background_extensions;
         let (characters, character_extensions) =
-            self.create_character_model(ctx, &format!("{id}-characters"), -100)?;
+            self.create_character_model(ctx, &format!("{id}-characters"))?;
         self.characters = Some(characters);
         self.character_extensions = character_extensions;
         // the fill pass shares the characters' shader, layouts and buffers
         self.fill_pass = Some(
-            self.create_character_model(ctx, &format!("{id}-characters-fill"), -100)?
+            self.create_character_model(ctx, &format!("{id}-characters-fill"))?
                 .0,
         );
         self.atlas_key = None;
@@ -672,14 +666,18 @@ impl Layer for TextLayer {
         }
         let outline_buffer = self.outline_buffer();
         let base = self.props.base.clone();
+        // the characters sit above the background, like deck.gl's sub layer order
+        let character_bias = ctx.depth_bias().constant - 100;
         if let Some(mut model) = self.characters.take() {
             update_standard_uniforms(&mut model, ctx, viewport, &base)?;
+            set_depth_bias(&mut model, character_bias)?;
             self.write_character_uniforms(&mut model, outline_buffer)?;
             model.upload_uniforms(&ctx.queue);
             self.characters = Some(model);
         }
         if let Some(mut model) = self.fill_pass.take() {
             update_standard_uniforms(&mut model, ctx, viewport, &base)?;
+            set_depth_bias(&mut model, character_bias)?;
             self.write_character_uniforms(&mut model, SDF_BUFFER)?;
             model.upload_uniforms(&ctx.queue);
             self.fill_pass = Some(model);
