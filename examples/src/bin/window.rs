@@ -107,6 +107,7 @@ impl State {
         if let Some(lighting) = loaded.lighting {
             deck.set_lighting(lighting);
         }
+        deck.set_repeat(loaded.repeat);
         deck.set_on_hover(Some(HoverCallback::new(|info| {
             if let Some(hit) = info {
                 println!(

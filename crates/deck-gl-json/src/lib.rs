@@ -74,6 +74,8 @@ pub struct JsonDeck {
     pub layers: Vec<Box<dyn Layer>>,
     /// The `LightingEffect` among `effects`, when present.
     pub lighting: Option<LightingEffect>,
+    /// `repeat` of the `MapView` among `views`: draw world copies across the antimeridian.
+    pub repeat: bool,
     /// Layer types and props that were ignored, mirroring deck.gl's console warnings.
     pub warnings: Vec<String>,
 }
@@ -142,6 +144,7 @@ impl JsonConverter {
     pub fn convert(&self, value: &Value) -> Result<JsonDeck> {
         let mut warnings = Vec::new();
         let mut lighting = None;
+        let mut repeat = false;
         let (view_state, layers) = match value {
             Value::Array(_) => (None, self.convert_layers(value, &mut warnings)?),
             Value::Object(map) => {
@@ -155,6 +158,19 @@ impl JsonConverter {
                     Some(layers) => self.convert_layers(layers, &mut warnings)?,
                     None => Vec::new(),
                 };
+                if let Some(Value::Array(views)) = map.get("views") {
+                    for view in views {
+                        match view.get(props::TYPE_KEY).and_then(Value::as_str) {
+                            Some("MapView") => {
+                                repeat |= view.get("repeat").and_then(Value::as_bool).unwrap_or(false)
+                            }
+                            Some(other) => {
+                                warnings.push(format!("view `{other}` is not available yet and was skipped"))
+                            }
+                            None => warnings.push("view without @@type was skipped".to_string()),
+                        }
+                    }
+                }
                 if let Some(Value::Array(effects)) = map.get("effects") {
                     for effect in effects {
                         match effect.get(props::TYPE_KEY).and_then(Value::as_str) {
@@ -178,6 +194,7 @@ impl JsonConverter {
             view_state,
             layers,
             lighting,
+            repeat,
             warnings,
         })
     }

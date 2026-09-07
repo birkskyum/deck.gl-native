@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(lighting) = json.lighting {
         deck.set_lighting(lighting);
     }
+    deck.set_repeat(json.repeat);
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");

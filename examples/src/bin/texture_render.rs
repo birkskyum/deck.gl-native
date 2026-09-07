@@ -37,6 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(lighting) = loaded.lighting {
         deck.set_lighting(lighting);
     }
+    deck.set_repeat(loaded.repeat);
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");

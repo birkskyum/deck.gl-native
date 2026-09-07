@@ -145,6 +145,9 @@ pub struct LayerContext {
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
     pub clip_depth_range: ClipDepthRange,
+    /// Uniform slot models write and draw with (see `Model::set_uniform_slot`): 0 for the main
+    /// viewport, one more for each repeated world copy the deck draws.
+    pub uniform_slot: usize,
 }
 
 impl LayerContext {
@@ -319,6 +322,7 @@ pub fn update_standard_uniforms(
     viewport: &Viewport,
     props: &LayerProps,
 ) -> Result<()> {
+    model.set_uniform_slot(ctx.uniform_slot);
     let project = get_uniforms_from_viewport(&ProjectProps {
         viewport,
         device_pixel_ratio: ctx.device_pixel_ratio,

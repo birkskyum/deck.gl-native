@@ -45,6 +45,15 @@ impl Default for LineLayerProps {
 }
 
 /// Renders straight lines joining pairs of source and target coordinates.
+/// `useShortestPath` values to draw with: 0 normally, 1 and -1 with `wrap_longitude`.
+fn shortest_path_variants(wrap_longitude: bool) -> &'static [f32] {
+    if wrap_longitude {
+        &[1.0, -1.0]
+    } else {
+        &[0.0]
+    }
+}
+
 pub struct LineLayer {
     props: LineLayerProps,
     model: Option<Model>,
@@ -174,34 +183,53 @@ impl Layer for LineLayer {
         let model = self.model.as_mut().expect("initialized");
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
 
-        let u = model.uniforms("line")?;
-        u.set_f32("widthScale", props.width_scale)?;
-        u.set_f32("widthMinPixels", props.width_min_pixels)?;
-        u.set_f32("widthMaxPixels", props.width_max_pixels)?;
-        // TODO: wrapLongitude draws the layer twice with useShortestPath 1 and -1
-        u.set_f32("useShortestPath", 0.0)?;
-        u.set_i32("widthUnits", props.width_units.shader_value())?;
-        model.upload_uniforms(&ctx.queue);
+        // With wrapLongitude the layer draws twice, with useShortestPath 1 and -1, each in
+        // its own uniform slot (two per world copy).
+        for (variant, shortest_path) in shortest_path_variants(props.base.wrap_longitude)
+            .iter()
+            .enumerate()
+        {
+            model.set_uniform_slot(ctx.uniform_slot * 2 + variant);
+            let u = model.uniforms("line")?;
+            u.set_f32("widthScale", props.width_scale)?;
+            u.set_f32("widthMinPixels", props.width_min_pixels)?;
+            u.set_f32("widthMaxPixels", props.width_max_pixels)?;
+            u.set_f32("useShortestPath", *shortest_path)?;
+            u.set_i32("widthUnits", props.width_units.shader_value())?;
+            model.upload_uniforms(&ctx.queue);
+        }
         Ok(())
     }
 
-    fn draw(&mut self, _ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        if let Some(model) = &self.model {
-            model.draw(pass)?;
+    fn draw(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        let variants = shortest_path_variants(self.props.base.wrap_longitude).len();
+        if let Some(model) = &mut self.model {
+            for variant in 0..variants {
+                model.set_uniform_slot(ctx.uniform_slot * 2 + variant);
+                model.draw(pass)?;
+            }
         }
         Ok(())
     }
 
     fn set_picking_active(&mut self, ctx: &LayerContext, active: bool) -> Result<()> {
+        let variants = shortest_path_variants(self.props.base.wrap_longitude).len();
         if let Some(model) = &mut self.model {
-            set_model_picking_active(model, &ctx.queue, active)?;
+            for variant in 0..variants {
+                model.set_uniform_slot(ctx.uniform_slot * 2 + variant);
+                set_model_picking_active(model, &ctx.queue, active)?;
+            }
         }
         Ok(())
     }
 
-    fn draw_picking(&mut self, _ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        if let Some(model) = &self.model {
-            model.draw_picking(pass)?;
+    fn draw_picking(&mut self, ctx: &LayerContext, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        let variants = shortest_path_variants(self.props.base.wrap_longitude).len();
+        if let Some(model) = &mut self.model {
+            for variant in 0..variants {
+                model.set_uniform_slot(ctx.uniform_slot * 2 + variant);
+                model.draw_picking(pass)?;
+            }
         }
         Ok(())
     }

@@ -829,6 +829,126 @@ fn hover_and_click_callbacks_with_auto_highlight() {
     );
 }
 
+/// A deck looking at `longitude` on the equator with the test size.
+fn deck_at(
+    ctx: &HeadlessContext,
+    longitude: f64,
+    zoom: f64,
+    repeat: bool,
+    layers: Vec<Box<dyn Layer>>,
+) -> Deck {
+    Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: ViewState {
+                longitude,
+                latitude: 0.0,
+                zoom,
+                pitch: 0.0,
+                bearing: 0.0,
+            },
+            layers,
+            repeat,
+            ..Default::default()
+        },
+    )
+    .expect("deck")
+}
+
+#[test]
+fn repeat_draws_world_copies_across_the_antimeridian() {
+    let Some(ctx) = context() else { return };
+    let points = || {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                pickable: true,
+                ..LayerProps::new("points")
+            },
+            data: LayerData::with_length(2),
+            // One point just west of the antimeridian, one just east of it (12 px at zoom 14)
+            get_position: Accessor::Func(Arc::new(|i| {
+                if i == 0 {
+                    [179.9995, 0.0, 0.0]
+                } else {
+                    [-179.9995, 0.0, 0.0]
+                }
+            })),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(4.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    let plain = deck_at(&ctx, 180.0, 14.0, false, vec![points()])
+        .snapshot(None)
+        .unwrap();
+    assert_eq!(
+        plain.pixel(c - 12, c),
+        [255, 0, 0, 255],
+        "west point is in this world"
+    );
+    assert_eq!(plain.pixel(c + 12, c), [0, 0, 0, 0], "east point is a world away");
+    let repeated = deck_at(&ctx, 180.0, 14.0, true, vec![points()])
+        .snapshot(None)
+        .unwrap();
+    assert_eq!(repeated.pixel(c - 12, c), [255, 0, 0, 255]);
+    assert_eq!(
+        repeated.pixel(c + 12, c),
+        [255, 0, 0, 255],
+        "the next world copy shows it"
+    );
+    // Picking still works on the main viewport
+    let mut deck = deck_at(&ctx, 180.0, 14.0, true, vec![points()]);
+    deck.snapshot(None).unwrap();
+    let hit = deck.pick(c as f64 - 12.0, c as f64).unwrap().expect("hit");
+    assert_eq!(hit.index, 0);
+}
+
+#[test]
+fn line_layer_wrap_longitude_takes_the_shortest_path() {
+    let Some(ctx) = context() else { return };
+    let line = |wrap_longitude: bool| {
+        Box::new(LineLayer::new(LineLayerProps {
+            base: LayerProps {
+                wrap_longitude,
+                ..LayerProps::new("line")
+            },
+            data: LayerData::with_length(1),
+            get_source_position: Accessor::Constant([179.5, 0.0, 0.0]),
+            get_target_position: Accessor::Constant([-179.5, 0.0, 0.0]),
+            get_color: Accessor::Constant([0, 255, 0, 255]),
+            get_width: Accessor::Constant(4.0),
+            width_units: Unit::Pixels,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    // Without wrapping the line runs the long way round, through longitude 0
+    let long_way = deck_at(&ctx, 180.0, 8.0, true, vec![line(false)])
+        .snapshot(None)
+        .unwrap();
+    assert_eq!(long_way.pixel(c - 4, c), [0, 0, 0, 0]);
+    assert_eq!(long_way.pixel(c + 4, c), [0, 0, 0, 0]);
+    // With wrapping it crosses the antimeridian: the west half is drawn in this world and
+    // the east half needs the repeated world copy
+    let short = deck_at(&ctx, 180.0, 8.0, false, vec![line(true)])
+        .snapshot(None)
+        .unwrap();
+    assert_eq!(short.pixel(c - 4, c), [0, 255, 0, 255]);
+    assert_eq!(short.pixel(c + 4, c), [0, 0, 0, 0]);
+    let short_repeated = deck_at(&ctx, 180.0, 8.0, true, vec![line(true)])
+        .snapshot(None)
+        .unwrap();
+    assert_eq!(short_repeated.pixel(c - 4, c), [0, 255, 0, 255]);
+    assert_eq!(short_repeated.pixel(c + 4, c), [0, 255, 0, 255]);
+}
+
 #[test]
 fn point_cloud_layer_draws_lit_points() {
     let Some(ctx) = context() else { return };

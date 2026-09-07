@@ -170,6 +170,12 @@ struct IndexBuffer {
 
 /// A drawable: pipeline, uniform blocks, textures, bind group and vertex buffers.
 #[derive(Debug)]
+/// GPU copies of the uniform blocks for one extra uniform slot, see [`Model::set_uniform_slot`].
+struct UniformSlot {
+    buffers: HashMap<String, wgpu::Buffer>,
+    bind_group: wgpu::BindGroup,
+}
+
 pub struct Model {
     label: String,
     device: wgpu::Device,
@@ -178,6 +184,9 @@ pub struct Model {
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     bind_group_dirty: bool,
+    /// Extra uniform slots (slot 1 is `slots[0]`); slot 0 lives in the blocks themselves
+    slots: Vec<UniformSlot>,
+    active_slot: usize,
     uniform_bindings: Vec<UniformBinding>,
     resource_bindings: Vec<ResourceBinding>,
     uniforms: HashMap<String, UniformBlock>,
@@ -255,13 +264,17 @@ impl Model {
             label: Some(desc.label),
             entries: &layout_entries,
         });
+        let buffers: HashMap<&str, &wgpu::Buffer> = uniforms
+            .iter()
+            .map(|(name, block)| (name.as_str(), block.buffer()))
+            .collect();
         let bind_group = build_bind_group(
             device,
             desc.label,
             &bind_group_layout,
             &shader.uniforms,
             &shader.resources,
-            &uniforms,
+            &buffers,
             &textures,
             &samplers,
         );
@@ -359,6 +372,8 @@ impl Model {
             bind_group_layout,
             bind_group,
             bind_group_dirty: false,
+            slots: Vec::new(),
+            active_slot: 0,
             uniform_bindings: shader.uniforms.clone(),
             resource_bindings: shader.resources.clone(),
             uniforms,
@@ -387,23 +402,88 @@ impl Model {
         self.uniforms.contains_key(name)
     }
 
-    /// Upload every dirty uniform block and rebuild the bind group if a texture or sampler
-    /// changed. Call before encoding the render pass.
+    /// Choose which set of GPU uniform buffers the next [`Model::upload_uniforms`] writes and
+    /// the next draws bind. Every slot shares the CPU side blocks, so a model can be drawn
+    /// several times per frame with different uniforms (one slot per world copy, or per
+    /// variant of a pass) by writing the blocks, uploading, and drawing once per slot. Slot 0
+    /// is the model's own buffers; others are allocated on first use.
+    pub fn set_uniform_slot(&mut self, slot: usize) {
+        while self.slots.len() < slot {
+            let buffers: HashMap<String, wgpu::Buffer> = self
+                .uniforms
+                .iter()
+                .map(|(name, block)| {
+                    let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("{} {name} slot {}", self.label, self.slots.len() + 1)),
+                        size: block.buffer().size(),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    (name.clone(), buffer)
+                })
+                .collect();
+            let bind_group = self.slot_bind_group(&buffers);
+            self.slots.push(UniformSlot { buffers, bind_group });
+        }
+        self.active_slot = slot;
+    }
+
+    pub fn uniform_slot(&self) -> usize {
+        self.active_slot
+    }
+
+    fn slot_bind_group(&self, buffers: &HashMap<String, wgpu::Buffer>) -> wgpu::BindGroup {
+        let refs: HashMap<&str, &wgpu::Buffer> = buffers.iter().map(|(n, b)| (n.as_str(), b)).collect();
+        build_bind_group(
+            &self.device,
+            &self.label,
+            &self.bind_group_layout,
+            &self.uniform_bindings,
+            &self.resource_bindings,
+            &refs,
+            &self.textures,
+            &self.samplers,
+        )
+    }
+
+    /// Upload the uniform blocks to the active slot and rebuild the bind groups if a texture
+    /// or sampler changed. Call before encoding the render pass. Slot 0 uploads only blocks
+    /// written since its last upload; other slots always upload every block.
     pub fn upload_uniforms(&mut self, queue: &wgpu::Queue) {
-        for block in self.uniforms.values_mut() {
-            block.upload(queue);
+        if self.active_slot == 0 {
+            for block in self.uniforms.values_mut() {
+                block.upload(queue);
+            }
+        } else {
+            let slot = &self.slots[self.active_slot - 1];
+            for (name, block) in &self.uniforms {
+                queue.write_buffer(&slot.buffers[name], 0, block.data());
+            }
         }
         if self.bind_group_dirty {
+            let buffers: HashMap<&str, &wgpu::Buffer> = self
+                .uniforms
+                .iter()
+                .map(|(name, block)| (name.as_str(), block.buffer()))
+                .collect();
             self.bind_group = build_bind_group(
                 &self.device,
                 &self.label,
                 &self.bind_group_layout,
                 &self.uniform_bindings,
                 &self.resource_bindings,
-                &self.uniforms,
+                &buffers,
                 &self.textures,
                 &self.samplers,
             );
+            let groups: Vec<wgpu::BindGroup> = self
+                .slots
+                .iter()
+                .map(|s| self.slot_bind_group(&s.buffers))
+                .collect();
+            for (slot, group) in self.slots.iter_mut().zip(groups) {
+                slot.bind_group = group;
+            }
             self.bind_group_dirty = false;
         }
     }
@@ -490,7 +570,11 @@ impl Model {
             }
         }
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        let bind_group = match self.active_slot {
+            0 => &self.bind_group,
+            slot => &self.slots[slot - 1].bind_group,
+        };
+        pass.set_bind_group(0, bind_group, &[]);
         for (slot, buffer) in self.vertex_slots.iter().enumerate() {
             pass.set_vertex_buffer(slot as u32, buffer.as_ref().unwrap().slice(..));
         }
@@ -520,7 +604,7 @@ fn build_bind_group(
     layout: &wgpu::BindGroupLayout,
     uniform_bindings: &[UniformBinding],
     resource_bindings: &[ResourceBinding],
-    uniforms: &HashMap<String, UniformBlock>,
+    buffers: &HashMap<&str, &wgpu::Buffer>,
     textures: &HashMap<String, wgpu::TextureView>,
     samplers: &HashMap<String, wgpu::Sampler>,
 ) -> wgpu::BindGroup {
@@ -528,7 +612,7 @@ fn build_bind_group(
     for binding in uniform_bindings {
         entries.push(wgpu::BindGroupEntry {
             binding: binding.binding,
-            resource: uniforms[&binding.name].buffer().as_entire_binding(),
+            resource: buffers[binding.name.as_str()].as_entire_binding(),
         });
     }
     for resource in resource_bindings {

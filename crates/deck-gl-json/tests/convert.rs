@@ -472,6 +472,7 @@ fn lighting_effects_and_materials() {
         ]
     });
     let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert!(!deck.repeat);
     let lighting = deck.lighting.expect("lighting effect");
     assert_eq!(lighting.ambient.color, [255.0, 200.0, 200.0]);
     assert_eq!(lighting.ambient.intensity, 0.5);
@@ -543,4 +544,16 @@ fn render_parameters() {
         error.contains("depthCompare") && error.contains("sometimes"),
         "{error}"
     );
+}
+
+#[test]
+fn map_view_repeat() {
+    let spec = json!({
+        "views": [{"@@type": "MapView", "repeat": true, "controller": true}, {"@@type": "OrbitView"}],
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert!(deck.repeat);
+    assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
+    assert!(deck.warnings[0].contains("OrbitView"));
 }

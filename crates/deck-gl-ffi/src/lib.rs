@@ -56,6 +56,8 @@ pub struct DeckglHandle {
     pub(crate) view_state: Option<ViewState>,
     /// Layer id of the last `deckgl_pick` hit, so its pointer stays valid
     pub(crate) picked_layer: CString,
+    /// `MapView.repeat` of the last JSON description
+    pub(crate) repeat: bool,
     pub(crate) last_error: CString,
     /// Number of frames rendered so far
     pub(crate) frame: u64,
@@ -74,6 +76,7 @@ impl DeckglHandle {
             lighting: None,
             view_state: None,
             picked_layer: CString::default(),
+            repeat: false,
             last_error: CString::default(),
             frame: 0,
         }
@@ -131,6 +134,7 @@ impl DeckglHandle {
             if let Some(lighting) = self.lighting.clone() {
                 deck.set_lighting(lighting);
             }
+            deck.set_repeat(self.repeat);
             self.deck = Some(deck);
             self.target = Some(target);
         }
@@ -253,6 +257,10 @@ fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_js
             }
             if json.view_state.is_some() {
                 handle.view_state = json.view_state;
+            }
+            handle.repeat = json.repeat;
+            if let Some(deck) = handle.deck.as_mut() {
+                deck.set_repeat(json.repeat);
             }
             0
         }

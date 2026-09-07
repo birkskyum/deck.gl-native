@@ -44,6 +44,11 @@ impl UniformBlock {
         &self.buffer
     }
 
+    /// The CPU copy of the block, laid out as the shader expects.
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     /// Write pending changes to the GPU. Must be called before the buffer is used in a pass.
     pub fn upload(&mut self, queue: &wgpu::Queue) {
         if self.dirty {

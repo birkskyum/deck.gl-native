@@ -107,6 +107,9 @@ pub struct Viewport {
     pub pixel_unprojection_matrix: DMat4,
     pub near: f64,
     pub far: f64,
+    /// Whole worlds this viewport is shifted by along longitude, see
+    /// [`Viewport::sub_viewports`]. Zero for the viewport itself.
+    pub world_offset: i32,
 }
 
 fn fround(v: f64) -> f64 {
@@ -211,7 +214,45 @@ impl Viewport {
             pixel_unprojection_matrix,
             near: projection_parameters.near,
             far: projection_parameters.far,
+            world_offset: 0,
         }
+    }
+
+    /// A copy of this viewport looking at the world shifted by `offset` whole worlds (512
+    /// common units each) along longitude: port of `WebMercatorViewport`'s `worldOffset`.
+    pub fn with_world_offset(&self, offset: i32) -> Viewport {
+        let mut v = self.clone();
+        v.world_offset = offset;
+        v.view_matrix_uncentered = self.view_matrix_uncentered
+            * DMat4::from_translation(DVec3::new(512.0 * offset as f64, 0.0, 0.0));
+        v.view_matrix = v.view_matrix_uncentered * DMat4::from_translation(-self.center);
+        v.view_projection_matrix = self.projection_matrix * v.view_matrix;
+        v.view_matrix_inverse = v.view_matrix.inverse();
+        v.camera_position = v.view_matrix_inverse.w_axis.truncate();
+        let viewport_matrix = DMat4::from_scale(DVec3::new(self.width / 2.0, -self.height / 2.0, 1.0))
+            * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0));
+        v.pixel_projection_matrix = viewport_matrix * v.view_projection_matrix;
+        v.pixel_unprojection_matrix = v.pixel_projection_matrix.inverse();
+        v
+    }
+
+    /// The viewports needed to fill the screen when it shows more than one copy of the world
+    /// (deck.gl's `MapView({repeat: true})`): this viewport followed by one per extra world
+    /// copy visible across the antimeridian, at most three to each side.
+    pub fn sub_viewports(&self) -> Vec<Viewport> {
+        if !self.is_geospatial {
+            return vec![self.clone()];
+        }
+        let bounds = self.get_bounds(0.0);
+        let min_offset = (((bounds[0] + 180.0) / 360.0).floor() as i32).clamp(-3, 0);
+        let max_offset = (((bounds[2] - 180.0) / 360.0).ceil() as i32).clamp(0, 3);
+        let mut viewports = vec![self.clone()];
+        for offset in min_offset..=max_offset {
+            if offset != 0 {
+                viewports.push(self.with_world_offset(offset));
+            }
+        }
+        viewports
     }
 
     pub fn meters_per_pixel(&self) -> f64 {
@@ -376,6 +417,35 @@ mod tests {
 
     fn assert_close(a: f64, b: f64, eps: f64) {
         assert!((a - b).abs() <= eps, "{a} != {b} (eps {eps})");
+    }
+
+    #[test]
+    fn world_offset_shifts_by_whole_worlds() {
+        let v = Viewport::web_mercator(&WebMercatorViewportOptions {
+            width: 512.0,
+            height: 256.0,
+            longitude: 90.0,
+            latitude: 0.0,
+            zoom: 0.0,
+            ..Default::default()
+        });
+        // Half the screen lies past the antimeridian: one extra world copy to the east
+        let copies = v.sub_viewports();
+        assert_eq!(copies.iter().map(|c| c.world_offset).collect::<Vec<_>>(), [0, 1]);
+        let shifted = &copies[1];
+        let a = shifted.project(DVec3::new(-170.0, 10.0, 0.0), true);
+        let b = v.project(DVec3::new(190.0, 10.0, 0.0), true);
+        assert!((a - b).length() < 1e-6, "{a:?} vs {b:?}");
+        // A view inside one world has no copies
+        let inside = Viewport::web_mercator(&WebMercatorViewportOptions {
+            width: 64.0,
+            height: 64.0,
+            longitude: 0.0,
+            latitude: 0.0,
+            zoom: 4.0,
+            ..Default::default()
+        });
+        assert_eq!(inside.sub_viewports().len(), 1);
     }
 
     fn sf() -> Viewport {

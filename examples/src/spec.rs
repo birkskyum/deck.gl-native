@@ -36,6 +36,8 @@ pub struct Scene {
     pub layers: Vec<Box<dyn Layer>>,
     /// The description's `LightingEffect`, when it has one
     pub lighting: Option<LightingEffect>,
+    /// Draw world copies across the antimeridian (`views: [{"@@type": "MapView", "repeat": true}]`)
+    pub repeat: bool,
 }
 
 /// The built-in scene, or the description named by `DECKGL_JSON`.
@@ -51,12 +53,14 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
                 view_state: json.view_state.unwrap_or_else(|| scene::view_state(bearing)),
                 layers: keep_only(json.layers),
                 lighting: json.lighting,
+                repeat: json.repeat,
             })
         }
         _ => Ok(Scene {
             view_state: scene::view_state(bearing),
             layers: keep_only(scene::layers()),
             lighting: None,
+            repeat: true,
         }),
     }
 }

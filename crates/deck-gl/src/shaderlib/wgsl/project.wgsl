@@ -168,7 +168,14 @@ fn project_offset_(offset: vec4<f32>) -> vec4<f32> {
 fn project_mercator_(lnglat: vec2<f32>) -> vec2<f32> {
   var x = lnglat.x;
   if (project.wrapLongitude != 0) {
-    x = ((x + 180.0) % 360.0) - 180.0;
+    // deck.gl uses mod(x + 180, 360) - 180 here, which sends a longitude of exactly 180 to
+    // -180. Layers that split geometry at the antimeridian (LineLayer's shortest path) then
+    // see their split point jump to the other edge of the world, so wrap only beyond it.
+    if (x > 180.0) {
+      x = x - 360.0;
+    } else if (x < -180.0) {
+      x = x + 360.0;
+    }
   }
   let y = clamp(lnglat.y, -89.9, 89.9);
   return vec2<f32>(

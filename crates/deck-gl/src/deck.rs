@@ -47,6 +47,9 @@ pub struct DeckProps {
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
     pub clip_depth_range: ClipDepthRange,
+    /// Draw extra copies of the world when the view spans the antimeridian, deck.gl's
+    /// `MapView({repeat: true})`.
+    pub repeat: bool,
 }
 
 impl Default for DeckProps {
@@ -60,6 +63,7 @@ impl Default for DeckProps {
             lighting: LightingEffect::default(),
             depth_bias_base: 0,
             clip_depth_range: ClipDepthRange::default(),
+            repeat: false,
         }
     }
 }
@@ -110,6 +114,7 @@ pub struct Deck {
     viewport: Viewport,
     external_viewport: bool,
     picking: Option<PickingTarget>,
+    repeat: bool,
     /// The object under the pointer after the last `pointer_move`
     hovered: Option<PickingInfo>,
     on_hover: Option<HoverCallback>,
@@ -132,6 +137,7 @@ impl Deck {
             layer_index: 0,
             depth_bias_base: props.depth_bias_base,
             clip_depth_range: props.clip_depth_range,
+            uniform_slot: 0,
         };
         let viewport = make_viewport(props.width, props.height, &props.view_state);
         let mut deck = Self {
@@ -144,6 +150,7 @@ impl Deck {
             viewport,
             external_viewport: false,
             picking: None,
+            repeat: props.repeat,
             hovered: None,
             on_hover: None,
             on_click: None,
@@ -197,6 +204,11 @@ impl Deck {
 
     pub fn set_lighting(&mut self, lighting: LightingEffect) {
         self.ctx.lighting = lighting;
+    }
+
+    /// Draw extra copies of the world across the antimeridian, see [`DeckProps::repeat`].
+    pub fn set_repeat(&mut self, repeat: bool) {
+        self.repeat = repeat;
     }
 
     /// Replace the layer list. Layers whose id matches an existing layer of the same type keep
@@ -577,6 +589,7 @@ impl Deck {
     /// Initialize new layers and update all layers for the current viewport.
     /// Must be called before [`Deck::draw`], outside of any render pass.
     pub fn update(&mut self) -> Result<()> {
+        self.ctx.uniform_slot = 0;
         for (index, entry) in self.layers.iter_mut().enumerate() {
             self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
             if !entry.initialized {
@@ -593,11 +606,28 @@ impl Deck {
     /// Encode all visible layers into a render pass whose attachments match the deck's
     /// [`RenderTarget`]. The pass viewport is expected to cover the full deck size.
     pub fn draw(&mut self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        self.ctx.uniform_slot = 0;
         for (index, entry) in self.layers.iter_mut().enumerate() {
             self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
             if entry.initialized && entry.layer.props().visible {
                 entry.layer.draw(&self.ctx, pass)?;
             }
+        }
+        if self.repeat {
+            // Extra world copies: every layer updates its uniforms for the shifted viewport
+            // in its own uniform slot, so the copies do not overwrite each other's uniforms.
+            let copies = self.viewport.sub_viewports();
+            for (slot, viewport) in copies.iter().filter(|v| v.world_offset != 0).enumerate() {
+                self.ctx.uniform_slot = slot + 1;
+                for (index, entry) in self.layers.iter_mut().enumerate() {
+                    self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
+                    if entry.initialized && entry.layer.props().visible {
+                        entry.layer.update(&self.ctx, viewport)?;
+                        entry.layer.draw(&self.ctx, pass)?;
+                    }
+                }
+            }
+            self.ctx.uniform_slot = 0;
         }
         Ok(())
     }

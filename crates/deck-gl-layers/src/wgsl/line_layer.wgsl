@@ -74,8 +74,9 @@ fn vertexMain(
 
   // Apply shortest-path adjustments if needed.
   if (line.useShortestPath > 0.5 || line.useShortestPath < -0.5) {
-    source_world.x = (source_world.x + 180.0 % 360.0) - 180.0;
-    target_world.x = (target_world.x + 180.0 % 360.0) - 180.0;
+    // GLSL mod: normalise the endpoints to [-180, 180)
+    source_world.x = source_world.x - 360.0 * floor((source_world.x + 180.0) / 360.0);
+    target_world.x = target_world.x - 360.0 * floor((target_world.x + 180.0) / 360.0);
     let deltaLng: f32 = target_world.x - source_world.x;
 
     if (deltaLng * line.useShortestPath > 180.0) {

@@ -103,6 +103,12 @@ polygon a ring or an array of rings). Errors name the layer, the prop and the ro
 Enumerations use `@@#`: `"coordinateSystem": "@@#COORDINATE_SYSTEM.METER_OFFSETS"` (the plain
 number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 
+## Views
+
+A top level `views` array may hold a `MapView`; its `repeat` flag makes the deck draw extra
+copies of the world when the view spans the antimeridian, as in deck.gl. Other view types
+produce a warning and are skipped until they exist here.
+
 ## Effects
 
 A top level `effects` array may hold a `LightingEffect`, whose other fields are the lights, each
