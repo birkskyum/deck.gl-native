@@ -1587,6 +1587,33 @@ fn wms_layer_requests_an_image_for_the_view() {
 }
 
 #[test]
+fn frame_stats_count_layers_draws_and_uploads() {
+    let Some(ctx) = context() else { return };
+    let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps::new("points"),
+        data: LayerData::with_length(7),
+        get_position: Accessor::Constant(CENTER),
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        get_radius: Accessor::Constant(2.0),
+        radius_units: Unit::Pixels,
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    assert_eq!(deck.stats().frame, 0);
+    deck.snapshot(None).unwrap();
+    let first = deck.stats();
+    assert_eq!(
+        (first.frame, first.layers, first.draw_calls, first.instances),
+        (1, 1, 1, 7)
+    );
+    assert!(first.uploaded_bytes > 0, "attributes were uploaded: {first:?}");
+    deck.snapshot(None).unwrap();
+    let second = deck.stats();
+    assert_eq!((second.frame, second.draw_calls), (2, 1));
+    assert_eq!(second.uploaded_bytes, 0, "nothing changed: {second:?}");
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

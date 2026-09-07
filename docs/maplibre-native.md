@@ -64,6 +64,7 @@ Environment variables read by the overlay:
 | `DECKGL_JSON=scene.json` | Show a [JSON description](json.md) instead of the demo scene (also honoured by the all-Rust demo below) |
 | `DECKGL_LOAD_DEPTH=0` | Clear depth before deck draws instead of depth testing against the map's buildings (interleaving is the default) |
 | `DECKGL_DEBUG=1` | Print the camera, planes and viewport deck derives from the map |
+| `DECKGL_LOG=<level>` | Level of deck's stderr logging (`error`, `warn`, `info`, `debug`, `trace`); `deckgl_set_log_level` changes it at run time and `deckgl_stats` reports draw calls, instances and CPU time per frame |
 | `DECKGL_DUMP_DEPTH=/tmp/prefix` | Write the map's depth buffer as raw `f32` once and print building feet against deck's ground depth (see hosts/maplibre-native-glfw/README.md) |
 | `DECKGL_SCREENSHOT=frame.png` | Write the composited frame to a PNG once, `DECKGL_SCREENSHOT_AFTER_MS` (default 8000) after the first frame |
 

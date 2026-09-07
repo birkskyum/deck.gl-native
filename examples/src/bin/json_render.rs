@@ -11,6 +11,7 @@ use deck_gl_examples::{scene, spec};
 use deck_gl_json::JsonConverter;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    deck_gl_examples::init_logging();
     let mut args = std::env::args().skip(1);
     let Some(spec) = args.next() else {
         eprintln!("usage: json_render <spec.json> [output.png] [WIDTHxHEIGHT]");
@@ -64,6 +65,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     spec::apply_views(&mut deck, &json.views, &json.cameras);
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
+    let stats = deck.stats();
+    println!(
+        "{} layers, {} draw calls, {} instances, {} KB uploaded, update {:.1} ms, draw {:.1} ms",
+        stats.layers,
+        stats.draw_calls,
+        stats.instances,
+        stats.uploaded_bytes / 1024,
+        stats.update_ms,
+        stats.draw_ms
+    );
     println!("wrote {output}");
     Ok(())
 }

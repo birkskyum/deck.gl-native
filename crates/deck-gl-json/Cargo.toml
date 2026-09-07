@@ -13,6 +13,7 @@ default = ["fetch"]
 fetch = ["dep:ureq", "deck-gl-layers/fetch"]
 
 [dependencies]
+tracing = { workspace = true }
 deck-gl = { workspace = true }
 deck-gl-layers = { workspace = true }
 arrow-array = { workspace = true }

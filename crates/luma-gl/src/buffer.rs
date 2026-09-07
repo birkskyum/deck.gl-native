@@ -18,6 +18,7 @@ pub fn split_f64(values: &[f64]) -> (Vec<f32>, Vec<f32>) {
 
 /// Create a vertex buffer from bytes.
 pub fn create_vertex_buffer(device: &wgpu::Device, label: &str, contents: &[u8]) -> wgpu::Buffer {
+    crate::stats::count_upload(contents.len());
     // wgpu rejects zero sized buffers; keep a minimal placeholder so bindings stay valid.
     let mut padded;
     let contents = if contents.is_empty() {
@@ -48,6 +49,7 @@ pub fn create_vertex_buffer_from<T: bytemuck::NoUninit>(
 
 /// Create a 32-bit index buffer.
 pub fn create_index_buffer(device: &wgpu::Device, label: &str, indices: &[u32]) -> wgpu::Buffer {
+    crate::stats::count_upload(indices.len() * 4);
     let contents: &[u8] = if indices.is_empty() {
         &[0u8; 4]
     } else {

@@ -12,6 +12,8 @@ name = "deckgl"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 deck-gl = { workspace = true, features = ["png"] }
 deck-gl-layers = { workspace = true }
 deck-gl-json = { workspace = true }

@@ -134,6 +134,7 @@ pub struct Deck {
     attachment_size: Option<(u32, u32)>,
     /// Viewport of the view picked last, for the unprojection of the hit
     pick_viewport: Option<Viewport>,
+    stats: FrameStats,
     external_viewport: bool,
     picking: Option<PickingTarget>,
     repeat: bool,
@@ -185,6 +186,7 @@ impl Deck {
             layer_filter: None,
             attachment_size: None,
             pick_viewport: None,
+            stats: FrameStats::default(),
             external_viewport: false,
             picking: None,
             repeat: props.repeat,
@@ -1038,7 +1040,10 @@ impl Deck {
         color_load: wgpu::LoadOp<wgpu::Color>,
         depth_load: wgpu::LoadOp<f32>,
     ) -> Result<()> {
+        luma_gl::stats::reset();
+        let started = std::time::Instant::now();
         self.update()?;
+        let update_ms = started.elapsed().as_secs_f64() * 1000.0;
         let size = color_view.texture().size();
         self.attachment_size = Some((size.width, size.height));
         let sample_count = self.ctx.target.sample_count;
@@ -1098,7 +1103,36 @@ impl Deck {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        self.draw(&mut pass)
+        let draw_started = std::time::Instant::now();
+        let result = self.draw(&mut pass);
+        let counters = luma_gl::stats::snapshot();
+        self.stats = FrameStats {
+            frame: self.stats.frame + 1,
+            layers: self
+                .layers
+                .iter()
+                .filter(|e| e.initialized && e.layer.props().visible)
+                .count(),
+            draw_calls: counters.draw_calls,
+            instances: counters.instances,
+            uploaded_bytes: counters.uploaded_bytes,
+            update_ms,
+            draw_ms: draw_started.elapsed().as_secs_f64() * 1000.0,
+        };
+        tracing::trace!(
+            frame = self.stats.frame,
+            layers = self.stats.layers,
+            draw_calls = self.stats.draw_calls,
+            instances = self.stats.instances,
+            uploaded_bytes = self.stats.uploaded_bytes,
+            "frame"
+        );
+        result
+    }
+
+    /// Counters of the last frame rendered with [`Deck::render`] or [`Deck::render_with`].
+    pub fn stats(&self) -> FrameStats {
+        self.stats
     }
 
     /// Multisampled attachments matching the target's size and formats.
@@ -1132,6 +1166,25 @@ impl Deck {
             None => unreachable_after_creation(),
         }
     }
+}
+
+/// What the last frame cost, deck.gl's stats: filled by [`Deck::render_with`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameStats {
+    /// Frames rendered so far
+    pub frame: u64,
+    /// Layers that were initialized and visible (including sub layers of composites is not
+    /// counted; those show up in draw calls)
+    pub layers: usize,
+    pub draw_calls: u64,
+    /// Instances drawn (vertices for non instanced models)
+    pub instances: u64,
+    /// Bytes uploaded to vertex and index buffers during the frame
+    pub uploaded_bytes: u64,
+    /// CPU time of the layer updates in milliseconds
+    pub update_ms: f64,
+    /// CPU time of encoding the draws in milliseconds
+    pub draw_ms: f64,
 }
 
 /// Pixels read back by [`Deck::snapshot`]: RGBA, 8 bits per channel, rows top to bottom.

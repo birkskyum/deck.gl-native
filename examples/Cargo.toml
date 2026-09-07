@@ -9,6 +9,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
 deck-gl = { workspace = true, features = ["png"] }

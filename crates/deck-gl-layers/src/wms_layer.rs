@@ -273,7 +273,7 @@ impl WmsLayer {
                 self.pending = None;
             }
             Ok(Err(message)) => {
-                eprintln!("deck.gl-native: WMS image failed: {message}");
+                tracing::warn!("WMS image failed: {message}");
                 self.pending = None;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}

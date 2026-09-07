@@ -11,6 +11,7 @@ use deck_gl::{Deck, DeckProps};
 use deck_gl_examples::{scene, spec};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    deck_gl_examples::init_logging();
     let output = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "target/texture-render.png".to_string());

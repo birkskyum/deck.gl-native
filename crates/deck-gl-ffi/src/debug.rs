@@ -69,7 +69,7 @@ pub fn maybe_dump(
     let data = match slice.get_mapped_range() {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("deck.gl-native: depth readback failed: {e}");
+            tracing::info!("depth readback failed: {e}");
             return;
         }
     };
@@ -86,9 +86,9 @@ pub fn maybe_dump(
     let raw: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
     let path = format!("{prefix}.f32");
     if let Err(e) = std::fs::write(&path, raw) {
-        eprintln!("deck.gl-native: could not write {path}: {e}");
+        tracing::info!("could not write {path}: {e}");
     }
-    eprintln!("deck.gl-native: wrote {path} ({width}x{height} f32)");
+    tracing::info!("wrote {path} ({width}x{height} f32)");
 
     // deck's ground depth at sampled pixels on its own planes, and on maplibre's 1 px planes
     // that flat map layers use. Logical pixel coordinates.
@@ -106,9 +106,11 @@ pub fn maybe_dump(
         far_z: Some(viewport.far),
         ..Default::default()
     });
-    eprintln!(
+    tracing::info!(
         "deck.gl-native: viewport near {} far {} (flat layers near {})",
-        viewport.near, viewport.far, flat.near
+        viewport.near,
+        viewport.far,
+        flat.near
     );
     let ground_depths = |col: u32, row: u32| {
         let px = DVec2::new(col as f64 / ratio, row as f64 / ratio);
@@ -120,19 +122,19 @@ pub fn maybe_dump(
     let cleared = values.iter().filter(|v| **v >= 1.0).count();
     let flat_like = values.iter().filter(|v| **v < 1.0 && **v > 0.997).count();
     let near_like = values.iter().filter(|v| **v <= 0.997).count();
-    eprintln!("  pixels: cleared {cleared}, flat curve {flat_like}, near clipped curve {near_like}");
-    eprintln!("  px(x,y)       map depth   deck ground   flat ground");
+    tracing::info!("  pixels: cleared {cleared}, flat curve {flat_like}, near clipped curve {near_like}");
+    tracing::info!("  px(x,y)       map depth   deck ground   flat ground");
     let step = height / 12;
     for row in (step / 2..height).step_by(step as usize) {
         for col in (width / 8..width).step_by((width / 4) as usize) {
             let d = values[(row * width + col) as usize];
             let (deck_z, flat_z) = ground_depths(col, row);
-            eprintln!("  ({col:5},{row:5})  {d:.6}    {deck_z:.6}    {flat_z:.6}");
+            tracing::info!("  ({col:5},{row:5})  {d:.6}    {deck_z:.6}    {flat_z:.6}");
         }
     }
     // Scanning up each column, the first fragment on the near clipped curve is the foot of a
     // building; its depth should equal deck's ground depth at that pixel.
-    eprintln!("  building feet: px(x,y)  map depth  deck ground  (rows above with same curve)");
+    tracing::info!("  building feet: px(x,y)  map depth  deck ground  (rows above with same curve)");
     for col in (width / 16..width).step_by((width / 8) as usize) {
         let mut row = height - 1;
         while row > 0 && values[(row * width + col) as usize] > 0.997 {
@@ -147,6 +149,6 @@ pub fn maybe_dump(
         while top > 0 && values[(top * width + col) as usize] <= 0.997 {
             top -= 1;
         }
-        eprintln!("  ({col:5},{row:5})  {d:.6}   {deck_z:.6}   ({} rows)", row - top);
+        tracing::info!("  ({col:5},{row:5})  {d:.6}   {deck_z:.6}   ({} rows)", row - top);
     }
 }

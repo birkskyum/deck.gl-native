@@ -84,6 +84,32 @@ impl Default for DeckglCamera {
     }
 }
 
+/// Install a stderr log subscriber unless the host already has one. `DECKGL_LOG` (or
+/// `RUST_LOG`) picks the level, `warn` by default; `deckgl_set_log_level` changes it later.
+pub(crate) fn init_logging() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let filter = std::env::var("DECKGL_LOG")
+            .or_else(|_| std::env::var("RUST_LOG"))
+            .unwrap_or_else(|_| "warn".to_string());
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        let (layer, reload) =
+            tracing_subscriber::reload::Layer::new(tracing_subscriber::EnvFilter::new(filter));
+        let subscriber = tracing_subscriber::registry().with(layer).with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(false),
+        );
+        if subscriber.try_init().is_ok() {
+            if let Ok(mut slot) = LOG_RELOAD.lock() {
+                *slot = Some(reload);
+            }
+        }
+    });
+}
+
 /// Opaque handle returned to the host.
 pub struct DeckglHandle {
     pub(crate) device: wgpu::Device,
@@ -109,6 +135,7 @@ pub struct DeckglHandle {
 
 impl DeckglHandle {
     pub(crate) fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        init_logging();
         Self {
             device,
             queue,
@@ -128,7 +155,7 @@ impl DeckglHandle {
 
     pub(crate) fn set_error(&mut self, message: impl Into<String>) -> i32 {
         let message = message.into();
-        eprintln!("deck.gl-native: {message}");
+        tracing::error!("{message}");
         self.last_error = CString::new(message).unwrap_or_default();
         1
     }
@@ -254,7 +281,7 @@ pub fn viewport_from_camera(camera: &DeckglCamera) -> Viewport {
     }
     let viewport = Viewport::web_mercator(&opts);
     if std::env::var_os("DECKGL_DEBUG").is_some() {
-        eprintln!(
+        tracing::info!(
             "deck.gl-native: viewport {}x{} zoom {:.2} pitch {:.1} fovy {:.3} altitude {:.3} near {} far {}",
             viewport.width,
             viewport.height,
@@ -303,7 +330,7 @@ fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_js
     match result {
         Ok(json) => {
             for warning in &json.warnings {
-                eprintln!("deck.gl-native: {warning}");
+                tracing::warn!("{warning}");
             }
             handle.set_layers(json.layers);
             if let Some(lighting) = json.lighting {
@@ -380,7 +407,7 @@ pub unsafe extern "C" fn deckgl_headless_create() -> *mut DeckglHandle {
     match deck_gl::luma_gl::device::create_headless_context() {
         Ok(ctx) => Box::into_raw(Box::new(DeckglHandle::new(ctx.device, ctx.queue))),
         Err(e) => {
-            eprintln!("deck.gl-native: {e}");
+            tracing::error!("{e}");
             std::ptr::null_mut()
         }
     }
@@ -419,6 +446,77 @@ impl DeckglHandle {
         deck.snapshot(None).map_err(|e| e.to_string())
     }
 }
+
+/// Counters of the last frame, see `deckgl_stats`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DeckglStats {
+    pub frame: u64,
+    pub layers: u32,
+    pub draw_calls: u64,
+    pub instances: u64,
+    pub uploaded_bytes: u64,
+    pub update_ms: f64,
+    pub draw_ms: f64,
+}
+
+/// Counters of the last frame rendered: layers drawn, draw calls, instances, bytes uploaded
+/// and CPU time. Returns 0 on success (1 when no frame was rendered yet).
+///
+/// # Safety
+/// `deck` must be a valid handle and `stats` writable.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_stats(deck: *mut DeckglHandle, stats: *mut DeckglStats) -> i32 {
+    let Some(handle) = (unsafe { deck.as_ref() }) else {
+        return 1;
+    };
+    let Some(out) = (unsafe { stats.as_mut() }) else {
+        return 1;
+    };
+    let Some(deck) = handle.deck.as_ref() else {
+        *out = DeckglStats::default();
+        return 1;
+    };
+    let s = deck.stats();
+    *out = DeckglStats {
+        frame: s.frame,
+        layers: s.layers as u32,
+        draw_calls: s.draw_calls,
+        instances: s.instances,
+        uploaded_bytes: s.uploaded_bytes,
+        update_ms: s.update_ms,
+        draw_ms: s.draw_ms,
+    };
+    0
+}
+
+/// Change the log level of deck.gl-native's stderr logging: 0 off, 1 error, 2 warn, 3 info,
+/// 4 debug, 5 trace. Only affects the subscriber deck installed itself.
+///
+/// # Safety
+/// Always safe to call.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_set_log_level(level: i32) {
+    let filter = match level {
+        i32::MIN..=0 => "off",
+        1 => "error",
+        2 => "warn",
+        3 => "info",
+        4 => "debug",
+        _ => "trace",
+    };
+    std::env::set_var("DECKGL_LOG", filter);
+    init_logging();
+    if let Ok(handle) = LOG_RELOAD.lock() {
+        if let Some(reload) = handle.as_ref() {
+            let _ = reload.reload(tracing_subscriber::EnvFilter::new(filter));
+        }
+    }
+}
+
+type ReloadHandle =
+    tracing_subscriber::reload::Handle<tracing_subscriber::EnvFilter, tracing_subscriber::Registry>;
+static LOG_RELOAD: std::sync::Mutex<Option<ReloadHandle>> = std::sync::Mutex::new(None);
 
 /// What `deckgl_pick` found under a pixel.
 #[repr(C)]
@@ -706,9 +804,10 @@ mod tests {
         for (name, viewport) in [("host", &host), ("plain", &plain)] {
             let ground = viewport.project(deck_gl::glam::DVec3::new(-122.42, 37.775, 0.0), true);
             let roof = viewport.project(deck_gl::glam::DVec3::new(-122.42, 37.775, 400.0), true);
-            eprintln!(
+            tracing::info!(
                 "{name}: ground {ground:?} roof {roof:?} near {} far {}",
-                viewport.near, viewport.far
+                viewport.near,
+                viewport.far
             );
             assert!(
                 ground.y - roof.y > 50.0,

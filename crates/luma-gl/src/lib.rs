@@ -15,6 +15,7 @@ pub mod buffer;
 pub mod device;
 pub mod model;
 pub mod shader;
+pub mod stats;
 pub mod uniform;
 
 pub use model::{

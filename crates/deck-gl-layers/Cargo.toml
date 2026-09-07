@@ -13,6 +13,7 @@ default = ["fetch"]
 fetch = ["dep:ureq"]
 
 [dependencies]
+tracing = { workspace = true }
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
 deck-gl = { workspace = true }

@@ -31,7 +31,7 @@ pub mod views;
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
-pub use deck::{Deck, DeckProps, PickingInfo, Snapshot, ViewState};
+pub use deck::{Deck, DeckProps, FrameStats, PickingInfo, Snapshot, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use globe_controller::{GlobeConstraints, GlobeController};
 pub use layer::{initialized, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};

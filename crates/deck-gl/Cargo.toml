@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+tracing = { workspace = true }
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
 wgpu = { workspace = true }

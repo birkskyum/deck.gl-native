@@ -36,7 +36,7 @@ pub(crate) fn maybe_capture(handle: &DeckglHandle, texture: &wgpu::Texture, form
     let mut pixels = match read_texture_rgba8(&handle.device, &handle.queue, texture) {
         Ok(pixels) => pixels,
         Err(e) => {
-            eprintln!("deck.gl-native: screenshot readback failed: {e}");
+            tracing::info!("screenshot readback failed: {e}");
             return;
         }
     };
@@ -50,8 +50,8 @@ pub(crate) fn maybe_capture(handle: &DeckglHandle, texture: &wgpu::Texture, form
     }
     let size = texture.size();
     match write_png(&path, size.width, size.height, &pixels) {
-        Ok(()) => eprintln!("deck.gl-native: wrote {path}"),
-        Err(e) => eprintln!("deck.gl-native: screenshot failed: {e}"),
+        Ok(()) => tracing::info!("wrote {path}"),
+        Err(e) => tracing::info!("screenshot failed: {e}"),
     }
 }
 

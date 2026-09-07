@@ -587,12 +587,14 @@ impl Model {
                 }
                 pass.set_index_buffer(index.buffer.slice(..), index.format);
                 pass.draw_indexed(0..index.count, 0, 0..self.instance_count);
+                crate::stats::count_draw(self.instance_count);
             }
             None => {
                 if self.vertex_count == 0 {
                     return Ok(());
                 }
                 pass.draw(0..self.vertex_count, 0..self.instance_count);
+                crate::stats::count_draw(self.instance_count);
             }
         }
         Ok(())

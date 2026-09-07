@@ -98,6 +98,25 @@ DeckglHandle* deckgl_headless_create(void);
  *  Works on any deck, headless or host bound. Returns 0 on success. */
 int32_t deckgl_snapshot(DeckglHandle* deck, uint32_t width, uint32_t height, uint8_t* rgba);
 
+/** Counters of the last frame, see deckgl_stats. */
+typedef struct DeckglStats {
+    uint64_t frame;
+    uint32_t layers;
+    uint64_t draw_calls;
+    uint64_t instances;
+    uint64_t uploaded_bytes;
+    double update_ms;
+    double draw_ms;
+} DeckglStats;
+
+/** Counters of the last frame rendered. Returns 0 on success, 1 before the first frame. */
+int32_t deckgl_stats(DeckglHandle* deck, DeckglStats* stats);
+
+/** Log level of deck.gl-native's own stderr logging: 0 off, 1 error, 2 warn (default), 3
+ *  info, 4 debug, 5 trace. The DECKGL_LOG (or RUST_LOG) environment variable sets the initial
+ *  level. Hosts with their own tracing subscriber receive the messages instead. */
+void deckgl_set_log_level(int32_t level);
+
 /** Result of deckgl_pick. */
 typedef struct DeckglPickingInfo {
     int32_t picked;        /* 1 when an object was hit, 0 otherwise */

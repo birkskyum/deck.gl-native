@@ -131,13 +131,13 @@ pub unsafe extern "C" fn deckgl_metal_create(
     let raw_queue =
         unsafe { Retained::retain(mtl_command_queue as *mut ProtocolObject<dyn MTLCommandQueue>) };
     let (Some(raw_device), Some(raw_queue)) = (raw_device, raw_queue) else {
-        eprintln!("deck.gl-native: null Metal device or queue");
+        tracing::info!("null Metal device or queue");
         return std::ptr::null_mut();
     };
     match create_device(raw_device, raw_queue) {
         Ok((device, queue)) => Box::into_raw(Box::new(DeckglHandle::new(device, queue))),
         Err(e) => {
-            eprintln!("deck.gl-native: {e}");
+            tracing::info!("{e}");
             std::ptr::null_mut()
         }
     }

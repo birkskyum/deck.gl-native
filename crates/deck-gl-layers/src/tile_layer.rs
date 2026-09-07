@@ -325,7 +325,7 @@ impl TileLayer {
                 }
                 Ok(None) => self.tileset.set_status(index, TileStatus::Loaded, false),
                 Err(message) => {
-                    eprintln!("deck.gl-native: tile {} failed to load: {message}", index.id());
+                    tracing::warn!("tile {} failed to load: {message}", index.id());
                     self.tileset.set_status(index, TileStatus::Failed, false);
                 }
             }
