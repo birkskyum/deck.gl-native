@@ -36,6 +36,7 @@ pub mod data;
 pub mod expression;
 mod layers;
 pub mod props;
+pub mod tabular;
 
 pub use expression::{Expr, ExpressionError};
 pub use props::{Props, Rows};

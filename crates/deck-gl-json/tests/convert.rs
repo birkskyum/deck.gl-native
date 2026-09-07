@@ -699,3 +699,41 @@ fn tile_layer_from_a_url_template() {
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
     assert!(error.contains("{x}"), "{error}");
 }
+
+#[test]
+fn csv_and_ndjson_files_load_as_rows() {
+    let dir = std::env::temp_dir().join(format!("deck-gl-json-tabular-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("stops.csv"),
+        "lng,lat,riders\n-122.4,37.8,10\n-122.41,37.79,20\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("stops.ndjson"),
+        "{\"lng\": 1, \"lat\": 2, \"riders\": 3}\n{\"lng\": 4, \"lat\": 5, \"riders\": 6}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("spec.json"),
+        r#"{"layers": [
+            {"@@type": "ScatterplotLayer", "id": "csv", "data": "stops.csv", "getPosition": "@@=[lng, lat]", "getRadius": "@@=riders * 2"},
+            {"@@type": "ScatterplotLayer", "id": "ndjson", "data": "stops.ndjson", "getPosition": "@@=[lng, lat]", "getRadius": "@@=riders"}
+        ]}"#,
+    )
+    .unwrap();
+    let mut deck = JsonConverter::parse_file(dir.join("spec.json")).unwrap();
+    assert_eq!(deck.layers.len(), 2);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let radii = |layer: &mut Box<dyn deck_gl::Layer>| {
+        let layer = layer
+            .as_any_mut()
+            .downcast_mut::<deck_gl_layers::ScatterplotLayer>()
+            .unwrap();
+        let props = layer.props();
+        resolve_f32(&props.data, &props.get_radius).unwrap()
+    };
+    assert_eq!(radii(&mut deck.layers[0]), [20.0, 40.0]);
+    assert_eq!(radii(&mut deck.layers[1]), [3.0, 6.0]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

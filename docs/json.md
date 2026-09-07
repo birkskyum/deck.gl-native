@@ -60,8 +60,9 @@ overlay reads `DECKGL_JSON` too.
 ## Data
 
 `data` is an inline array of rows, a GeoJSON object (its features become the rows), or a
-string naming a local file or an `http(s)` URL of either. URLs need the crate's default `fetch`
-feature. `image` (BitmapLayer) and `iconAtlas` (IconLayer) are PNG or JPEG files or URLs, and
+string naming a local file or an `http(s)` URL of JSON, GeoJSON, CSV, TSV (`.csv`, `.tsv`, by
+extension; a header row names the fields and cells become numbers, booleans, `null` or text) or
+newline delimited JSON (`.ndjson`, `.jsonl`). URLs need the crate's default `fetch` feature. `image` (BitmapLayer) and `iconAtlas` (IconLayer) are PNG or JPEG files or URLs, and
 `iconMapping` is an inline object or a JSON file.
 
 ## Arrow tables

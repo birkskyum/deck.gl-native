@@ -68,11 +68,16 @@ fn fetch(url: &str) -> Result<Vec<u8>> {
     })
 }
 
-/// A JSON prop that is either inline or a string pointing at a JSON document.
+/// A JSON prop that is either inline or a string pointing at a JSON document. CSV, TSV and
+/// newline delimited JSON files (by extension) load as arrays of row objects.
 pub fn load_json<'a>(value: &'a Value, options: &ConvertOptions) -> Result<Cow<'a, Value>> {
     match value {
         Value::String(source) => {
             let text = load_text(source, options)?;
+            if let Some(format) = crate::tabular::TabularFormat::from_source(source) {
+                let rows = crate::tabular::parse(&text, format, source)?;
+                return Ok(Cow::Owned(Value::Array(rows)));
+            }
             let parsed = serde_json::from_str(&text).map_err(|e| JsonError::Load {
                 url: source.clone(),
                 message: format!("invalid JSON: {e}"),
