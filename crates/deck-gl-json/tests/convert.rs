@@ -326,10 +326,11 @@ fn aggregation_layers_props() {
             "gpuAggregation": true
         },
         {"@@type": "GridLayer", "id": "grid", "data": [], "cellSize": 200, "colorDomain": [0, 10]},
+        {"@@type": "ScreenGridLayer", "id": "screen", "data": [{"position": [1, 2]}], "cellSizePixels": 40, "aggregation": "COUNT", "colorScaleType": "quantize"},
         {"@@type": "GridCellLayer", "id": "cells", "data": [{"position": [0, 0], "h": 5}], "cellSize": 100, "getElevation": "@@=h * 10"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
-    assert_eq!(deck.layers.len(), 3);
+    assert_eq!(deck.layers.len(), 4);
     assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
     let bad = json!([{"@@type": "HexagonLayer", "data": [], "colorAggregation": "MEDIAN"}]);
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();

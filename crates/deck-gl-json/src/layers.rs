@@ -10,8 +10,8 @@ use deck_gl_layers::{
     GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HexagonLayer, HexagonLayerProps,
     IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
     PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
-    TripsLayer, TripsLayerProps, WordBreak,
+    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    TextAnchor, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -108,6 +108,40 @@ pub fn convert_layer(
                 data,
                 cell_size: props.f64("cellSize", d.cell_size)?,
                 aggregation: aggregation(&props)?,
+            }))
+        }
+        "ScreenGridLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = ScreenGridLayerProps::default();
+            props.get("gpuAggregation");
+            let color_range = match props.get("colorRange") {
+                None | Some(Value::Null) => d.color_range,
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(convert::color)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|m| props.error("colorRange", m))?,
+                Some(other) => {
+                    return Err(props.error(
+                        "colorRange",
+                        format!(
+                            "expected an array of colors, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+            };
+            Box::new(ScreenGridLayer::new(ScreenGridLayerProps {
+                base: props.base()?,
+                data,
+                cell_size_pixels: props.f32("cellSizePixels", d.cell_size_pixels)?,
+                cell_margin_pixels: props.f32("cellMarginPixels", d.cell_margin_pixels)?,
+                color_domain: domain(&props, "colorDomain")?,
+                color_range,
+                color_scale_type: scale_type(&props, "colorScaleType", d.color_scale_type)?,
+                aggregation: operation(&props, "aggregation", d.aggregation)?,
+                get_position: props.accessor("getPosition", "position", convert::position)?,
+                get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
             }))
         }
         "GridCellLayer" => {

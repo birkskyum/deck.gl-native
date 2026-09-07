@@ -13,8 +13,9 @@ use deck_gl_layers::{
     BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
     GridLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
     LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
-    PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
+    PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
+    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer,
+    TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -973,4 +974,60 @@ fn multisampled_target_antialiases_and_picks() {
         )
         .unwrap_err();
     assert!(error.to_string().contains("multisampled"), "{error}");
+}
+
+#[test]
+fn screen_grid_layer_bins_in_screen_space_and_follows_the_view() {
+    let Some(ctx) = context() else { return };
+    let (data, get_position) = clustered_points();
+    let props = ScreenGridLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("screen")
+        },
+        data,
+        cell_size_pixels: 16.0,
+        cell_margin_pixels: 1.0,
+        aggregation: AggregationOperation::Count,
+        get_position,
+        ..Default::default()
+    };
+    let mut deck = make_deck(&ctx, vec![Box::new(ScreenGridLayer::new(props.clone()))]);
+    deck.update().unwrap();
+    let layer = deck
+        .layer_mut("screen")
+        .and_then(|l| l.as_any_mut().downcast_mut::<ScreenGridLayer>())
+        .unwrap();
+    let bins = layer.bins().to_vec();
+    assert!(!bins.is_empty());
+    let total: usize = bins.iter().map(|b| b.count).sum();
+    assert_eq!(total, 44, "every point on screen lands in a cell");
+    let densest = bins.iter().max_by_key(|b| b.count).unwrap().clone();
+    assert!(densest.col < 2, "the dense cluster is on the left: {densest:?}");
+
+    let pixels = render(&ctx, vec![Box::new(ScreenGridLayer::new(props.clone()))]);
+    let center_of = |b: &deck_gl_layers::ScreenGridBin| (b.col * 16 + 8, b.row * 16 + 8);
+    let (x, y) = center_of(&densest);
+    let dense = pixel(&pixels, x, y);
+    assert_eq!(dense, [189, 0, 38, 255], "densest cell has the last colour");
+    let hit = deck.pick(x as f64, y as f64).unwrap().expect("a cell");
+    assert_eq!(bins[hit.index as usize].count, densest.count);
+
+    // Zooming out re-aggregates: the clusters collapse into fewer cells
+    deck.set_view_state(ViewState {
+        zoom: 13.0,
+        ..*deck.view_state()
+    });
+    deck.update().unwrap();
+    let zoomed: Vec<(u32, u32)> = deck
+        .layer_mut("screen")
+        .and_then(|l| l.as_any_mut().downcast_mut::<ScreenGridLayer>())
+        .unwrap()
+        .bins()
+        .iter()
+        .map(|b| (b.col, b.row))
+        .collect();
+    let before: Vec<(u32, u32)> = bins.iter().map(|b| (b.col, b.row)).collect();
+    assert!(!zoomed.is_empty());
+    assert_ne!(zoomed, before, "cells move when the view changes");
 }
