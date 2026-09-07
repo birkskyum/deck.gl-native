@@ -10,7 +10,7 @@ use deck_gl::glam::Vec4;
 use deck_gl::luma_gl::{Model, ShaderField, ShaderInjection, ShaderModuleSource};
 use deck_gl::{
     same_extension, Accessor, ExtensionAttribute, ExtensionShaders, LayerContext, LayerData, LayerExtension,
-    Result, Viewport,
+    LayerProps, Result, Viewport,
 };
 use wgpu::VertexFormat;
 
@@ -378,7 +378,13 @@ impl LayerExtension for DataFilterExtension {
         sources
     }
 
-    fn update_uniforms(&self, model: &mut Model, _ctx: &LayerContext, _viewport: &Viewport) -> Result<()> {
+    fn update_uniforms(
+        &self,
+        model: &mut Model,
+        _ctx: &LayerContext,
+        _viewport: &Viewport,
+        _props: &LayerProps,
+    ) -> Result<()> {
         let mut min = [0.0f32; 4];
         let mut soft_min = [0.0f32; 4];
         let mut soft_max = [0.0f32; 4];

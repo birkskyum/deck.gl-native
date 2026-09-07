@@ -10,7 +10,9 @@ use deck_gl::{
     Accessor, Color, CoordinateSystem, CullMode, Extensions, LayerExtension, LayerProps, Material,
     RenderParameters, Unit,
 };
-use deck_gl_layers::{DataFilterExtension, FilterCategories, FilterValues};
+use deck_gl_layers::{
+    BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, FilterCategories, FilterValues,
+};
 use serde_json::{Map, Value};
 
 use crate::expression::Expr;
@@ -415,6 +417,8 @@ impl<'a> Props<'a> {
             };
             match kind.as_str() {
                 "DataFilterExtension" => extensions.push(Arc::new(self.data_filter_extension(&options)?)),
+                "BrushingExtension" => extensions.push(Arc::new(self.brushing_extension()?)),
+                "ClipExtension" => extensions.push(Arc::new(self.clip_extension()?)),
                 "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
                 other => self.warn(format!(
                     "extension `{other}` is not supported yet and was ignored"
@@ -422,6 +426,64 @@ impl<'a> Props<'a> {
             }
         }
         Ok(Extensions::new(extensions))
+    }
+
+    fn brushing_extension(&self) -> Result<BrushingExtension> {
+        let defaults = BrushingExtension::default();
+        let target = match self.string("brushingTarget")?.as_deref() {
+            None | Some("source") => BrushingTarget::Source,
+            Some("target") => BrushingTarget::Target,
+            Some("source_target") => BrushingTarget::SourceTarget,
+            Some("custom") => BrushingTarget::Custom,
+            Some(other) => {
+                return Err(self.error(
+                    "brushingTarget",
+                    format!("expected source, target, source_target or custom, got `{other}`"),
+                ))
+            }
+        };
+        Ok(BrushingExtension {
+            get_brushing_target: self.accessor(
+                "getBrushingTarget",
+                &defaults.get_brushing_target,
+                convert::vec2,
+            )?,
+            brushing_target: target,
+            brushing_enabled: self.bool("brushingEnabled", defaults.brushing_enabled)?,
+            brushing_radius: self.f32("brushingRadius", defaults.brushing_radius)?,
+        })
+    }
+
+    fn clip_extension(&self) -> Result<ClipExtension> {
+        let bounds = match self.get("clipBounds") {
+            None | Some(Value::Null) => ClipExtension::default().clip_bounds,
+            Some(value) => {
+                let n = convert::numbers(value, 4, 4).map_err(|m| self.error("clipBounds", m))?;
+                [n[0], n[1], n[2], n[3]]
+            }
+        };
+        // deck.gl clips by instance when the layer has an `instancePositions` attribute
+        let by_geometry = matches!(
+            self.layer_type.as_str(),
+            "PathLayer"
+                | "TripsLayer"
+                | "SolidPolygonLayer"
+                | "PolygonLayer"
+                | "GeoJsonLayer"
+                | "BitmapLayer"
+                | "H3HexagonLayer"
+                | "S2Layer"
+                | "GeohashLayer"
+                | "QuadkeyLayer"
+                | "MVTLayer"
+                | "TileLayer"
+                | "WMSLayer"
+                | "ContourLayer"
+        );
+        Ok(ClipExtension {
+            clip_bounds: bounds,
+            clip_by_instance: self.bool("clipByInstance", !by_geometry)?,
+        })
     }
 
     fn data_filter_extension(&self, options: &Map<String, Value>) -> Result<DataFilterExtension> {

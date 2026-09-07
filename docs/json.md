@@ -162,6 +162,8 @@ sit on the layer, as in pydeck:
 | Extension | Options and props |
 | --- | --- |
 | `DataFilterExtension` | options `filterSize` (0 to 4 values per object) and `categorySize` (0 to 4 categories per object); props `getFilterValue`, `filterRange` (`[min, max]`, or one pair per value), `filterSoftRange`, `filterEnabled`, `filterTransformSize`, `filterTransformColor`, `getFilterCategory` (names or numbers, mapped to keys in order of appearance), `filterCategories` (the categories shown, one list per category channel). `fp64` and `countItems` are accepted and ignored. `examples/json/data-filter.json` filters points by value and kind. |
+| `BrushingExtension` | `getBrushingTarget`, `brushingTarget` (`source`, `target`, `source_target`, `custom`), `brushingEnabled`, `brushingRadius` (metres); the pointer comes from `deckgl_pointer_move` or `Deck::pointer_move` |
+| `ClipExtension` | `clipBounds` (`[left, bottom, right, top]`), `clipByInstance` (by default whole objects for point like layers, trimmed geometry for path, polygon, GeoJSON, bitmap and tile layers) |
 
 Extension attributes need a layer on the attribute manager (scatterplot, line, arc, point
 cloud, icon, column); the other layers report an error for them. See

@@ -550,6 +550,50 @@ impl Default for DeckglPickingInfo {
     }
 }
 
+/// Tell the deck where the pointer is (logical pixels, origin top left): hover callbacks,
+/// `autoHighlight` and the brushing extension follow it. Waits for the GPU like
+/// `deckgl_pick`. Returns 0 on success.
+///
+/// # Safety
+/// `deck` must be a valid handle.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_pointer_move(deck: *mut DeckglHandle, x: f64, y: f64) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let target = handle.target.unwrap_or_default();
+    if let Err(e) = handle.ensure_deck(target) {
+        return handle.set_error(e);
+    }
+    if handle.camera.is_some() {
+        handle.apply_camera();
+    } else if let (Some(view_state), Some(deck)) = (handle.view_state, handle.deck.as_mut()) {
+        deck.set_view_state(view_state);
+    }
+    let Some(deck) = handle.deck.as_mut() else {
+        return handle.set_error("deckgl_pointer_move: deck was not created");
+    };
+    match deck.pointer_move(x, y) {
+        Ok(_) => 0,
+        Err(e) => handle.set_error(e.to_string()),
+    }
+}
+
+/// The pointer left the view: hover state and brushing are cleared. Returns 0 on success.
+///
+/// # Safety
+/// `deck` must be a valid handle.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_pointer_leave(deck: *mut DeckglHandle) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    if let Some(deck) = handle.deck.as_mut() {
+        deck.pointer_leave();
+    }
+    0
+}
+
 /// Find the object under a pixel (logical coordinates, origin top left) with the current
 /// camera, deck.gl's `pickObject`. Waits for the GPU. Returns 0 on success and fills `info`;
 /// `info.picked` says whether anything was hit.

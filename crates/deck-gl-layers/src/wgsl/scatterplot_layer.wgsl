@@ -84,8 +84,9 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   varyings.innerUnitRadius = 1.0 - scatterplot.stroked * lineWidthPixels / varyings.outerRadiusPixels;
 
   if (scatterplot.billboard != 0) {
-    varyings.position = project_position_to_clipspace(attributes.instancePositions, attributes.instancePositions64Low, vec3<f32>(0.0));
-    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
+    let projected = project_position_to_clipspace_and_commonspace(attributes.instancePositions, attributes.instancePositions64Low, vec3<f32>(0.0));
+    geometry.position = projected.commonPosition;
+    varyings.position = deckgl_filter_gl_position(projected.clipPosition, geometry);
     var offset = edgePadding * attributes.positions * varyings.outerRadiusPixels;
     offset = vec3<f32>(offset.xy + attributes.instancePixelOffset, offset.z);
     offset = deckgl_filter_size(offset, geometry);
@@ -95,8 +96,9 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     var offset = edgePadding * attributes.positions * project_pixel_size_float(varyings.outerRadiusPixels);
     offset = vec3<f32>(offset.xy + project_pixel_size_vec2(attributes.instancePixelOffset), offset.z);
     offset = deckgl_filter_size(offset, geometry);
-    varyings.position = project_position_to_clipspace(attributes.instancePositions, attributes.instancePositions64Low, offset);
-    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
+    let projected = project_position_to_clipspace_and_commonspace(attributes.instancePositions, attributes.instancePositions64Low, offset);
+    geometry.position = projected.commonPosition;
+    varyings.position = deckgl_filter_gl_position(projected.clipPosition, geometry);
   }
 
   // Apply opacity to instance color, or return instance picking color

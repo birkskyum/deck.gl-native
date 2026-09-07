@@ -133,6 +133,13 @@ typedef struct DeckglPickingInfo {
  *  fills `info`; `info->picked` says whether anything was hit. */
 int32_t deckgl_pick(DeckglHandle* deck, double x, double y, DeckglPickingInfo* info);
 
+/** Where the pointer is over the view (logical pixels, origin top left): drives hover
+ *  callbacks, autoHighlight and the BrushingExtension. Waits for the GPU. Returns 0 on success. */
+int32_t deckgl_pointer_move(DeckglHandle* deck, double x, double y);
+
+/** The pointer left the view: hover state and brushing are cleared. Returns 0 on success. */
+int32_t deckgl_pointer_leave(DeckglHandle* deck);
+
 /** Like deckgl_snapshot, written as a PNG file. Returns 0 on success. */
 int32_t deckgl_snapshot_png(DeckglHandle* deck, uint32_t width, uint32_t height, const char* path);
 

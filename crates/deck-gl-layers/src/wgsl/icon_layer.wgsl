@@ -82,8 +82,9 @@ fn vertexMain(inp: Attributes) -> Varyings {
   pixelOffset.y = pixelOffset.y * -1.0;
 
   if (icon.billboard != 0) {
-    var pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, vec3<f32>(0.0));
-    pos = deckgl_filter_gl_position(pos, geometry);
+    let projected = project_position_to_clipspace_and_commonspace(inp.instancePositions, inp.instancePositions64Low, vec3<f32>(0.0));
+    geometry.position = projected.commonPosition;
+    var pos = deckgl_filter_gl_position(projected.clipPosition, geometry);
 
     var offset = vec3<f32>(pixelOffset, 0.0);
     offset = deckgl_filter_size(offset, geometry);
@@ -93,8 +94,9 @@ fn vertexMain(inp: Attributes) -> Varyings {
   } else {
     var offset_common = vec3<f32>(project_pixel_size_vec2(pixelOffset), 0.0);
     offset_common = deckgl_filter_size(offset_common, geometry);
-    var pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, offset_common);
-    pos = deckgl_filter_gl_position(pos, geometry);
+    let projected = project_position_to_clipspace_and_commonspace(inp.instancePositions, inp.instancePositions64Low, offset_common);
+    geometry.position = projected.commonPosition;
+    var pos = deckgl_filter_gl_position(projected.clipPosition, geometry);
     outp.position = pos;
   }
 

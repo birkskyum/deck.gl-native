@@ -163,6 +163,7 @@ impl Deck {
             depth_bias_base: props.depth_bias_base,
             clip_depth_range: props.clip_depth_range,
             uniform_slot: 0,
+            pointer: None,
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -561,13 +562,16 @@ impl Deck {
     /// `auto_highlight` highlight the hovered object, and the deck's own hover callback runs.
     /// Returns the object under the pointer. Like [`Deck::pick`], this waits for the GPU.
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Result<Option<PickingInfo>> {
+        self.ctx.pointer = Some([x, y]);
         let hit = self.pick(x, y)?;
         self.set_hovered(hit.clone());
         Ok(hit)
     }
 
-    /// The pointer left the deck: hover callbacks and auto highlights are cleared.
+    /// The pointer left the deck: hover callbacks and auto highlights are cleared, and
+    /// layers brushed by the pointer draw everything again.
     pub fn pointer_leave(&mut self) {
+        self.ctx.pointer = None;
         self.set_hovered(None);
     }
 

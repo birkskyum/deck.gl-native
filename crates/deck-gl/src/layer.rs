@@ -162,6 +162,10 @@ pub struct LayerContext {
     /// Uniform slot models write and draw with (see `Model::set_uniform_slot`): 0 for the main
     /// viewport, one more for each repeated world copy the deck draws.
     pub uniform_slot: usize,
+    /// Where the pointer is over the deck, in logical pixels from the top left, or `None`
+    /// when it is outside (deck.gl's `mousePosition`). Maintained by `Deck::pointer_move`
+    /// and `Deck::pointer_leave`; the brushing extension reads it.
+    pub pointer: Option<[f64; 2]>,
 }
 
 impl LayerContext {
@@ -328,6 +332,20 @@ pub fn set_model_picking_active(model: &mut Model, queue: &wgpu::Queue, active: 
     Ok(())
 }
 
+/// The projection inputs of a layer: its coordinate system, origin and model matrix with the
+/// viewport it is drawn in.
+pub fn project_props<'a>(ctx: &LayerContext, viewport: &'a Viewport, props: &LayerProps) -> ProjectProps<'a> {
+    ProjectProps {
+        viewport,
+        device_pixel_ratio: ctx.device_pixel_ratio,
+        model_matrix: props.model_matrix,
+        coordinate_system: props.coordinate_system,
+        coordinate_origin: glam::DVec3::from(props.coordinate_origin),
+        auto_wrap_longitude: props.wrap_longitude,
+        clip_depth_range: ctx.clip_depth_range,
+    }
+}
+
 /// Fill the uniform blocks every deck.gl layer shader has: `project`, `layer` and `picking`,
 /// plus `lighting`, `gouraudMaterial` and `floatColors` when the model uses them.
 pub fn update_standard_uniforms(
@@ -337,15 +355,7 @@ pub fn update_standard_uniforms(
     props: &LayerProps,
 ) -> Result<()> {
     model.set_uniform_slot(ctx.uniform_slot);
-    let project = get_uniforms_from_viewport(&ProjectProps {
-        viewport,
-        device_pixel_ratio: ctx.device_pixel_ratio,
-        model_matrix: props.model_matrix,
-        coordinate_system: props.coordinate_system,
-        coordinate_origin: glam::DVec3::from(props.coordinate_origin),
-        auto_wrap_longitude: props.wrap_longitude,
-        clip_depth_range: ctx.clip_depth_range,
-    });
+    let project = get_uniforms_from_viewport(&project_props(ctx, viewport, props));
     project.write(model.uniforms("project")?)?;
 
     // apply gamma to opacity to make it visually "linear"
@@ -386,7 +396,7 @@ pub fn update_standard_uniforms(
     if model.has_uniforms("floatColors") {
         model.uniforms("floatColors")?.set_f32("useByteColors", 1.0)?;
     }
-    props.extensions.update_uniforms(model, ctx, viewport)?;
+    props.extensions.update_uniforms(model, ctx, viewport, props)?;
 
     model.upload_uniforms(&ctx.queue);
     Ok(())

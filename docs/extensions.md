@@ -84,7 +84,7 @@ impl LayerExtension for TintExtension {
     fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
         vec![("tintValues", AttributeSource::Floats(self.get_tint.clone()))]
     }
-    fn update_uniforms(&self, model: &mut Model, _: &LayerContext, _: &Viewport) -> deck_gl::Result<()> {
+    fn update_uniforms(&self, model: &mut Model, _: &LayerContext, _: &Viewport, _: &LayerProps) -> deck_gl::Result<()> {
         model.uniforms("tint")?.set_f32("scale", self.scale)
     }
     fn equals(&self, other: &dyn LayerExtension) -> bool { same_extension(self, other) }
@@ -114,3 +114,10 @@ error for extensions that declare attributes.
   `filter_categories`. `count_filtered` evaluates the same rules on the CPU, deck.gl's
   `onFilteredItemsChange` count. In JSON, `extensions: [{"@@type": "DataFilterExtension"}]`
   with the props on the layer, see [docs/json.md](json.md#extensions).
+- `BrushingExtension`: shows only the objects within `brushing_radius` metres of the pointer,
+  measured to the object's position, the other end of a line or arc, either end, or a custom
+  position from `get_brushing_target`. The pointer is `LayerContext::pointer`, kept up to date
+  by `Deck::pointer_move` and `Deck::pointer_leave` (and `deckgl_pointer_move` in the C API).
+- `ClipExtension`: clips a layer to `clip_bounds` (`[left, bottom, right, top]` in the layer's
+  coordinates), whole objects by their anchor with `clip_by_instance`, or the geometry per
+  fragment without it.

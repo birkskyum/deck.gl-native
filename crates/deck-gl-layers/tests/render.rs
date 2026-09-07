@@ -17,10 +17,10 @@ use deck_gl::{
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
-    BitmapLayerProps, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps,
-    DataFilterExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer, GridLayerProps,
-    HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas,
-    IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
+    BitmapLayerProps, BrushingExtension, ClipExtension, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
+    ContourLayerProps, DataFilterExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
+    GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
+    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
     PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
     ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
     TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
@@ -2327,6 +2327,7 @@ impl LayerExtension for TintExtension {
         model: &mut Model,
         _ctx: &LayerContext,
         _viewport: &Viewport,
+        _props: &LayerProps,
     ) -> deck_gl::Result<()> {
         model.uniforms("tint")?.set_f32("scale", self.scale)?;
         Ok(())
@@ -2460,4 +2461,84 @@ fn data_filter_extension_keeps_the_selected_categories() {
     assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
     assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
     assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
+}
+
+fn three_circles(id: &str, extensions: Extensions) -> Box<dyn Layer> {
+    let d = 0.0007;
+    Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            extensions,
+            ..LayerProps::new(id)
+        },
+        data: LayerData::with_length(3),
+        get_position: Accessor::func(move |i| [CENTER[0] + (i as f64 - 1.0) * d, CENTER[1], 0.0]),
+        get_radius: Accessor::Constant(6.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    }))
+}
+
+#[test]
+fn brushing_extension_shows_objects_near_the_pointer() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    // the circles are about 62 metres apart: a 30 metre brush keeps one
+    let layer = three_circles("brushed", Extensions::from_one(BrushingExtension::new(30.0)));
+    let mut deck = make_deck(&ctx, vec![layer]);
+    deck.pointer_move((c - 16) as f64, c as f64).expect("pointer");
+    let snapshot = deck.snapshot(Some(wgpu::Color::TRANSPARENT)).expect("snapshot");
+    assert_pixel(&snapshot.rgba, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&snapshot.rgba, c, c, [0, 0, 0, 0], 0);
+    assert_pixel(&snapshot.rgba, c + 16, c, [0, 0, 0, 0], 0);
+    // without a pointer everything is drawn
+    deck.pointer_leave();
+    let snapshot = deck.snapshot(Some(wgpu::Color::TRANSPARENT)).expect("snapshot");
+    assert_pixel(&snapshot.rgba, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&snapshot.rgba, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&snapshot.rgba, c + 16, c, [255, 0, 0, 255], 0);
+}
+
+#[test]
+fn clip_extension_clips_by_anchor_or_by_geometry() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    // by instance: the left circle's centre is outside the bounds
+    let bounds = [
+        CENTER[0] - d / 2.0,
+        CENTER[1] - 1.0,
+        CENTER[0] + 2.0 * d,
+        CENTER[1] + 1.0,
+    ];
+    let layer = three_circles("clipped", Extensions::from_one(ClipExtension::new(bounds, true)));
+    let pixels = render(&ctx, vec![layer]);
+    assert_pixel(&pixels, c - 16, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
+
+    // by geometry: a square is trimmed to its left half
+    let square = Arc::new(vec![vec![
+        [CENTER[0] - d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] + d, 0.0],
+        [CENTER[0] - d, CENTER[1] + d, 0.0],
+    ]]);
+    let half = [CENTER[0] - d, CENTER[1] - d, CENTER[0], CENTER[1] + d];
+    let layer = SolidPolygonLayer::new(SolidPolygonLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(ClipExtension::new(half, false)),
+            ..LayerProps::new("trimmed")
+        },
+        data: LayerData::with_length(1),
+        get_polygon: Accessor::func(move |_| (*square).clone()),
+        get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    assert_pixel(&pixels, c - 8, c, [0, 0, 255, 255], 0);
+    assert_pixel(&pixels, c - 2, c, [0, 0, 255, 255], 0);
+    assert_pixel(&pixels, c + 2, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c + 8, c, [0, 0, 0, 0], 0);
 }

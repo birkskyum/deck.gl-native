@@ -10,7 +10,7 @@ use deck_gl::{
 };
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
-use deck_gl_layers::DataFilterExtension;
+use deck_gl_layers::{BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension};
 use serde_json::{json, Value};
 
 fn props_with_rows(object: &Value, rows: Vec<Value>) -> (Props<'_>, LayerData) {
@@ -850,10 +850,42 @@ fn extensions_parse_the_data_filter_with_named_categories() {
     let mut warnings = Vec::new();
     let layers = JsonConverter::new()
         .convert_layers(
-            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "BrushingExtension"}]}]),
+            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "MaskExtension"}]}]),
             &mut warnings,
         )
         .unwrap();
     assert!(layers[0].props().extensions.is_empty());
     assert_eq!(warnings.len(), 1, "{warnings:?}");
+}
+
+#[test]
+fn extensions_parse_brushing_and_clip() {
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([
+                {
+                    "@@type": "ArcLayer", "id": "arcs", "data": [],
+                    "extensions": [{"@@type": "BrushingExtension"}, {"@@type": "ClipExtension"}],
+                    "brushingRadius": 500, "brushingTarget": "source_target",
+                    "clipBounds": [-1, -2, 3, 4]
+                },
+                {
+                    "@@type": "PathLayer", "id": "paths", "data": [],
+                    "extensions": ["ClipExtension"]
+                }
+            ]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let arcs = layers[0].props();
+    let brushing = arcs.extensions.get::<BrushingExtension>().unwrap();
+    assert_eq!(brushing.brushing_radius, 500.0);
+    assert_eq!(brushing.brushing_target, BrushingTarget::SourceTarget);
+    let clip = arcs.extensions.get::<ClipExtension>().unwrap();
+    assert_eq!(clip.clip_bounds, [-1.0, -2.0, 3.0, 4.0]);
+    assert!(clip.clip_by_instance, "arcs clip by their anchors");
+    let paths = layers[1].props().extensions.get::<ClipExtension>().unwrap();
+    assert!(!paths.clip_by_instance, "paths clip by geometry");
 }

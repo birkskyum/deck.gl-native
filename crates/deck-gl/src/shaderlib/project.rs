@@ -201,6 +201,53 @@ fn calculate_matrix_and_offset(
     }
 }
 
+/// The common space position the shader computes for a world position of the layer
+/// (`geometry.position`), deck.gl's `projectPosition` from `project-functions.ts`: in offset
+/// mode the result is relative to the shader's origin.
+pub fn project_position(props: &ProjectProps<'_>, position: DVec3) -> DVec3 {
+    let viewport = props.viewport;
+    let coordinate_system = match props.coordinate_system {
+        CoordinateSystem::Default if viewport.is_geospatial => CoordinateSystem::LngLat,
+        CoordinateSystem::Default => CoordinateSystem::Cartesian,
+        other => other,
+    };
+    let OffsetOrigin {
+        geospatial_origin,
+        shader_coordinate_origin,
+        offset_mode,
+    } = get_offset_origin(viewport, coordinate_system, props.coordinate_origin);
+    let position = match props.model_matrix {
+        Some(matrix) => matrix.transform_point3(position),
+        None => position,
+    };
+    let lng_lat_z_to_world = |lng_lat_z: DVec3| -> DVec3 {
+        let mut p = viewport.project_position(lng_lat_z);
+        if offset_mode && viewport.is_geospatial {
+            let scales = viewport.get_distance_scales(Some(lng_lat_z));
+            p.z = lng_lat_z.z * scales.units_per_meter.z;
+        }
+        p
+    };
+    let world = match coordinate_system {
+        CoordinateSystem::LngLat => lng_lat_z_to_world(position),
+        CoordinateSystem::LngLatOffsets => lng_lat_z_to_world(position + props.coordinate_origin),
+        CoordinateSystem::MeterOffsets => {
+            lng_lat_z_to_world(DVec3::from(math_gl::web_mercator::add_meters_to_lng_lat(
+                props.coordinate_origin.to_array(),
+                position.to_array(),
+            )))
+        }
+        _ if viewport.is_geospatial => position + props.coordinate_origin,
+        _ => viewport.project_position(position),
+    };
+    if offset_mode {
+        let origin = viewport.project_position(geospatial_origin.unwrap_or(shader_coordinate_origin));
+        world - DVec3::new(origin.x, origin.y, 0.0)
+    } else {
+        world
+    }
+}
+
 /// Returns uniforms for shaders based on the current projection.
 pub fn get_uniforms_from_viewport(props: &ProjectProps<'_>) -> ProjectUniforms {
     let viewport = props.viewport;

@@ -15,7 +15,7 @@ use luma_gl::{AssembledShader, Model, ShaderModuleSource};
 use wgpu::VertexFormat;
 
 use crate::attribute_manager::{AttributeSource, BufferSpec};
-use crate::layer::LayerContext;
+use crate::layer::{LayerContext, LayerProps};
 use crate::shaderlib::HOOKS;
 use crate::viewport::Viewport;
 use crate::{DeckError, Result};
@@ -51,8 +51,15 @@ pub trait LayerExtension: Send + Sync + fmt::Debug {
         Vec::new()
     }
 
-    /// Write the extension's uniforms. Called on every layer update, before the upload.
-    fn update_uniforms(&self, _model: &mut Model, _ctx: &LayerContext, _viewport: &Viewport) -> Result<()> {
+    /// Write the extension's uniforms. Called on every layer update, before the upload, with
+    /// the layer's base props (its coordinate system, for extensions that project positions).
+    fn update_uniforms(
+        &self,
+        _model: &mut Model,
+        _ctx: &LayerContext,
+        _viewport: &Viewport,
+        _props: &LayerProps,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -222,9 +229,15 @@ impl Extensions {
         self.0.iter().flat_map(|e| e.attributes()).collect()
     }
 
-    pub fn update_uniforms(&self, model: &mut Model, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+    pub fn update_uniforms(
+        &self,
+        model: &mut Model,
+        ctx: &LayerContext,
+        viewport: &Viewport,
+        props: &LayerProps,
+    ) -> Result<()> {
         for extension in &self.0 {
-            extension.update_uniforms(model, ctx, viewport)?;
+            extension.update_uniforms(model, ctx, viewport, props)?;
         }
         Ok(())
     }
