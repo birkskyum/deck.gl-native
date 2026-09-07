@@ -32,6 +32,7 @@ pub mod shaderlib;
 pub mod transition;
 pub mod viewport;
 pub mod views;
+pub mod wkb;
 
 pub use attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field, Part};
 pub use collision::CollisionMaps;

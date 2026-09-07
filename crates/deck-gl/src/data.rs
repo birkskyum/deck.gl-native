@@ -238,6 +238,12 @@ pub fn resolve_with<T: Clone + Send>(
 /// Resolve positions. Columns must be `FixedSizeList<Float32|Float64>` of width 2 or 3.
 pub fn resolve_positions(data: &LayerData, accessor: &Accessor<Position>) -> Result<Vec<Position>> {
     resolve_with(data, accessor, |column| {
+        if let Some(points) = wkb_column(column, "point", [0.0; 3], |g| match g {
+            crate::geojson::Geometry::Point(p) => Some(p),
+            _ => None,
+        })? {
+            return Ok(points);
+        }
         let (values, width) = fixed_size_list_to_f64(column.as_ref())?;
         if width != 2 && width != 3 {
             return Err(DeckError::Data(format!(
@@ -261,6 +267,60 @@ fn resolve_function<T: Clone + Send>(f: &(dyn Fn(usize) -> T + Send + Sync), len
     }
     use rayon::prelude::*;
     (0..len).into_par_iter().map(f).collect()
+}
+
+/// The WKB bytes of every row of a binary column, when the column is one.
+fn wkb_rows(column: &ArrayRef) -> Option<Vec<Option<&[u8]>>> {
+    let rows = column.len();
+    if let Some(array) = column.as_binary_opt::<i32>() {
+        return Some(
+            (0..rows)
+                .map(|i| (!array.is_null(i)).then(|| array.value(i)))
+                .collect(),
+        );
+    }
+    if let Some(array) = column.as_binary_opt::<i64>() {
+        return Some(
+            (0..rows)
+                .map(|i| (!array.is_null(i)).then(|| array.value(i)))
+                .collect(),
+        );
+    }
+    if let Some(array) = column.as_binary_view_opt() {
+        return Some(
+            (0..rows)
+                .map(|i| (!array.is_null(i)).then(|| array.value(i)))
+                .collect(),
+        );
+    }
+    None
+}
+
+/// Decode every row of a WKB column with `pick`, which turns the geometry into the value the
+/// accessor needs; nulls and geometries of another kind become `fallback`.
+fn wkb_column<T: Clone>(
+    column: &ArrayRef,
+    what: &str,
+    fallback: T,
+    pick: impl Fn(crate::geojson::Geometry) -> Option<T>,
+) -> Result<Option<Vec<T>>> {
+    let Some(rows) = wkb_rows(column) else {
+        return Ok(None);
+    };
+    let mut values = Vec::with_capacity(rows.len());
+    for (row, bytes) in rows.into_iter().enumerate() {
+        let value = match bytes {
+            None => fallback.clone(),
+            Some(bytes) => {
+                let geometry = crate::wkb::wkb_geometry(bytes)
+                    .map_err(|e| DeckError::Data(format!("row {row}: {e}")))?;
+                pick(geometry)
+                    .ok_or_else(|| DeckError::Data(format!("row {row}: WKB geometry is not a {what}")))?
+            }
+        };
+        values.push(value);
+    }
+    Ok(Some(values))
 }
 
 /// Resolve scalar floats from any numeric column.
@@ -359,6 +419,12 @@ pub fn resolve_colors(data: &LayerData, accessor: &Accessor<Color>) -> Result<Ve
 /// Resolve paths. Columns must be GeoArrow linestrings (`List<FixedSizeList<Float64, 2|3>>`).
 pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<Path>> {
     resolve_with(data, accessor, |column| {
+        if let Some(paths) = wkb_column(column, "linestring", Vec::new(), |g| match g {
+            crate::geojson::Geometry::LineString(path) => Some(path),
+            _ => None,
+        })? {
+            return Ok(paths);
+        }
         let (offsets, coords) = list_parts(column.as_ref())?;
         let (values, width) = fixed_size_list_to_f64(coords.as_ref())?;
         if width != 2 && width != 3 {
@@ -400,6 +466,12 @@ pub fn resolve_polygons(data: &LayerData, accessor: &Accessor<Polygon>) -> Resul
 }
 
 fn polygons_from_column(column: &ArrayRef) -> Result<Vec<Polygon>> {
+    if let Some(polygons) = wkb_column(column, "polygon", Vec::new(), |g| match g {
+        crate::geojson::Geometry::Polygon(polygon) => Some(polygon),
+        _ => None,
+    })? {
+        return Ok(polygons);
+    }
     match column.data_type() {
         DataType::List(_) | DataType::LargeList(_) => {}
         other => {
@@ -555,5 +627,33 @@ mod tests {
         assert_eq!(result[0].len(), 2);
         assert_eq!(result[0][0][1], [10.0, 0.0, 0.0]);
         assert_eq!(result[0][1][2], [4.0, 4.0, 0.0]);
+    }
+}
+
+#[cfg(test)]
+mod wkb_column_tests {
+    use super::*;
+    use arrow_array::{BinaryArray, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+
+    fn le_point(x: f64, y: f64) -> Vec<u8> {
+        let mut bytes = vec![1u8, 1, 0, 0, 0];
+        bytes.extend_from_slice(&x.to_le_bytes());
+        bytes.extend_from_slice(&y.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn positions_come_from_wkb_binary_columns() {
+        let a = le_point(1.0, 2.0);
+        let b = le_point(3.0, 4.0);
+        let column = BinaryArray::from_opt_vec(vec![Some(a.as_slice()), None, Some(b.as_slice())]);
+        let schema = Schema::new(vec![Field::new("geometry", DataType::Binary, true)]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(column)]).unwrap();
+        let data = LayerData::from_batch(batch);
+        let positions = resolve_positions(&data, &Accessor::column("geometry")).unwrap();
+        assert_eq!(positions, vec![[1.0, 2.0, 0.0], [0.0; 3], [3.0, 4.0, 0.0]]);
+        // a point is not a path
+        assert!(resolve_paths(&data, &Accessor::column("geometry")).is_err());
     }
 }
