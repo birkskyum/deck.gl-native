@@ -1,0 +1,61 @@
+---
+title: Gallery
+description: Scenes rendered by deck.gl-native, each one a JSON description in the repository.
+---
+
+export const url = (path) => `${import.meta.env.BASE_URL.replace(/\/$/, '')}/${path}`
+export const image = (name) => url(`images/${name}`)
+
+Every picture here is a JSON description in `examples/json/`, rendered headless with
+`cargo run --release --bin json_render -- examples/json/<name>.json out.png`. They are
+regenerated from the repository, so they show what the current code draws.
+
+<div class="gallery">
+  <figure>
+    <img src={image('scenegraph.png')} alt="glTF aircraft over raster tiles" />
+    <figcaption>
+      `ScenegraphLayer`: glTF models with a heading each, over a `TileLayer` basemap.
+    </figcaption>
+  </figure>
+  <figure>
+    <img src={image('terrain.png')} alt="Terrain from elevation tiles" />
+    <figcaption>
+      `TerrainLayer`: elevation tiles triangulated with Martini, lit by a directional light.
+    </figcaption>
+  </figure>
+  <figure>
+    <img src={image('shadows.png')} alt="Extruded blocks casting shadows" />
+    <figcaption>Shadow maps from a low sun over Vancouver's extruded blocks.</figcaption>
+  </figure>
+  <figure>
+    <img src={image('post-process.png')} alt="Hexagon aggregation with a vignette" />
+    <figcaption>
+      `HexagonLayer` under two `PostProcessEffect` passes, a vignette and a saturation boost.
+    </figcaption>
+  </figure>
+  <figure>
+    <img src={image('osm-tiles.png')} alt="Raster tiles of Copenhagen" />
+    <figcaption>
+      `TileLayer`: a frustum culled quadtree loading raster tiles in the background.
+    </figcaption>
+  </figure>
+  <figure>
+    <img src={image('geojson-vancouver.png')} alt="Vancouver blocks from GeoJSON" />
+    <figcaption>`GeoJsonLayer`: 4,600 extruded blocks read from GeoJSON.</figcaption>
+  </figure>
+</div>
+
+## Inside a map
+
+<div class="hero-shot">
+  <img
+    src={image('maplibre-interleaved.png')}
+    alt="deck.gl-native arcs weaving through maplibre-native's 3D buildings"
+  />
+</div>
+
+Depth interleaved rendering: deck.gl-native arcs and maplibre-native's own extruded buildings
+in one frame, sharing a depth buffer, so each arc is hidden where it passes behind a tower and
+visible where it clears one. This is maplibre-native's GLFW app on Metal, drawing
+`examples/json/maplibre-arcs.json` through the C API. See
+<a href={url('docs/maplibre-native/')}>maplibre-native</a>.

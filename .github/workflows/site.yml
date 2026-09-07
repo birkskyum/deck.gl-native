@@ -1,0 +1,55 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - 'crates/**'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+# One deployment at a time, and let a newer push finish rather than cancelling it
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The API reference goes under /api, with an index that jumps into the main crate
+      - run: cargo doc --no-deps -p math-gl -p luma-gl -p deck-gl -p deck-gl-layers -p deck-gl-json
+      - name: Put the API reference in the site
+        run: |
+          cp -r target/doc site/dist/api
+          echo '<meta http-equiv="refresh" content="0; url=deck_gl/index.html">' > site/dist/api/index.html
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

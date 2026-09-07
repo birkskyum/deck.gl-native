@@ -1,0 +1,83 @@
+---
+title: deck.gl-native
+description: A native implementation of deck.gl for native hardware, in Rust on wgpu.
+template: splash
+hero:
+  tagline: |
+    deck.gl for native hardware: Rust on wgpu, rendering with deck.gl's own WGSL shaders and
+    taking Apache Arrow and GeoArrow data directly.
+  image:
+    file: ../../assets/texture-render.png
+  actions:
+    - text: Gallery
+      link: /deck.gl-native/gallery/
+      icon: right-arrow
+    - text: Design notes
+      link: /deck.gl-native/docs/rust-port/
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/birkskyum/deck.gl-native
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components'
+
+<CardGrid stagger>
+  <Card title="Every layer of deck.gl 9.4" icon="seti:image">
+    Scatterplot, line, path, arc, polygon, text, icon, column, point cloud and bitmap layers;
+    the aggregation layers with their scales; tiles, MVT, WMS, terrain and 3D Tiles; H3, S2, A5,
+    geohash and quadkey cells; glTF scenes and instanced meshes. All verified pixel by pixel in
+    headless GPU tests.
+  </Card>
+  <Card title="Columnar data, no conversion" icon="seti:db">
+    Arrow record batches with column, constant and function accessors. GeoArrow geometry in both
+    coordinate layouts, WKB, GeoParquet, FlatGeobuf, GeoJSON, CSV. Columns already in the GPU's
+    layout are handed over as they are, and a constant accessor uploads a single element.
+  </Card>
+  <Card title="Draws inside your renderer" icon="seti:config">
+    Render into a wgpu pass you own, or into textures you provide. Layers draw inside a
+    maplibre-native map, depth interleaved with its own 3D buildings, through a C API that also
+    takes Arrow tables without copying them.
+  </Card>
+  <Card title="The effects too" icon="star">
+    Lighting with per layer materials, shadows from directional lights, eighteen
+    post-processing passes, eight layer extensions, prop transitions, picking and highlighting.
+  </Card>
+</CardGrid>
+
+## Getting started
+
+```sh
+git clone https://github.com/birkskyum/deck.gl-native
+cd deck.gl-native
+cargo run --release --bin window          # the example scene, in a window
+cargo run --release --bin json_render -- examples/json/shadows.json out.png
+```
+
+```rust
+use deck_gl::{Accessor, Deck, DeckProps, LayerData, LayerProps, ViewState};
+use deck_gl_layers::{ScatterplotLayer, ScatterplotLayerProps};
+
+let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+    base: LayerProps::new("points"),
+    data: LayerData::from_batch(record_batch),   // an Arrow RecordBatch
+    get_position: Accessor::column("geometry"),
+    get_fill_color: Accessor::column("color"),
+    get_radius: Accessor::Constant(50.0),        // metres
+    ..Default::default()
+});
+
+let mut deck = Deck::new(&device, &queue, target, DeckProps {
+    width, height,
+    view_state: ViewState { longitude: -122.4, latitude: 37.8, zoom: 12.0, pitch: 45.0, bearing: 0.0 },
+    layers: vec![Box::new(layer)],
+    ..Default::default()
+})?;
+deck.render(&mut encoder, &color_view, Some(&depth_view), Some(wgpu::Color::TRANSPARENT))?;
+```
+
+This is an independent project by [Birk Skyum](https://github.com/birkskyum), not affiliated
+with vis.gl or the deck.gl maintainers, although it builds on their work: the layer designs,
+the WGSL shaders and the projection math are ports of
+[deck.gl](https://github.com/visgl/deck.gl) and [luma.gl](https://github.com/visgl/luma.gl).

@@ -17,8 +17,10 @@ and the repository started from the 2020 C++ prototype that Unfolded, Inc. publi
 is kept in `cpp/` as a reference and described in [docs/cpp-prototype.md](docs/cpp-prototype.md).
 The Rust port in `crates/` is a fresh port of deck.gl 9 and is the active code base.
 
-Planned work is tracked in the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
-and the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
+The documentation and the gallery are on the
+[site](https://birkskyum.github.io/deck.gl-native/), built from `site/`. Planned work is
+tracked in the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75) and
+the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
 
 ## Gallery
 

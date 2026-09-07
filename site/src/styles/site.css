@@ -1,0 +1,34 @@
+/* The gallery: two pictures a row on a wide screen, one on a narrow one. */
+.gallery {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: 1fr;
+  margin-block: 2rem;
+}
+
+@media (min-width: 50rem) {
+  .gallery {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.gallery figure {
+  margin: 0;
+}
+
+.gallery img {
+  border-radius: 0.5rem;
+  width: 100%;
+  display: block;
+}
+
+.gallery figcaption {
+  color: var(--sl-color-gray-3);
+  font-size: var(--sl-text-sm);
+  margin-top: 0.5rem;
+}
+
+.hero-shot img {
+  border-radius: 0.5rem;
+  width: 100%;
+}
