@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
-use deck_gl::{FeatureCollection, Layer, LayerData, Polygon};
+use deck_gl::{Accessor, FeatureCollection, Layer, LayerData, Polygon};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
     BitmapLayerProps, CellKind, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
@@ -529,7 +529,7 @@ fn solid_polygon(p: &Props, data: LayerData) -> Result<SolidPolygonLayerProps> {
         extruded: p.bool("extruded", d.extruded)?,
         wireframe: p.bool("wireframe", d.wireframe)?,
         elevation_scale: p.f32("elevationScale", d.elevation_scale)?,
-        get_polygon,
+        get_polygon: p.accessor("getPolygon", "polygon", convert::polygon)?,
         get_elevation: p.accessor("getElevation", &d.get_elevation, convert::f32)?,
         get_fill_color: p.accessor("getFillColor", &d.get_fill_color, convert::color)?,
         get_line_color: p.accessor("getLineColor", &d.get_line_color, convert::color)?,
@@ -558,7 +558,7 @@ fn polygon_with(p: &Props, data: LayerData, get_polygon: Accessor<Polygon>) -> R
         line_width_max_pixels: p.f32("lineWidthMaxPixels", d.line_width_max_pixels)?,
         line_joint_rounded: p.bool("lineJointRounded", d.line_joint_rounded)?,
         line_miter_limit: p.f32("lineMiterLimit", d.line_miter_limit)?,
-        get_polygon: p.accessor("getPolygon", "polygon", convert::polygon)?,
+        get_polygon,
         get_fill_color: p.accessor("getFillColor", &d.get_fill_color, convert::color)?,
         get_line_color: p.accessor("getLineColor", &d.get_line_color, convert::color)?,
         get_line_width: p.accessor("getLineWidth", &d.get_line_width, convert::f32)?,
