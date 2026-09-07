@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/path-layer/path-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
-use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Path, Result, Unit, Viewport};
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
@@ -170,7 +170,7 @@ impl Layer for PathLayer {
             wgpu::PrimitiveTopology::TriangleList,
             ctx.target,
         );
-        desc.depth_bias = depth_bias_for_layer(ctx.layer_index);
+        desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
         let mut model = Model::new(&ctx.device, &desc)?;
 

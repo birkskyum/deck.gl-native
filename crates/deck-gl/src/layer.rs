@@ -3,7 +3,7 @@
 use glam::DMat4;
 use luma_gl::{Model, RenderTarget};
 
-use crate::constants::CoordinateSystem;
+use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::Color;
 use crate::lighting::LightingEffect;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
@@ -64,6 +64,20 @@ pub struct LayerContext {
     pub lighting: LightingEffect,
     /// Position of the layer being initialized, updated or drawn in the deck's layer list.
     pub layer_index: u32,
+    /// Constant depth bias added to every layer, in depth buffer units. A host that shares its
+    /// depth buffer sets this so deck's ground level geometry wins against the host's ground.
+    pub depth_bias_base: i32,
+    /// Depth convention of the depth buffer, see [`ClipDepthRange`].
+    pub clip_depth_range: ClipDepthRange,
+}
+
+impl LayerContext {
+    /// Depth bias for the current layer: deck.gl's per layer polygon offset plus the base.
+    pub fn depth_bias(&self) -> wgpu::DepthBiasState {
+        let mut bias = depth_bias_for_layer(self.layer_index);
+        bias.constant += self.depth_bias_base;
+        bias
+    }
 }
 
 /// Top-level layers are spaced this far apart in `layer_index`, leaving room for the sub
@@ -225,6 +239,7 @@ pub fn update_standard_uniforms(
         coordinate_system: props.coordinate_system,
         coordinate_origin: glam::DVec3::from(props.coordinate_origin),
         auto_wrap_longitude: props.wrap_longitude,
+        clip_depth_range: ctx.clip_depth_range,
     });
     project.write(model.uniforms("project")?)?;
 

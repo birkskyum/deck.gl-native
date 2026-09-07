@@ -108,11 +108,7 @@ unsafe fn wrap_texture(
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: if is_depth {
-                    wgpu::TextureUsages::RENDER_ATTACHMENT
-                } else {
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
-                },
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
             if is_depth {
@@ -190,6 +186,16 @@ pub unsafe extern "C" fn deckgl_metal_render(
         .map(|depth| unsafe { wrap_texture(&handle.device, depth, depth_format.unwrap(), "host depth") });
     let color_view = color_texture.create_view(&Default::default());
     let depth_view = depth_texture.as_ref().map(|t| t.create_view(&Default::default()));
+    if let (Some(depth), Some(deck)) = (&depth_texture, handle.deck.as_ref()) {
+        crate::debug::maybe_dump(
+            &handle.device,
+            &handle.queue,
+            depth,
+            deck.viewport(),
+            handle.frame,
+            false,
+        );
+    }
 
     let mut encoder = handle
         .device
@@ -201,7 +207,8 @@ pub unsafe extern "C" fn deckgl_metal_render(
         &color_view,
         depth_view.as_ref(),
         wgpu::LoadOp::Load,
-        if clear_depth != 0 {
+        // The after pass depth dump wants deck's depth alone, on the shared planes.
+        if clear_depth != 0 || std::env::var_os("DECKGL_DUMP_DEPTH_AFTER").is_some() {
             wgpu::LoadOp::Clear(1.0)
         } else {
             wgpu::LoadOp::Load
@@ -211,6 +218,16 @@ pub unsafe extern "C" fn deckgl_metal_render(
         return handle.set_error(format!("render failed: {e}"));
     }
     handle.queue.submit([encoder.finish()]);
+    if let (Some(depth), Some(deck)) = (&depth_texture, handle.deck.as_ref()) {
+        crate::debug::maybe_dump(
+            &handle.device,
+            &handle.queue,
+            depth,
+            deck.viewport(),
+            handle.frame,
+            true,
+        );
+    }
     handle.frame += 1;
     crate::screenshot::maybe_capture(handle, &color_texture, color_format);
     0

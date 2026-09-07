@@ -25,7 +25,9 @@ frame is presented once. No texture copies, no compositing pass.
    textures without copying, loads the color contents, and draws the layers.
 
 The host side for the GLFW demo app lives in the maplibre-native tree
-(`platform/glfw/deckgl_overlay.{hpp,mm}`) behind the CMake option `MLN_DECKGL_OVERLAY`:
+(`platform/glfw/deckgl_overlay.{hpp,mm}`, snapshotted with the patch in
+[hosts/maplibre-native-glfw](../hosts/maplibre-native-glfw/)) behind the CMake option
+`MLN_DECKGL_OVERLAY`:
 
 - `GLFWView::render` passes `map->getCameraOptions()` to the overlay before each frame.
 - `MetalRenderableResource::swap` commits the map's command buffer, calls the overlay, then
@@ -44,6 +46,15 @@ over San Francisco. On this machine two workarounds were needed and the script a
 the Homebrew ccache cannot start, and maplibre-tile-spec's FastPFOR needs the simde headers
 and `SIMDE_ENABLE_NATIVE_ALIASES` on the include path.
 
+Interleaving works by sharing the map's depth buffer: the hook keeps the depth attachment
+cleared at load and stored after the map's pass, and deck projects with the same near and far
+planes maplibre uses for its 3D layers (a near plane of a tenth of the camera distance, see
+`maplibre_near_far_pixels`) and writes OpenGL style depth values like maplibre does
+(`ClipDepthRange::NegativeOneToOne`). Ground level deck geometry therefore sits under buildings and
+above the flat map layers, and elevated geometry such as arcs and extruded polygons is occluded
+only by taller buildings. Labels are still drawn under deck's layers; putting deck between map
+layers needs the custom layer host tracked in issue #61.
+
 Environment variables read by the overlay:
 
 | Variable | Effect |
@@ -51,6 +62,8 @@ Environment variables read by the overlay:
 | `DECKGL_OVERLAY=0` | Disable the overlay |
 | `DECKGL_JSON=scene.json` | Show a [JSON description](json.md) instead of the demo scene (also honoured by the all-Rust demo below) |
 | `DECKGL_LOAD_DEPTH=0` | Clear depth before deck draws instead of depth testing against the map's buildings (interleaving is the default) |
+| `DECKGL_DEBUG=1` | Print the camera, planes and viewport deck derives from the map |
+| `DECKGL_DUMP_DEPTH=/tmp/prefix` | Write the map's depth buffer as raw `f32` once and print building feet against deck's ground depth (see hosts/maplibre-native-glfw/README.md) |
 | `DECKGL_SCREENSHOT=frame.png` | Write the composited frame to a PNG once, `DECKGL_SCREENSHOT_AFTER_MS` (default 8000) after the first frame |
 
 ## All-Rust host through maplibre-native-ffi

@@ -18,7 +18,7 @@ pub mod lighting;
 pub mod shaderlib;
 pub mod viewport;
 
-pub use constants::{CoordinateSystem, ProjectionMode, Unit};
+pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, PickingInfo, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};

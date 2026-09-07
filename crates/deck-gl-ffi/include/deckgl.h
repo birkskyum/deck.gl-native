@@ -26,8 +26,9 @@ typedef struct DeckglCamera {
     double pitch;
     /** Vertical field of view in degrees */
     double fov_degrees;
-    /** Distances of the host's near and far planes in pixels, as used by its projection matrix.
-     *  Set both to 0 to let deck choose its own planes. */
+    /** Distances of the host's near and far planes in pixels, as used by the projection matrix
+     *  of its 3D layers (maplibre-native: a tenth of the camera distance and the far plane of
+     *  TransformState::getProjMatrix). Set both to 0 to let deck choose its own planes. */
     double near_z_pixels;
     double far_z_pixels;
     /** Viewport size in logical (CSS) pixels */

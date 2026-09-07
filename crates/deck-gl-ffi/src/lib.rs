@@ -11,9 +11,10 @@
 use std::ffi::{c_char, c_void, CStr, CString};
 
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, Layer, Viewport, WebMercatorViewportOptions};
+use deck_gl::{ClipDepthRange, Deck, DeckProps, Layer, Viewport, WebMercatorViewportOptions};
 use deck_gl_json::JsonConverter;
 
+mod debug;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod metal;
 mod screenshot;
@@ -101,6 +102,11 @@ impl DeckglHandle {
                     height: camera.height.max(1),
                     device_pixel_ratio: camera.pixel_ratio,
                     layers: self.pending_layers.take().unwrap_or_default(),
+                    // The host's background and opaque fills write the ground plane into the
+                    // shared depth buffer; bias deck above it so ground layers do not z-fight.
+                    depth_bias_base: -100,
+                    // maplibre-native writes OpenGL style depth on every backend.
+                    clip_depth_range: ClipDepthRange::NegativeOneToOne,
                     ..Default::default()
                 },
             )
@@ -129,9 +135,11 @@ impl DeckglHandle {
     }
 }
 
-/// Near and far plane distances, in pixels, that maplibre-native uses for its projection
-/// matrix (`TransformState::getProjMatrix` with no padding, roll or center altitude).
-/// `height` is the map height in logical pixels.
+/// Near and far plane distances, in pixels, of the projection maplibre-native uses for its 3D
+/// layers: `PaintParameters::nearClippedProjMatrix`, whose near plane is a tenth of the camera
+/// distance truncated to whole pixels, with the far plane of `TransformState::getProjMatrix`
+/// (no padding, roll or center altitude). Deck must use these planes for its depth values to
+/// be comparable with the map's buildings. `height` is the map height in logical pixels.
 pub fn maplibre_near_far_pixels(fov_degrees: f64, pitch_degrees: f64, height: f64) -> (f64, f64) {
     let fov = fov_degrees.to_radians();
     let pitch = pitch_degrees.clamp(0.0, 89.0).to_radians();
@@ -139,7 +147,7 @@ pub fn maplibre_near_far_pixels(fov_degrees: f64, pitch_degrees: f64, height: f6
     let tan_fov_above_center = (fov / 2.0).tan();
     let tan_multiple = (tan_fov_above_center * pitch.tan()).clamp(0.0, 0.99);
     let furthest = camera_to_center / (1.0 - tan_multiple);
-    (1.0, furthest * 1.01)
+    ((0.1 * camera_to_center).floor().max(1.0), furthest * 1.01)
 }
 
 /// Build a deck viewport that matches the host's projection. Port of deck.gl's
@@ -164,7 +172,21 @@ pub fn viewport_from_camera(camera: &DeckglCamera) -> Viewport {
         opts.near_z = Some(camera.near_z_pixels / height);
         opts.far_z = Some(camera.far_z_pixels / height);
     }
-    Viewport::web_mercator(&opts)
+    let viewport = Viewport::web_mercator(&opts);
+    if std::env::var_os("DECKGL_DEBUG").is_some() {
+        eprintln!(
+            "deck.gl-native: viewport {}x{} zoom {:.2} pitch {:.1} fovy {:.3} altitude {:.3} near {} far {}",
+            viewport.width,
+            viewport.height,
+            viewport.zoom,
+            viewport.pitch,
+            viewport.fovy,
+            viewport.altitude,
+            viewport.near,
+            viewport.far
+        );
+    }
+    viewport
 }
 
 /// # Safety
@@ -300,10 +322,52 @@ mod tests {
     }
 
     #[test]
+    fn elevated_points_project_above_the_ground() {
+        let (near, far) = maplibre_near_far_pixels(36.86989764584402, 60.0, 1000.0);
+        let camera = DeckglCamera {
+            longitude: -122.42,
+            latitude: 37.775,
+            zoom: 14.5,
+            bearing: -25.0,
+            pitch: 60.0,
+            fov_degrees: 36.86989764584402,
+            near_z_pixels: near,
+            far_z_pixels: far,
+            width: 1400,
+            height: 1000,
+            pixel_ratio: 2.0,
+        };
+        let host = viewport_from_camera(&camera);
+        let plain = Viewport::web_mercator(&WebMercatorViewportOptions {
+            width: 1400.0,
+            height: 1000.0,
+            longitude: -122.42,
+            latitude: 37.775,
+            zoom: 14.5,
+            pitch: 60.0,
+            bearing: -25.0,
+            ..Default::default()
+        });
+        for (name, viewport) in [("host", &host), ("plain", &plain)] {
+            let ground = viewport.project(deck_gl::glam::DVec3::new(-122.42, 37.775, 0.0), true);
+            let roof = viewport.project(deck_gl::glam::DVec3::new(-122.42, 37.775, 400.0), true);
+            eprintln!(
+                "{name}: ground {ground:?} roof {roof:?} near {} far {}",
+                viewport.near, viewport.far
+            );
+            assert!(
+                ground.y - roof.y > 50.0,
+                "{name}: a 400 m roof must be well above the ground on screen"
+            );
+        }
+    }
+
+    #[test]
     fn near_far_match_maplibre_formula() {
-        // fov 36.87 degrees, no pitch: camera at 1.5 * height, far = 1.5 * height * 1.01
+        // fov 36.87 degrees, no pitch: camera at 1.5 * height, near a tenth of that in whole
+        // pixels, far = 1.5 * height * 1.01
         let (near, far) = maplibre_near_far_pixels(36.86989764584402, 0.0, 600.0);
-        assert!((near - 1.0).abs() < 1e-12);
+        assert!((near - 90.0).abs() < 1e-12, "{near}");
         assert!((far - 900.0 * 1.01).abs() < 1e-6, "{far}");
         let (_, far_pitched) = maplibre_near_far_pixels(36.86989764584402, 50.0, 600.0);
         assert!(far_pitched > far);

@@ -1,0 +1,126 @@
+diff --git a/platform/glfw/CMakeLists.txt b/platform/glfw/CMakeLists.txt
+index 68a1328a53ba..af29ad8ca04a 100644
+--- a/platform/glfw/CMakeLists.txt
++++ b/platform/glfw/CMakeLists.txt
+@@ -76,6 +76,33 @@ if(MLN_WITH_METAL)
+     )
+ endif()
+ 
++option(MLN_DECKGL_OVERLAY "Draw a deck.gl-native overlay in the GLFW app (Metal backend only)" OFF)
++if(MLN_DECKGL_OVERLAY)
++    if(NOT MLN_WITH_METAL)
++        message(FATAL_ERROR "MLN_DECKGL_OVERLAY requires MLN_WITH_METAL")
++    endif()
++    if(NOT DECKGL_FFI_LIB OR NOT DECKGL_FFI_INCLUDE)
++        message(FATAL_ERROR "MLN_DECKGL_OVERLAY requires DECKGL_FFI_LIB (path to libdeckgl.a) and DECKGL_FFI_INCLUDE (directory containing deckgl.h)")
++    endif()
++    target_sources(
++        mbgl-glfw
++        PRIVATE
++        ${PROJECT_SOURCE_DIR}/platform/glfw/deckgl_overlay.mm
++        ${PROJECT_SOURCE_DIR}/platform/glfw/deckgl_overlay.hpp
++    )
++    target_include_directories(mbgl-glfw PRIVATE ${DECKGL_FFI_INCLUDE})
++    target_compile_definitions(mbgl-glfw PRIVATE MLN_DECKGL_OVERLAY=1)
++    target_link_libraries(
++        mbgl-glfw
++        PRIVATE
++        ${DECKGL_FFI_LIB}
++        "-framework Metal"
++        "-framework QuartzCore"
++        "-framework CoreGraphics"
++        "-framework Foundation"
++    )
++endif()
++
+ if(MLN_WITH_WEBGPU)
+     if(APPLE)
+         target_sources(
+diff --git a/platform/glfw/glfw_view.cpp b/platform/glfw/glfw_view.cpp
+index 5df17a795b5c..63b414a93c99 100644
+--- a/platform/glfw/glfw_view.cpp
++++ b/platform/glfw/glfw_view.cpp
+@@ -4,6 +4,10 @@
+ #include "ny_route.hpp"
+ #include "test_writer.hpp"
+ 
++#ifdef MLN_DECKGL_OVERLAY
++#include "deckgl_overlay.hpp"
++#endif
++
+ #include <mln/annotation/annotation.hpp>
+ #include <mln/gfx/backend.hpp>
+ #include <mln/gfx/backend_scope.hpp>
+@@ -1187,6 +1191,15 @@ void GLFWView::render() {
+ 
+         mln::gfx::BackendScope scope{backend->getRendererBackend()};
+ 
++#ifdef MLN_DECKGL_OVERLAY
++        if (map) {
++            deckgl_overlay::setCamera(map->getCameraOptions(),
++                                      static_cast<uint32_t>(width),
++                                      static_cast<uint32_t>(height),
++                                      pixelRatio);
++        }
++#endif
++
+         rendererFrontend->render();
+ 
+         if (freeCameraDemoPhase >= 0.0) {
+diff --git a/platform/glfw/metal_backend.mm b/platform/glfw/metal_backend.mm
+index 0497b558d652..741c87e307d2 100644
+--- a/platform/glfw/metal_backend.mm
++++ b/platform/glfw/metal_backend.mm
+@@ -6,6 +6,10 @@
+ #include <Metal/Metal.hpp>
+ #include <QuartzCore/CAMetalLayer.hpp>
+ 
++#ifdef MLN_DECKGL_OVERLAY
++#include "deckgl_overlay.hpp"
++#endif
++
+ namespace mln {
+ 
+ using namespace mtl;
+@@ -63,6 +67,13 @@ public:
+       if (auto* depthTarget = renderPassDescriptor->depthAttachment()) {
+         depthTarget->setTexture(
+             static_cast<mtl::Texture2D*>(depthTexture.get())->getMetalTexture());
++#ifdef MLN_DECKGL_OVERLAY
++        // deck.gl depth tests against this buffer after the map's pass, so it must start
++        // cleared and be written back to memory instead of discarded from tile memory.
++        depthTarget->setLoadAction(MTL::LoadActionClear);
++        depthTarget->setClearDepth(1.0);
++        depthTarget->setStoreAction(MTL::StoreActionStore);
++#endif
+       }
+     }
+     if (stencilTexture) {
+@@ -75,8 +86,27 @@ public:
+   }
+ 
+   void swap() override {
++#ifdef MLN_DECKGL_OVERLAY
++    // Commit the map frame, let deck.gl draw into the same attachments on the same queue,
++    // then present from a third command buffer so ordering follows commit order.
++    commandBuffer->commit();
++    if (deckgl_overlay::enabled()) {
++      auto* depth = depthTexture ? static_cast<mtl::Texture2D*>(depthTexture.get())->getMetalTexture() : nullptr;
++      const auto drawableSize = swapchain->drawableSize();
++      deckgl_overlay::render(rendererBackend.getDevice().get(),
++                             commandQueue.get(),
++                             surface->texture(),
++                             depth,
++                             static_cast<uint32_t>(drawableSize.width),
++                             static_cast<uint32_t>(drawableSize.height));
++    }
++    auto presentBuffer = NS::TransferPtr(commandQueue->commandBuffer());
++    presentBuffer->presentDrawable(surface.get());
++    presentBuffer->commit();
++#else
+     commandBuffer->presentDrawable(surface.get());
+     commandBuffer->commit();
++#endif
+     commandBuffer.reset();
+     renderPassDescriptor.reset();
+   }

@@ -4,7 +4,7 @@
 use glam::{DMat4, DVec3, DVec4, Mat4, Vec2, Vec3, Vec4};
 use luma_gl::UniformBlock;
 
-use crate::constants::{CoordinateSystem, ProjectionMode};
+use crate::constants::{ClipDepthRange, CoordinateSystem, ProjectionMode};
 use crate::viewport::Viewport;
 use crate::Result;
 
@@ -33,6 +33,7 @@ pub struct ProjectProps<'a> {
     pub coordinate_system: CoordinateSystem,
     pub coordinate_origin: DVec3,
     pub auto_wrap_longitude: bool,
+    pub clip_depth_range: ClipDepthRange,
 }
 
 /// Values of the `project` uniform block. Mirrors `ProjectUniforms`.
@@ -57,6 +58,7 @@ pub struct ProjectUniforms {
     pub model_matrix: Mat4,
     /// For lighting calculations
     pub camera_position: Vec3,
+    pub depth_range: i32,
 }
 
 impl ProjectUniforms {
@@ -75,6 +77,7 @@ impl ProjectUniforms {
         block.set_vec2("viewportSize", self.viewport_size)?;
         block.set_f32("devicePixelRatio", self.device_pixel_ratio)?;
         block.set_f32("focalDistance", self.focal_distance)?;
+        block.set_i32("depthRange", self.depth_range)?;
         block.set_vec3("cameraPosition", self.camera_position)?;
         block.set_vec3("coordinateOrigin", self.coordinate_origin)?;
         block.set_vec3("commonOrigin", self.common_origin)?;
@@ -220,6 +223,7 @@ pub fn get_uniforms_from_viewport(props: &ProjectProps<'_>) -> ProjectUniforms {
     );
     uniforms.wrap_longitude = props.auto_wrap_longitude;
     uniforms.model_matrix = props.model_matrix.map(|m| m.as_mat4()).unwrap_or(Mat4::IDENTITY);
+    uniforms.depth_range = props.clip_depth_range.shader_value();
     uniforms
 }
 
@@ -270,6 +274,7 @@ fn calculate_viewport_uniforms(
         wrap_longitude: false,
         view_projection_matrix: view_projection_matrix.as_mat4(),
         model_matrix: Mat4::IDENTITY,
+        depth_range: 0,
         camera_position: camera_pos_common.as_vec3(),
     };
 
@@ -322,6 +327,7 @@ mod tests {
             coordinate_system: CoordinateSystem::Default,
             coordinate_origin: DVec3::ZERO,
             auto_wrap_longitude: false,
+            clip_depth_range: ClipDepthRange::default(),
         });
         assert_eq!(u.coordinate_system, CoordinateSystem::LngLat.shader_value());
         assert_eq!(u.projection_mode, ProjectionMode::WebMercator.shader_value());
@@ -353,6 +359,7 @@ mod tests {
             coordinate_system: CoordinateSystem::LngLat,
             coordinate_origin: DVec3::ZERO,
             auto_wrap_longitude: false,
+            clip_depth_range: ClipDepthRange::default(),
         });
         assert_eq!(
             u.projection_mode,

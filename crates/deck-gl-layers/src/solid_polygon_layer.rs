@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/solid-polygon-layer/solid-polygon-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons};
-use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
 use deck_gl::math_gl::web_mercator::lng_lat_to_world;
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
@@ -219,7 +219,7 @@ impl Layer for SolidPolygonLayer {
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let id = self.props.base.id.clone();
         let modules = self.modules();
-        let depth_bias = depth_bias_for_layer(ctx.layer_index);
+        let depth_bias = ctx.depth_bias();
         let pickable = self.props.base.pickable;
         let top_label = format!("{id}-top");
         let side_label = format!("{id}-side");

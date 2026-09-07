@@ -61,3 +61,27 @@ impl Unit {
         self as i32
     }
 }
+
+/// Depth range deck writes to the depth buffer.
+///
+/// deck.gl's projection matrices follow OpenGL, so the shaders remap clip z from `[-w, w]` to
+/// WebGPU's `[0, w]`. A host that shares its depth buffer and writes OpenGL style depth values,
+/// such as maplibre-native on Metal, needs the remap turned off so both sides compare equal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClipDepthRange {
+    /// WebGPU convention, depth in `[0, 1]`.
+    #[default]
+    ZeroToOne,
+    /// OpenGL convention, clip z in `[-w, w]`; geometry nearer than about twice the near
+    /// plane is clipped, as it is in hosts that use this convention.
+    NegativeOneToOne,
+}
+
+impl ClipDepthRange {
+    pub fn shader_value(self) -> i32 {
+        match self {
+            ClipDepthRange::ZeroToOne => 0,
+            ClipDepthRange::NegativeOneToOne => 1,
+        }
+    }
+}

@@ -2,6 +2,7 @@
 
 use luma_gl::{RenderTarget, PICKING_FORMAT};
 
+use crate::constants::ClipDepthRange;
 use crate::layer::{decode_picking_color, Layer, LayerContext, LAYER_INDEX_STRIDE};
 use crate::lighting::LightingEffect;
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
@@ -38,6 +39,10 @@ pub struct DeckProps {
     pub view_state: ViewState,
     pub layers: Vec<Box<dyn Layer>>,
     pub lighting: LightingEffect,
+    /// Constant depth bias for all layers, see [`LayerContext::depth_bias_base`].
+    pub depth_bias_base: i32,
+    /// Depth convention of the depth buffer, see [`ClipDepthRange`].
+    pub clip_depth_range: ClipDepthRange,
 }
 
 impl Default for DeckProps {
@@ -49,6 +54,8 @@ impl Default for DeckProps {
             view_state: ViewState::default(),
             layers: Vec::new(),
             lighting: LightingEffect::default(),
+            depth_bias_base: 0,
+            clip_depth_range: ClipDepthRange::default(),
         }
     }
 }
@@ -108,6 +115,8 @@ impl Deck {
             device_pixel_ratio: props.device_pixel_ratio,
             lighting: props.lighting,
             layer_index: 0,
+            depth_bias_base: props.depth_bias_base,
+            clip_depth_range: props.clip_depth_range,
         };
         let viewport = make_viewport(props.width, props.height, &props.view_state);
         let mut deck = Self {

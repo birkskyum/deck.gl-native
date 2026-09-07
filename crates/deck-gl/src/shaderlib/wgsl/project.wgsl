@@ -45,6 +45,8 @@ struct ProjectUniforms {
   coordinateOrigin: vec3<f32>,
   commonOrigin: vec3<f32>,
   pseudoMeters: i32,
+  // 0: remap depth to WebGPU's [0, w]; 1: keep OpenGL's [-w, w] for hosts that write it
+  depthRange: i32,
 };
 
 @group(0) @binding(auto)
@@ -266,7 +268,10 @@ fn project_position_vec2_f32(position: vec2<f32>) -> vec2<f32> {
 fn project_common_position_to_clipspace_with_projection(position: vec4<f32>, viewProjectionMatrix: mat4x4<f32>, center: vec4<f32>) -> vec4<f32> {
   var clipPosition = viewProjectionMatrix * position + center;
   // deck.gl projection matrices use WebGL's [-w, w] depth range; WebGPU clips z to [0, w].
-  clipPosition.z = (clipPosition.z + clipPosition.w) * 0.5;
+  // Hosts that share an OpenGL style depth buffer keep the original range.
+  if (project.depthRange == 0) {
+    clipPosition.z = (clipPosition.z + clipPosition.w) * 0.5;
+  }
   return clipPosition;
 }
 

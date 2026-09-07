@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/scatterplot-layer/scatterplot-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_vec2};
-use deck_gl::layer::{depth_bias_for_layer, set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -180,7 +180,7 @@ impl Layer for ScatterplotLayer {
             wgpu::PrimitiveTopology::TriangleStrip,
             ctx.target,
         );
-        desc.depth_bias = depth_bias_for_layer(ctx.layer_index);
+        desc.depth_bias = ctx.depth_bias();
         desc.pickable = self.props.base.pickable;
         let mut model = Model::new(&ctx.device, &desc)?;
         // a square that minimally covers the unit circle

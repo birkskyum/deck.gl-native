@@ -22,3 +22,6 @@ pollster = { workspace = true }
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6"
 objc2-metal = "0.3"
+
+[dev-dependencies]
+image = { workspace = true }
