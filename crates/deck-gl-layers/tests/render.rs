@@ -2660,6 +2660,8 @@ fn extension_attributes_expand_over_tessellated_paths_and_polygons() {
     let Some(ctx) = context() else { return };
     let c = SIZE / 2;
     let d = 0.0007;
+    // a degree of latitude spans more pixels than a degree of longitude here: 16 pixels
+    let dy = d * CENTER[1].to_radians().cos();
     // two horizontal paths, the lower one filtered out
     let paths = PathLayer::new(PathLayerProps {
         base: LayerProps {
@@ -2671,7 +2673,7 @@ fn extension_attributes_expand_over_tessellated_paths_and_polygons() {
         },
         data: LayerData::with_length(2),
         get_path: Accessor::func(move |i| {
-            let y = CENTER[1] + if i == 0 { d } else { -d };
+            let y = CENTER[1] + if i == 0 { dy } else { -dy };
             vec![[CENTER[0] - 2.0 * d, y, 0.0], [CENTER[0] + 2.0 * d, y, 0.0]]
         }),
         get_width: Accessor::Constant(4.0),
