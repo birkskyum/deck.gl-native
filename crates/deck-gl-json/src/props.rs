@@ -7,11 +7,12 @@ use std::sync::Arc;
 use deck_gl::glam::DMat4;
 use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, Color, CoordinateSystem, CullMode, Extensions, LayerExtension, LayerProps, Material,
+    Accessor, Color, CoordinateSystem, CullMode, Extensions, LayerExtension, LayerProps, Material, Operation,
     RenderParameters, Unit,
 };
 use deck_gl_layers::{
     BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, FilterCategories, FilterValues,
+    MaskExtension,
 };
 use serde_json::{Map, Value};
 
@@ -378,7 +379,51 @@ impl<'a> Props<'a> {
             }
         };
         base.extensions = self.extensions()?;
+        base.operation = match self.string("operation")?.as_deref() {
+            None | Some("draw") => Operation::DRAW,
+            Some("mask") => Operation::MASK,
+            Some("mask+draw") | Some("draw+mask") => {
+                self.warn(
+                    "operation `mask+draw` only renders the mask for now; add a layer to draw the geometry",
+                );
+                Operation::MASK
+            }
+            Some(other) => {
+                return Err(self.error("operation", format!("expected draw or mask, got `{other}`")))
+            }
+        };
         Ok(base)
+    }
+
+    /// deck.gl decides clipping and masking by instance for layers with an `instancePositions`
+    /// attribute: everything but the path, polygon, bitmap and tile layers.
+    fn instanced_layer(&self) -> bool {
+        !matches!(
+            self.layer_type.as_str(),
+            "PathLayer"
+                | "TripsLayer"
+                | "SolidPolygonLayer"
+                | "PolygonLayer"
+                | "GeoJsonLayer"
+                | "BitmapLayer"
+                | "H3HexagonLayer"
+                | "S2Layer"
+                | "GeohashLayer"
+                | "QuadkeyLayer"
+                | "MVTLayer"
+                | "TileLayer"
+                | "WMSLayer"
+                | "ContourLayer"
+        )
+    }
+
+    fn mask_extension(&self) -> Result<MaskExtension> {
+        let defaults = MaskExtension::default();
+        Ok(MaskExtension {
+            mask_id: self.string("maskId")?.unwrap_or_default(),
+            mask_by_instance: self.bool("maskByInstance", self.instanced_layer())?,
+            mask_inverted: self.bool("maskInverted", defaults.mask_inverted)?,
+        })
     }
 
     /// deck.gl's `extensions` prop: `{"@@type": "DataFilterExtension", ...options}` objects,
@@ -419,6 +464,7 @@ impl<'a> Props<'a> {
                 "DataFilterExtension" => extensions.push(Arc::new(self.data_filter_extension(&options)?)),
                 "BrushingExtension" => extensions.push(Arc::new(self.brushing_extension()?)),
                 "ClipExtension" => extensions.push(Arc::new(self.clip_extension()?)),
+                "MaskExtension" => extensions.push(Arc::new(self.mask_extension()?)),
                 "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
                 other => self.warn(format!(
                     "extension `{other}` is not supported yet and was ignored"
@@ -462,27 +508,9 @@ impl<'a> Props<'a> {
                 [n[0], n[1], n[2], n[3]]
             }
         };
-        // deck.gl clips by instance when the layer has an `instancePositions` attribute
-        let by_geometry = matches!(
-            self.layer_type.as_str(),
-            "PathLayer"
-                | "TripsLayer"
-                | "SolidPolygonLayer"
-                | "PolygonLayer"
-                | "GeoJsonLayer"
-                | "BitmapLayer"
-                | "H3HexagonLayer"
-                | "S2Layer"
-                | "GeohashLayer"
-                | "QuadkeyLayer"
-                | "MVTLayer"
-                | "TileLayer"
-                | "WMSLayer"
-                | "ContourLayer"
-        );
         Ok(ClipExtension {
             clip_bounds: bounds,
-            clip_by_instance: self.bool("clipByInstance", !by_geometry)?,
+            clip_by_instance: self.bool("clipByInstance", self.instanced_layer())?,
         })
     }
 

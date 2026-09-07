@@ -121,3 +121,9 @@ error for extensions that declare attributes.
 - `ClipExtension`: clips a layer to `clip_bounds` (`[left, bottom, right, top]` in the layer's
   coordinates), whole objects by their anchor with `clip_by_instance`, or the geometry per
   fragment without it.
+- `MaskExtension`: keeps only what lies inside the geometry of the layer whose id is
+  `mask_id`, or outside it with `mask_inverted`, by anchor (`mask_by_instance`) or per fragment.
+  The mask layer has `operation: Operation::MASK`: the deck renders it into a 2048 pixel
+  texture fitted to its bounds before the frame instead of on screen (deck.gl's `MaskEffect`),
+  for up to four mask layers, with the map view. Layers report their bounds through
+  `Layer::bounds`; without them the texture covers twice the view.

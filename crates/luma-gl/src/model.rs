@@ -490,8 +490,10 @@ impl Model {
 
     /// Bind a texture view to a `texture_2d<f32>` declared in the shader.
     pub fn set_texture(&mut self, name: &str, view: wgpu::TextureView) -> Result<()> {
-        if !self.textures.contains_key(name) {
-            return Err(LumaError::Model(format!("{}: no texture `{name}`", self.label)));
+        match self.textures.get(name) {
+            None => return Err(LumaError::Model(format!("{}: no texture `{name}`", self.label))),
+            Some(current) if *current == view => return Ok(()),
+            Some(_) => {}
         }
         self.textures.insert(name.to_string(), view);
         self.bind_group_dirty = true;
@@ -500,8 +502,10 @@ impl Model {
 
     /// Bind a sampler to a `sampler` declared in the shader.
     pub fn set_sampler(&mut self, name: &str, sampler: wgpu::Sampler) -> Result<()> {
-        if !self.samplers.contains_key(name) {
-            return Err(LumaError::Model(format!("{}: no sampler `{name}`", self.label)));
+        match self.samplers.get(name) {
+            None => return Err(LumaError::Model(format!("{}: no sampler `{name}`", self.label))),
+            Some(current) if *current == sampler => return Ok(()),
+            Some(_) => {}
         }
         self.samplers.insert(name.to_string(), sampler);
         self.bind_group_dirty = true;

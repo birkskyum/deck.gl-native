@@ -12,16 +12,16 @@ use deck_gl::luma_gl::{Model, RenderTarget, ShaderField, ShaderInjection, Shader
 use deck_gl::wgpu;
 use deck_gl::{
     same_extension, Accessor, ClickCallback, Deck, DeckProps, ExtensionAttribute, ExtensionShaders,
-    Extensions, HoverCallback, Layer, LayerContext, LayerData, LayerExtension, LayerProps, Material, Path,
-    PickingInfo, RenderParameters, Unit, ViewState, Viewport,
+    Extensions, HoverCallback, Layer, LayerContext, LayerData, LayerExtension, LayerProps, Material,
+    Operation, Path, PickingInfo, RenderParameters, Unit, ViewState, Viewport,
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
     BitmapLayerProps, BrushingExtension, ClipExtension, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
     ContourLayerProps, DataFilterExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
     GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
-    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
-    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
+    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, MaskExtension, PathLayer,
+    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
     ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
     TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
@@ -2541,4 +2541,76 @@ fn clip_extension_clips_by_anchor_or_by_geometry() {
     assert_pixel(&pixels, c - 2, c, [0, 0, 255, 255], 0);
     assert_pixel(&pixels, c + 2, c, [0, 0, 0, 0], 0);
     assert_pixel(&pixels, c + 8, c, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn mask_extension_keeps_what_the_mask_layer_covers() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    // the mask covers the centre and the right circle
+    let fence = Arc::new(vec![vec![
+        [CENTER[0] - d / 2.0, CENTER[1] - d, 0.0],
+        [CENTER[0] + 2.0 * d, CENTER[1] - d, 0.0],
+        [CENTER[0] + 2.0 * d, CENTER[1] + d, 0.0],
+        [CENTER[0] - d / 2.0, CENTER[1] + d, 0.0],
+    ]]);
+    let mask_layer = || -> Box<dyn Layer> {
+        let fence = fence.clone();
+        Box::new(SolidPolygonLayer::new(SolidPolygonLayerProps {
+            base: LayerProps {
+                operation: Operation::MASK,
+                ..LayerProps::new("fence")
+            },
+            data: LayerData::with_length(1),
+            get_polygon: Accessor::func(move |_| (*fence).clone()),
+            get_fill_color: Accessor::Constant([0, 255, 0, 255]),
+            ..Default::default()
+        }))
+    };
+    let masked = three_circles("masked", Extensions::from_one(MaskExtension::new("fence")));
+    let pixels = render(&ctx, vec![mask_layer(), masked]);
+    assert_pixel(&pixels, c - 16, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
+    // the mask layer itself is not drawn
+    assert_pixel(&pixels, c + 8, c + 8, [0, 0, 0, 0], 0);
+
+    let inverted = three_circles(
+        "masked",
+        Extensions::from_one(MaskExtension {
+            mask_inverted: true,
+            ..MaskExtension::new("fence")
+        }),
+    );
+    let pixels = render(&ctx, vec![mask_layer(), inverted]);
+    assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c + 16, c, [0, 0, 0, 0], 0);
+
+    // by geometry: a square larger than the mask is trimmed to it
+    let square = Arc::new(vec![vec![
+        [CENTER[0] - 2.0 * d, CENTER[1] - 2.0 * d, 0.0],
+        [CENTER[0] + 2.0 * d, CENTER[1] - 2.0 * d, 0.0],
+        [CENTER[0] + 2.0 * d, CENTER[1] + 2.0 * d, 0.0],
+        [CENTER[0] - 2.0 * d, CENTER[1] + 2.0 * d, 0.0],
+    ]]);
+    let trimmed = SolidPolygonLayer::new(SolidPolygonLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(MaskExtension {
+                mask_by_instance: false,
+                ..MaskExtension::new("fence")
+            }),
+            ..LayerProps::new("trimmed")
+        },
+        data: LayerData::with_length(1),
+        get_polygon: Accessor::func(move |_| (*square).clone()),
+        get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![mask_layer(), Box::new(trimmed)]);
+    assert_pixel(&pixels, c - 16, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c - 4, c, [0, 0, 255, 255], 0);
+    assert_pixel(&pixels, c + 16, c, [0, 0, 255, 255], 0);
+    assert_pixel(&pixels, c + 16, c - 24, [0, 0, 0, 0], 0);
 }

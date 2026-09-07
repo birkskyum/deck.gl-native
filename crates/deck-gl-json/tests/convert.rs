@@ -10,7 +10,7 @@ use deck_gl::{
 };
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
-use deck_gl_layers::{BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension};
+use deck_gl_layers::{BrushingExtension, BrushingTarget, ClipExtension, DataFilterExtension, MaskExtension};
 use serde_json::{json, Value};
 
 fn props_with_rows(object: &Value, rows: Vec<Value>) -> (Props<'_>, LayerData) {
@@ -850,7 +850,7 @@ fn extensions_parse_the_data_filter_with_named_categories() {
     let mut warnings = Vec::new();
     let layers = JsonConverter::new()
         .convert_layers(
-            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "MaskExtension"}]}]),
+            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "TerrainExtension"}]}]),
             &mut warnings,
         )
         .unwrap();
@@ -888,4 +888,27 @@ fn extensions_parse_brushing_and_clip() {
     assert!(clip.clip_by_instance, "arcs clip by their anchors");
     let paths = layers[1].props().extensions.get::<ClipExtension>().unwrap();
     assert!(!paths.clip_by_instance, "paths clip by geometry");
+}
+
+#[test]
+fn mask_operation_and_extension() {
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([
+                {"@@type": "SolidPolygonLayer", "id": "geofence", "data": [], "operation": "mask"},
+                {
+                    "@@type": "ScatterplotLayer", "id": "points", "data": [],
+                    "extensions": [{"@@type": "MaskExtension"}], "maskId": "geofence", "maskInverted": true
+                }
+            ]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(layers[0].props().operation, deck_gl::Operation::MASK);
+    let mask = layers[1].props().extensions.get::<MaskExtension>().unwrap();
+    assert_eq!(mask.mask_id, "geofence");
+    assert!(mask.mask_inverted);
+    assert!(mask.mask_by_instance);
 }

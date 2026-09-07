@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/solid-polygon-layer/solid-polygon-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{position_bounds, set_model_picking_active, update_standard_uniforms};
 use deck_gl::math_gl::web_mercator::lng_lat_to_world;
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
@@ -88,6 +88,7 @@ pub struct SolidPolygonLayer {
     side: Option<Model>,
     wireframe: Option<Model>,
     data_dirty: bool,
+    bounds: Option<[f64; 4]>,
 }
 
 impl SolidPolygonLayer {
@@ -98,6 +99,7 @@ impl SolidPolygonLayer {
             side: None,
             wireframe: None,
             data_dirty: true,
+            bounds: None,
         }
     }
 
@@ -142,6 +144,7 @@ impl SolidPolygonLayer {
         let device = &ctx.device;
 
         let polygons = resolve_polygons(data, &props.get_polygon)?;
+        self.bounds = position_bounds(polygons.iter().flatten().flatten());
         let elevations = resolve_f32(data, &props.get_elevation)?;
         let fill_colors = resolve_colors(data, &props.get_fill_color)?;
         let line_colors = resolve_colors(data, &props.get_line_color)?;
@@ -237,9 +240,7 @@ impl Layer for SolidPolygonLayer {
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let id = self.props.base.id.clone();
         let modules = self.modules();
-        let depth_bias = ctx.depth_bias();
-        let pickable = self.props.base.pickable;
-        let parameters = self.props.base.parameters;
+        let base = self.props.base.clone();
         let top_label = format!("{id}-top");
         let side_label = format!("{id}-side");
         let wireframe_label = format!("{id}-wireframe");
@@ -262,9 +263,7 @@ impl Layer for SolidPolygonLayer {
                 wgpu::PrimitiveTopology::TriangleList,
                 ctx.target,
             );
-            desc.depth_bias = depth_bias;
-            desc.pickable = pickable;
-            parameters.apply(&mut desc);
+            ctx.configure(&mut desc, &base);
             self.top = Some(Model::new(&ctx.device, &desc)?);
         }
 
@@ -290,9 +289,7 @@ impl Layer for SolidPolygonLayer {
                 wgpu::PrimitiveTopology::TriangleStrip,
                 ctx.target,
             );
-            desc.depth_bias = depth_bias;
-            desc.pickable = pickable;
-            parameters.apply(&mut desc);
+            ctx.configure(&mut desc, &base);
             let mut side = Model::new(&ctx.device, &desc)?;
             // top right - top left - bottom right - bottom left
             let side_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0];
@@ -311,9 +308,7 @@ impl Layer for SolidPolygonLayer {
                     wgpu::PrimitiveTopology::LineStrip,
                     ctx.target,
                 );
-                desc.depth_bias = depth_bias;
-                desc.pickable = pickable;
-                parameters.apply(&mut desc);
+                ctx.configure(&mut desc, &base);
                 let mut wireframe = Model::new(&ctx.device, &desc)?;
                 // top right - top left - bottom left - bottom right
                 let wire_positions: [f32; 8] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -398,6 +393,10 @@ impl Layer for SolidPolygonLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.bounds
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

@@ -4,14 +4,22 @@ use luma_gl::{RenderTarget, PICKING_FORMAT};
 
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
-use crate::constants::ClipDepthRange;
+use crate::constants::{ClipDepthRange, CoordinateSystem, ProjectionMode};
 use crate::layer::{
     decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
+    MASK_TARGET,
 };
 use crate::lighting::LightingEffect;
+use crate::mask::{
+    create_mask_texture, mask_viewport, render_bounds, MaskChannel, MaskMaps, MASK_BORDER, MASK_MAP_SIZE,
+    MAX_MASKS,
+};
 use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::Viewport;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use glam::DVec3;
 
 use crate::views::{AnyViewState, DeckView, LayerFilter, View, ViewRect};
 use crate::{DeckError, Result};
@@ -144,6 +152,10 @@ pub struct Deck {
     hovered: Option<PickingInfo>,
     on_hover: Option<HoverCallback>,
     on_click: Option<ClickCallback>,
+    /// The masks of the current frame, shared with the layer context
+    masks: Arc<MaskMaps>,
+    /// One texture per mask layer id, kept across frames
+    mask_textures: HashMap<String, wgpu::Texture>,
 }
 
 impl Deck {
@@ -153,6 +165,7 @@ impl Deck {
         target: RenderTarget,
         props: DeckProps,
     ) -> Result<Self> {
+        let masks = Arc::new(MaskMaps::new(device, queue));
         let ctx = LayerContext {
             device: device.clone(),
             queue: queue.clone(),
@@ -164,6 +177,7 @@ impl Deck {
             clip_depth_range: props.clip_depth_range,
             uniform_slot: 0,
             pointer: None,
+            masks: Some(masks.clone()),
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -195,6 +209,8 @@ impl Deck {
             hovered: None,
             on_hover: None,
             on_click: None,
+            masks,
+            mask_textures: HashMap::new(),
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -658,7 +674,8 @@ impl Deck {
                 self.ctx.uniform_slot = 0;
                 for (index, entry) in self.layers.iter_mut().enumerate() {
                     self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
-                    if entry.initialized && entry.layer.props().visible {
+                    if entry.initialized && entry.layer.props().visible && !entry.layer.props().operation.mask
+                    {
                         entry.layer.update(&self.ctx, &viewport)?;
                     }
                 }
@@ -674,7 +691,10 @@ impl Deck {
             .layers
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.initialized && e.layer.props().visible && e.layer.props().pickable)
+            .filter(|(_, e)| {
+                let props = e.layer.props();
+                e.initialized && props.visible && props.pickable && !props.operation.mask
+            })
             .filter(|(_, e)| {
                 self.layer_filter
                     .as_ref()
@@ -875,11 +895,25 @@ impl Deck {
     }
 
     /// Initialize new layers and update all layers for the current viewport.
-    /// Must be called before [`Deck::draw`], outside of any render pass.
+    /// Must be called before [`Deck::draw`], outside of any render pass. Layers whose
+    /// operation is `mask` are updated first and rendered into the mask textures, so that the
+    /// layers sampling them see this frame's masks.
     pub fn update(&mut self) -> Result<()> {
+        self.update_layers(true)?;
+        self.update_masks()?;
+        self.update_layers(false)
+    }
+
+    /// Initialize and update the layers whose operation is (`masks`) or is not `mask`.
+    fn update_layers(&mut self, masks: bool) -> Result<()> {
+        let main_target = self.ctx.target;
         self.ctx.uniform_slot = 0;
         for (index, entry) in self.layers.iter_mut().enumerate() {
+            if entry.layer.props().operation.mask != masks {
+                continue;
+            }
             self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
+            self.ctx.target = if masks { MASK_TARGET } else { main_target };
             if !entry.initialized {
                 entry.layer.initialize(&self.ctx)?;
                 entry.initialized = true;
@@ -888,7 +922,140 @@ impl Deck {
                 entry.layer.update(&self.ctx, &self.viewport)?;
             }
         }
+        self.ctx.target = main_target;
         Ok(())
+    }
+
+    /// deck.gl's `MaskEffect`: render every visible mask layer into its texture through a
+    /// viewport fitted to the layer's bounds, and publish the textures in the layer context.
+    fn update_masks(&mut self) -> Result<()> {
+        let mask_layers: Vec<usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.initialized && e.layer.props().visible && e.layer.props().operation.mask)
+            .map(|(i, _)| i)
+            .collect();
+        let mut maps = MaskMaps {
+            sampler: self.masks.sampler.clone(),
+            dummy: self.masks.dummy.clone(),
+            channels: HashMap::new(),
+        };
+        if mask_layers.is_empty() {
+            if !self.masks.channels.is_empty() {
+                self.publish_masks(maps);
+            }
+            return Ok(());
+        }
+        if !self.viewport.is_geospatial || self.viewport.projection_mode() == ProjectionMode::Globe {
+            tracing::warn!("mask layers are only supported with the map view for now");
+            self.publish_masks(maps);
+            return Ok(());
+        }
+        let viewport_bounds = {
+            let b = self.viewport.get_bounds(0.0);
+            let bl = self.viewport.project_position(DVec3::new(b[0], b[1], 0.0));
+            let tr = self.viewport.project_position(DVec3::new(b[2], b[3], 0.0));
+            [bl.x.min(tr.x), bl.y.min(tr.y), bl.x.max(tr.x), bl.y.max(tr.y)]
+        };
+        let main_target = self.ctx.target;
+        let dpr = self.ctx.device_pixel_ratio;
+        self.ctx.target = MASK_TARGET;
+        self.ctx.device_pixel_ratio = 1.0;
+        self.ctx.uniform_slot = 0;
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("deck.gl masks"),
+            });
+        for (count, &i) in mask_layers.iter().enumerate() {
+            if count >= MAX_MASKS {
+                tracing::warn!("too many mask layers, the most supported is {MAX_MASKS}");
+                break;
+            }
+            let (id, layer_bounds, coordinate_system, coordinate_origin) = {
+                let layer = &self.layers[i].layer;
+                let props = layer.props();
+                // bounds in absolute common space; other coordinate systems fall back to the view
+                let bounds = match props.coordinate_system {
+                    CoordinateSystem::Default | CoordinateSystem::LngLat => layer.bounds().map(|b| {
+                        let bl = self.viewport.project_position(DVec3::new(b[0], b[1], 0.0));
+                        let tr = self.viewport.project_position(DVec3::new(b[2], b[3], 0.0));
+                        [bl.x.min(tr.x), bl.y.min(tr.y), bl.x.max(tr.x), bl.y.max(tr.y)]
+                    }),
+                    _ => None,
+                };
+                (
+                    layer.id().to_string(),
+                    bounds,
+                    props.coordinate_system,
+                    props.coordinate_origin,
+                )
+            };
+            let bounds = render_bounds(layer_bounds, viewport_bounds);
+            let Some((mask_viewport, bounds_common)) =
+                mask_viewport(bounds, &self.viewport, MASK_MAP_SIZE, MASK_BORDER)
+            else {
+                continue;
+            };
+            let device = &self.ctx.device;
+            let texture = self
+                .mask_textures
+                .entry(id.clone())
+                .or_insert_with(|| create_mask_texture(device, &id));
+            let view = texture.create_view(&Default::default());
+            self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+            self.layers[i].layer.update(&self.ctx, &mask_viewport)?;
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("deck.gl mask"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                let inner = MASK_MAP_SIZE - 2 * MASK_BORDER;
+                pass.set_viewport(
+                    MASK_BORDER as f32,
+                    MASK_BORDER as f32,
+                    inner as f32,
+                    inner as f32,
+                    0.0,
+                    1.0,
+                );
+                pass.set_scissor_rect(MASK_BORDER, MASK_BORDER, inner, inner);
+                self.layers[i].layer.draw(&self.ctx, &mut pass)?;
+            }
+            maps.channels.insert(
+                id,
+                MaskChannel {
+                    view,
+                    bounds_common,
+                    coordinate_system,
+                    coordinate_origin,
+                },
+            );
+        }
+        self.ctx.queue.submit([encoder.finish()]);
+        self.ctx.target = main_target;
+        self.ctx.device_pixel_ratio = dpr;
+        self.publish_masks(maps);
+        Ok(())
+    }
+
+    fn publish_masks(&mut self, maps: MaskMaps) {
+        self.masks = Arc::new(maps);
+        self.ctx.masks = Some(self.masks.clone());
     }
 
     /// Encode all visible layers into a render pass whose attachments match the deck's
@@ -936,7 +1103,10 @@ impl Deck {
                 self.ctx.uniform_slot = slot;
                 for (index, entry) in self.layers.iter_mut().enumerate() {
                     self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
-                    if !entry.initialized || !entry.layer.props().visible {
+                    if !entry.initialized
+                        || !entry.layer.props().visible
+                        || entry.layer.props().operation.mask
+                    {
                         continue;
                     }
                     if let Some(filter) = &self.layer_filter {

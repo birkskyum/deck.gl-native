@@ -106,6 +106,7 @@ pub struct TripsLayer {
     props: TripsLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    bounds: Option<[f64; 4]>,
 }
 
 impl TripsLayer {
@@ -114,6 +115,7 @@ impl TripsLayer {
             props,
             model: None,
             data_dirty: true,
+            bounds: None,
         }
     }
 
@@ -139,7 +141,8 @@ impl TripsLayer {
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let model = initialized(self.model.as_mut(), &self.props.path.base.id)?;
-        let tesselated = upload_path_attributes(model, ctx, &self.props.path)?;
+        let (tesselated, bounds) = upload_path_attributes(model, ctx, &self.props.path)?;
+        self.bounds = bounds;
         let timestamps = resolve_f32_lists(&self.props.path.data, &self.props.get_timestamps)?;
         let mut packed = Vec::with_capacity(tesselated.instance_count());
         let mut start = 0;
@@ -218,6 +221,10 @@ impl Layer for TripsLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.path.base.highlighted_object_index = index;
+    }
+
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.bounds
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

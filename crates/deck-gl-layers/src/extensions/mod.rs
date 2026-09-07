@@ -4,7 +4,9 @@
 pub mod brushing;
 pub mod clip;
 pub mod data_filter;
+pub mod mask;
 
 pub use brushing::{BrushingExtension, BrushingTarget};
 pub use clip::ClipExtension;
 pub use data_filter::{DataFilterExtension, FilterCategories, FilterValues};
+pub use mask::MaskExtension;

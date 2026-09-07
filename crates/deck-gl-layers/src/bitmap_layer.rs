@@ -144,9 +144,7 @@ impl Layer for BitmapLayer {
             wgpu::PrimitiveTopology::TriangleList,
             ctx.target,
         );
-        desc.depth_bias = ctx.depth_bias();
-        desc.pickable = self.props.base.pickable;
-        self.props.base.parameters.apply(&mut desc);
+        ctx.configure(&mut desc, &self.props.base);
         let mut model = Model::new(&ctx.device, &desc)?;
         let tex_coords: [f32; 8] = [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0];
         let indices: [u32; 6] = [0, 2, 1, 0, 3, 2];

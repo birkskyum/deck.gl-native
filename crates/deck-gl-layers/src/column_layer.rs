@@ -302,9 +302,7 @@ impl Layer for ColumnLayer {
         let geometry_buffer = create_vertex_buffer_from(&ctx.device, "geometry", &geometry.vertices);
         let make = |label: String, topology: wgpu::PrimitiveTopology| -> Result<Model> {
             let mut desc = ModelDescriptor::new(&label, &shader, &layouts, topology, ctx.target);
-            desc.depth_bias = ctx.depth_bias();
-            desc.pickable = props.base.pickable;
-            props.base.parameters.apply(&mut desc);
+            ctx.configure(&mut desc, &props.base);
             let mut model = Model::new(&ctx.device, &desc)?;
             model.set_vertex_buffer("geometry", geometry_buffer.clone())?;
             Ok(model)
@@ -417,6 +415,10 @@ impl Layer for ColumnLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.attributes.bounds()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

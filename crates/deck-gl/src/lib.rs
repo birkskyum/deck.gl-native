@@ -24,6 +24,7 @@ pub mod geojson;
 pub mod globe_controller;
 pub mod layer;
 pub mod lighting;
+pub mod mask;
 pub mod orbit_controller;
 pub mod parameters;
 pub mod shaderlib;
@@ -39,8 +40,11 @@ pub use deck::{Deck, DeckProps, FrameStats, PickingInfo, Snapshot, ViewState};
 pub use extension::{same_extension, ExtensionAttribute, ExtensionShaders, Extensions, LayerExtension};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use globe_controller::{GlobeConstraints, GlobeController};
-pub use layer::{initialized, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};
+pub use layer::{
+    initialized, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, Operation, SubLayers,
+};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
+pub use mask::{MaskChannel, MaskMaps};
 pub use orbit_controller::{OrbitConstraints, OrbitController};
 pub use parameters::{CullMode, RenderParameters};
 pub use transition::{

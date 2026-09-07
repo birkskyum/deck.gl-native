@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/path-layer/path-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
-use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, position_bounds, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, DeckError, ExtensionShaders, Layer, LayerContext, LayerData, LayerProps, Path, Result,
@@ -70,6 +70,7 @@ pub struct PathLayer {
     props: PathLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    bounds: Option<[f64; 4]>,
 }
 
 impl PathLayer {
@@ -78,6 +79,7 @@ impl PathLayer {
             props,
             model: None,
             data_dirty: true,
+            bounds: None,
         }
     }
 
@@ -114,7 +116,7 @@ impl PathLayer {
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-        upload_path_attributes(model, ctx, &self.props)?;
+        self.bounds = upload_path_attributes(model, ctx, &self.props)?.1;
         Ok(())
     }
 }
@@ -125,11 +127,12 @@ pub(crate) fn upload_path_attributes(
     model: &mut Model,
     ctx: &LayerContext,
     props: &PathLayerProps,
-) -> Result<TesselatedPaths> {
+) -> Result<(TesselatedPaths, Option<[f64; 4]>)> {
     let data = &props.data;
     let device = &ctx.device;
 
     let paths = resolve_paths(data, &props.get_path)?;
+    let bounds = position_bounds(paths.iter().flatten());
     let widths = resolve_f32(data, &props.get_width)?;
     let colors = resolve_colors(data, &props.get_color)?;
     let tesselated = tesselate(&paths);
@@ -158,7 +161,7 @@ pub(crate) fn upload_path_attributes(
         create_vertex_buffer_from(device, "instanceData", &instance_data),
     )?;
     model.set_instance_count(tesselated.instance_count() as u32);
-    Ok(tesselated)
+    Ok((tesselated, bounds))
 }
 
 /// A model with the path shader and the path layer's vertex buffer layouts, plus the shader
@@ -220,9 +223,7 @@ pub(crate) fn path_model(
         wgpu::PrimitiveTopology::TriangleList,
         ctx.target,
     );
-    desc.depth_bias = ctx.depth_bias();
-    desc.pickable = base.pickable;
-    base.parameters.apply(&mut desc);
+    ctx.configure(&mut desc, base);
     let mut model = Model::new(&ctx.device, &desc)?;
 
     // [0] position on segment - 0: start, 1: end
@@ -320,6 +321,10 @@ impl Layer for PathLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.bounds
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

@@ -243,8 +243,7 @@ impl Layer for ScreenGridLayer {
         // an overlay in screen space, drawn over whatever is below
         desc.depth_compare = wgpu::CompareFunction::Always;
         desc.depth_write_enabled = false;
-        desc.pickable = self.props.base.pickable;
-        self.props.base.parameters.apply(&mut desc);
+        ctx.configure(&mut desc, &self.props.base);
         let mut model = Model::new(&ctx.device, &desc)?;
         let positions: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         model.set_vertex_buffer(

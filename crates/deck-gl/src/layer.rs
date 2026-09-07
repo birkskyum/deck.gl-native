@@ -3,13 +3,14 @@
 use std::sync::Arc;
 
 use glam::DMat4;
-use luma_gl::{Model, RenderTarget};
+use luma_gl::{Model, ModelDescriptor, RenderTarget};
 
 use crate::constants::{ClipDepthRange, CoordinateSystem};
-use crate::data::Color;
+use crate::data::{Color, Position};
 use crate::deck::PickingInfo;
 use crate::extension::Extensions;
 use crate::lighting::{LightingEffect, Material};
+use crate::mask::MaskMaps;
 use crate::parameters::RenderParameters;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
 use crate::viewport::Viewport;
@@ -74,6 +75,32 @@ impl std::fmt::Debug for ClickCallback {
     }
 }
 
+/// What a layer renders into, deck.gl's `operation` prop. A layer with `mask` is drawn into
+/// a mask texture that layers with the `MaskExtension` sample, and not on screen (deck.gl's
+/// `mask+draw` is not supported yet: add a second layer to draw the same geometry).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Operation {
+    pub draw: bool,
+    pub mask: bool,
+}
+
+impl Operation {
+    pub const DRAW: Self = Self {
+        draw: true,
+        mask: false,
+    };
+    pub const MASK: Self = Self {
+        draw: false,
+        mask: true,
+    };
+}
+
+impl Default for Operation {
+    fn default() -> Self {
+        Self::DRAW
+    }
+}
+
 /// Properties shared by all layers. Mirrors deck.gl's `LayerProps`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerProps {
@@ -101,6 +128,8 @@ pub struct LayerProps {
     /// Extensions that add shader code and attributes to the layer, see
     /// [`LayerExtension`](crate::LayerExtension).
     pub extensions: Extensions,
+    /// Whether the layer draws on screen or into a mask, see [`Operation`].
+    pub operation: Operation,
 }
 
 impl Default for LayerProps {
@@ -122,6 +151,7 @@ impl Default for LayerProps {
             on_hover: None,
             on_click: None,
             extensions: Extensions::default(),
+            operation: Operation::DRAW,
         }
     }
 }
@@ -140,6 +170,7 @@ impl LayerProps {
     pub fn needs_new_model(&self, next: &LayerProps) -> bool {
         self.pickable != next.pickable
             || self.parameters != next.parameters
+            || self.operation != next.operation
             || self.extensions.shaders() != next.extensions.shaders()
     }
 }
@@ -166,6 +197,29 @@ pub struct LayerContext {
     /// when it is outside (deck.gl's `mousePosition`). Maintained by `Deck::pointer_move`
     /// and `Deck::pointer_leave`; the brushing extension reads it.
     pub pointer: Option<[f64; 2]>,
+    /// The masks rendered this frame, for the mask extension. `None` outside a `Deck`.
+    pub masks: Option<Arc<MaskMaps>>,
+}
+
+/// Attachments of the mask pass: one red channel texture and no depth buffer.
+pub const MASK_TARGET: RenderTarget = RenderTarget {
+    color_format: wgpu::TextureFormat::R8Unorm,
+    depth_format: None,
+    sample_count: 1,
+};
+
+/// deck.gl's mask pass blending: every drawn fragment sets the channel to zero, whatever the
+/// layer's colour (`zero * source - one * destination`, clamped).
+pub fn mask_blend() -> wgpu::BlendState {
+    let component = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Subtract,
+    };
+    wgpu::BlendState {
+        color: component,
+        alpha: component,
+    }
 }
 
 impl LayerContext {
@@ -174,6 +228,40 @@ impl LayerContext {
         let mut bias = depth_bias_for_layer(self.layer_index);
         bias.constant += self.depth_bias_base;
         bias
+    }
+
+    /// Set a model descriptor up the way every layer does: the layer's depth bias, its
+    /// picking variant and render parameters, and the mask pass state when its operation is
+    /// `mask`.
+    pub fn configure(&self, desc: &mut ModelDescriptor<'_>, props: &LayerProps) {
+        desc.depth_bias = self.depth_bias();
+        desc.pickable = props.pickable;
+        props.parameters.apply(desc);
+        if props.operation.mask {
+            desc.blend = Some(mask_blend());
+            desc.depth_compare = wgpu::CompareFunction::Always;
+            desc.depth_write_enabled = false;
+            desc.pickable = false;
+        }
+    }
+}
+
+/// The bounding box of positions, `[min x, min y, max x, max y]`; `None` without positions.
+pub fn position_bounds<'a>(positions: impl IntoIterator<Item = &'a Position>) -> Option<[f64; 4]> {
+    positions.into_iter().fold(None, |bounds, p| {
+        Some(match bounds {
+            None => [p[0], p[1], p[0], p[1]],
+            Some([x0, y0, x1, y1]) => [x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1])],
+        })
+    })
+}
+
+/// The bounding box of two bounding boxes.
+pub fn union_bounds(a: Option<[f64; 4]>, b: Option<[f64; 4]>) -> Option<[f64; 4]> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
+        (a, None) => a,
+        (None, b) => b,
     }
 }
 
@@ -222,6 +310,12 @@ pub trait Layer {
 
     /// Change which object is drawn highlighted. Takes effect on the next update.
     fn set_highlighted_object(&mut self, _index: Option<u32>) {}
+
+    /// The extent of the layer's positions in its coordinate system, `[min x, min y, max x,
+    /// max y]`, when known after an update. The mask pass fits its texture to it.
+    fn bounds(&self) -> Option<[f64; 4]> {
+        None
+    }
 
     /// For downcasting in [`Layer::update_from`].
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
@@ -320,6 +414,13 @@ impl SubLayers {
         for (layer, _) in &mut self.layers {
             layer.set_highlighted_object(index);
         }
+    }
+
+    /// The bounds of all sub layers together.
+    pub fn bounds(&self) -> Option<[f64; 4]> {
+        self.layers
+            .iter()
+            .fold(None, |bounds, (layer, _)| union_bounds(bounds, layer.bounds()))
     }
 }
 

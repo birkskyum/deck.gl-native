@@ -165,9 +165,7 @@ impl Layer for ScatterplotLayer {
             wgpu::PrimitiveTopology::TriangleStrip,
             ctx.target,
         );
-        desc.depth_bias = ctx.depth_bias();
-        desc.pickable = self.props.base.pickable;
-        self.props.base.parameters.apply(&mut desc);
+        ctx.configure(&mut desc, &self.props.base);
         let mut model = Model::new(&ctx.device, &desc)?;
         // a square that minimally covers the unit circle
         let positions: [f32; 12] = [-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
@@ -233,6 +231,10 @@ impl Layer for ScatterplotLayer {
 
     fn set_highlighted_object(&mut self, index: Option<u32>) {
         self.props.base.highlighted_object_index = index;
+    }
+
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.attributes.bounds()
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

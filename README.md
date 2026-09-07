@@ -33,7 +33,8 @@ Working today, headless and verified pixel by pixel in tests:
 - Shader hooks for WGSL and layer extensions (`LayerExtension`: shader modules, injections,
   attributes and uniforms), with `DataFilterExtension` filtering objects by value ranges, soft
   ranges and categories on the GPU, `BrushingExtension` showing what lies within a radius of
-  the pointer and `ClipExtension` clipping layers to bounds. See [docs/extensions.md](docs/extensions.md).
+  the pointer, `ClipExtension` clipping layers to bounds and `MaskExtension` masking layers by
+  the geometry of another layer (`operation: mask`). See [docs/extensions.md](docs/extensions.md).
 - Benchmarks for a million points, a hundred thousand polygons and ten thousand paths in `docs/benchmarks.md`
 - `Deck::stats` reports the last frame (layers, draw calls, instances, uploaded bytes, CPU time); logging goes through `tracing` (the examples and the C API print to stderr at the level of `DECKGL_LOG`)
 - `Deck::snapshot` reads a frame back as RGBA pixels (and saves PNGs with the `png` feature); the C API has `deckgl_snapshot` and `deckgl_snapshot_png`

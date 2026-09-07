@@ -16,6 +16,7 @@ use crate::data::{
     resolve_colors, resolve_f32, resolve_positions, resolve_vec2, resolve_with, Accessor, Color, LayerData,
     Position,
 };
+use crate::layer::{position_bounds, union_bounds};
 use crate::{DeckError, Result};
 
 /// Where an attribute's values come from, typed.
@@ -158,6 +159,8 @@ pub struct AttributeManager {
     previous: HashMap<&'static str, AttributeSource>,
     previous_data: Option<LayerData>,
     force: bool,
+    /// Bounds of every position attribute resolved so far
+    position_bounds: HashMap<&'static str, Option<[f64; 4]>>,
 }
 
 impl AttributeManager {
@@ -167,7 +170,16 @@ impl AttributeManager {
             previous: HashMap::new(),
             previous_data: None,
             force: true,
+            position_bounds: HashMap::new(),
         }
+    }
+
+    /// The bounds of the position attributes, `[min x, min y, max x, max y]`, once they were
+    /// resolved (Arrow columns uploaded without conversion are not scanned).
+    pub fn bounds(&self) -> Option<[f64; 4]> {
+        self.position_bounds
+            .values()
+            .fold(None, |bounds, b| union_bounds(bounds, *b))
     }
 
     /// Add buffers (extension attributes, typically) after construction.
@@ -225,6 +237,12 @@ impl AttributeManager {
                 model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
             }
             uploaded += 1;
+        }
+        for (name, values) in &resolved {
+            if let Resolved::Positions(positions) = values {
+                self.position_bounds
+                    .insert(name, position_bounds(positions.iter()));
+            }
         }
         self.previous = sources
             .iter()

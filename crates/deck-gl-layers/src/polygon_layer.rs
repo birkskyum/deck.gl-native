@@ -213,6 +213,10 @@ impl Layer for PolygonLayer {
         self.sub_layers.set_highlighted_object(index);
     }
 
+    fn bounds(&self) -> Option<[f64; 4]> {
+        self.sub_layers.bounds()
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
