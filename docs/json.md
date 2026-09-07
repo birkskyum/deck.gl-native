@@ -166,6 +166,8 @@ sit on the layer, as in pydeck:
 | `ClipExtension` | `clipBounds` (`[left, bottom, right, top]`), `clipByInstance` (by default whole objects for point like layers, trimmed geometry for path, polygon, GeoJSON, bitmap and tile layers) |
 | `MaskExtension` | `maskId` (the id of a layer with `"operation": "mask"`), `maskByInstance` (same default as `clipByInstance`), `maskInverted` |
 | `CollisionFilterExtension` | `getCollisionPriority` (-1000 to 1000, higher wins), `collisionEnabled`, `collisionGroup` (`collisionTestProps` is accepted and ignored) |
+| `FillStyleExtension` | option `pattern`; `fillPatternAtlas` (image path or URL), `fillPatternMapping` (`{name: {x, y, width, height}}`, inline or a JSON file), `fillPatternMask`, `fillPatternEnabled`, `getFillPattern`, `getFillPatternScale`, `getFillPatternOffset` |
+| `PathStyleExtension` | options `dash` and `offset` (`highPrecisionDash` is accepted and ignored); `getDashArray`, `getOffset`, `dashJustified`, `dashGapPickable`; dashes circle strokes on a `ScatterplotLayer` |
 
 Extension attributes work on every layer but the text, bitmap and screen grid layers, which
 report an error for them. See [docs/extensions.md](extensions.md) for the shader hook

@@ -134,3 +134,11 @@ attributes.
   `collision_group` into a half resolution map with their picking colours, sorted by priority
   (deck.gl's `CollisionFilterEffect`), and each object is kept only where the map shows it at
   its anchor, fading over a five pixel window. `collision_test_props` is not ported.
+- `FillStyleExtension`: tiles fills with a pattern from an atlas image (`FillPatternAtlas`),
+  named per object by `get_fill_pattern`, scaled in meters by `get_fill_pattern_scale` and
+  shifted by `get_fill_pattern_offset`; as a mask (`fill_pattern_mask`) or with the pattern's
+  colours. Composite layers keep it away from their stroke sub layers.
+- `PathStyleExtension`: dashed paths (`dash`, `get_dash_array` in path widths,
+  `dash_justified`, `dash_gap_pickable`) and paths shifted sideways (`offset`, `get_offset` in
+  widths); with `target: PathStyleTarget::Scatterplot`, dashed circle strokes. Composite layers
+  hand it to their stroke sub layers only. `high_precision_dash` is not ported.

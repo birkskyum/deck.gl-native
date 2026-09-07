@@ -248,6 +248,20 @@ pub fn project_position(props: &ProjectProps<'_>, position: DVec3) -> DVec3 {
     }
 }
 
+/// The common space origin the shader positions are relative to (`project.commonOrigin`), in
+/// double precision: zero unless the projection runs in offset mode.
+pub fn common_origin(props: &ProjectProps<'_>) -> DVec3 {
+    let viewport = props.viewport;
+    let coordinate_system = match props.coordinate_system {
+        CoordinateSystem::Default if viewport.is_geospatial => CoordinateSystem::LngLat,
+        CoordinateSystem::Default => CoordinateSystem::Cartesian,
+        other => other,
+    };
+    calculate_matrix_and_offset(viewport, coordinate_system, props.coordinate_origin)
+        .origin_common
+        .truncate()
+}
+
 /// Returns uniforms for shaders based on the current projection.
 pub fn get_uniforms_from_viewport(props: &ProjectProps<'_>) -> ProjectUniforms {
     let viewport = props.viewport;

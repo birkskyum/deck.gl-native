@@ -110,6 +110,18 @@ impl Extensions {
         self.0.iter().find_map(|e| e.as_any().downcast_ref::<T>())
     }
 
+    /// These extensions without those of type `T` (composite layers keep extensions that only
+    /// apply to some of their sub layers away from the others).
+    pub fn without<T: LayerExtension + 'static>(&self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter(|e| e.as_any().downcast_ref::<T>().is_none())
+                .cloned()
+                .collect(),
+        )
+    }
+
     /// The combined shader contributions. Modules with the same name are only added once.
     pub fn shaders(&self) -> ExtensionShaders {
         let mut all = ExtensionShaders::default();

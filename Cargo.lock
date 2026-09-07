@@ -714,6 +714,7 @@ name = "deck-gl-layers"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "bytemuck",
  "criterion",
  "deck-gl",

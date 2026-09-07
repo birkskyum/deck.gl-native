@@ -10,6 +10,7 @@ use deck_gl::{
     Unit, Viewport,
 };
 
+use crate::extensions::sub_layer_extensions;
 use crate::{
     PathLayer, PathLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
 };
@@ -145,6 +146,7 @@ impl GeoJsonLayer {
     fn sub_props(&self, suffix: &str) -> LayerProps {
         LayerProps {
             id: format!("{}-{suffix}", self.props.base.id),
+            extensions: sub_layer_extensions(&self.props.base.extensions, suffix),
             ..self.props.base.clone()
         }
     }

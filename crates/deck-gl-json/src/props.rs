@@ -12,11 +12,13 @@ use deck_gl::{
 };
 use deck_gl_layers::{
     BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
-    FilterCategories, FilterValues, MaskExtension,
+    FillPattern, FillPatternAtlas, FillStyleExtension, FilterCategories, FilterValues, MaskExtension,
+    PathStyleExtension, PathStyleTarget,
 };
 use serde_json::{Map, Value};
 
 use crate::expression::Expr;
+use crate::{data, ConvertOptions};
 use crate::{JsonError, Result};
 
 /// The rows of a layer's `data`, one JSON value per object.
@@ -87,6 +89,8 @@ pub struct Props<'a> {
     rows: Option<Rows>,
     /// True when `data` is an Arrow table, so accessors are columns rather than expressions.
     table: bool,
+    /// How external files are resolved, for props that load images
+    options: Option<&'a ConvertOptions>,
 }
 
 impl<'a> Props<'a> {
@@ -104,6 +108,7 @@ impl<'a> Props<'a> {
             notes: RefCell::new(Vec::new()),
             rows: None,
             table: false,
+            options: None,
         };
         props.mark("id");
         props.mark(TYPE_KEY);
@@ -113,6 +118,11 @@ impl<'a> Props<'a> {
     /// Attach the rows that accessor expressions evaluate against.
     pub fn set_rows(&mut self, rows: Rows) {
         self.rows = Some(rows);
+    }
+
+    /// Attach the options external files (a pattern atlas) are loaded with.
+    pub fn set_options(&mut self, options: &'a ConvertOptions) {
+        self.options = Some(options);
     }
 
     pub fn rows(&self) -> Option<&Rows> {
@@ -417,6 +427,99 @@ impl<'a> Props<'a> {
         )
     }
 
+    fn fill_style_extension(&self, options: &Map<String, Value>) -> Result<FillStyleExtension> {
+        let defaults = FillStyleExtension::default();
+        let pattern = options.get("pattern").and_then(Value::as_bool).unwrap_or(false);
+        let atlas = match (self.string("fillPatternAtlas")?, self.get("fillPatternMapping")) {
+            (Some(source), Some(mapping)) => {
+                let load = self.options.ok_or_else(|| {
+                    self.error("fillPatternAtlas", "no converter options to load the atlas with")
+                })?;
+                let image = data::load_image(&source, load)
+                    .map_err(|e| self.error("fillPatternAtlas", e.to_string()))?;
+                let mapping = data::load_json(mapping, load)
+                    .map_err(|e| self.error("fillPatternMapping", e.to_string()))?;
+                let Some(object) = mapping.as_object() else {
+                    return Err(self.error("fillPatternMapping", "expected an object of patterns"));
+                };
+                let mut patterns = HashMap::new();
+                for (name, entry) in object {
+                    let number = |key: &str| -> Result<u32> {
+                        entry
+                            .get(key)
+                            .and_then(Value::as_f64)
+                            .map(|v| v as u32)
+                            .ok_or_else(|| {
+                                self.error(
+                                    "fillPatternMapping",
+                                    format!("pattern `{name}` is missing `{key}`"),
+                                )
+                            })
+                    };
+                    patterns.insert(
+                        name.clone(),
+                        FillPattern {
+                            x: number("x")?,
+                            y: number("y")?,
+                            width: number("width")?,
+                            height: number("height")?,
+                        },
+                    );
+                }
+                Some(Arc::new(FillPatternAtlas {
+                    image,
+                    mapping: patterns,
+                }))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(self.error(
+                    "fillPatternAtlas",
+                    "fillPatternAtlas and fillPatternMapping must be given together",
+                ))
+            }
+        };
+        Ok(FillStyleExtension {
+            pattern,
+            fill_pattern_enabled: self.bool("fillPatternEnabled", defaults.fill_pattern_enabled)?,
+            fill_pattern_atlas: atlas,
+            fill_pattern_mask: self.bool("fillPatternMask", defaults.fill_pattern_mask)?,
+            get_fill_pattern: self.accessor("getFillPattern", &defaults.get_fill_pattern, convert::string)?,
+            get_fill_pattern_scale: self.accessor(
+                "getFillPatternScale",
+                &defaults.get_fill_pattern_scale,
+                convert::f32,
+            )?,
+            get_fill_pattern_offset: self.accessor(
+                "getFillPatternOffset",
+                &defaults.get_fill_pattern_offset,
+                convert::vec2,
+            )?,
+            ..FillStyleExtension::default()
+        })
+    }
+
+    fn path_style_extension(&self, options: &Map<String, Value>) -> Result<PathStyleExtension> {
+        let defaults = PathStyleExtension::default();
+        let flag = |key: &str| options.get(key).and_then(Value::as_bool).unwrap_or(false);
+        if flag("highPrecisionDash") {
+            self.warn("PathStyleExtension highPrecisionDash is not supported yet and was ignored");
+        }
+        Ok(PathStyleExtension {
+            dash: flag("dash") || flag("highPrecisionDash"),
+            offset: flag("offset"),
+            target: if self.layer_type == "ScatterplotLayer" {
+                PathStyleTarget::Scatterplot
+            } else {
+                PathStyleTarget::Path
+            },
+            get_dash_array: self.accessor("getDashArray", &defaults.get_dash_array, convert::vec2)?,
+            get_offset: self.accessor("getOffset", &defaults.get_offset, convert::f32)?,
+            dash_justified: self.bool("dashJustified", defaults.dash_justified)?,
+            dash_gap_pickable: self.bool("dashGapPickable", defaults.dash_gap_pickable)?,
+        })
+    }
+
     fn collision_filter_extension(&self) -> Result<CollisionFilterExtension> {
         let defaults = CollisionFilterExtension::default();
         if self.get("collisionTestProps").is_some() {
@@ -482,6 +585,8 @@ impl<'a> Props<'a> {
                 "ClipExtension" => extensions.push(Arc::new(self.clip_extension()?)),
                 "MaskExtension" => extensions.push(Arc::new(self.mask_extension()?)),
                 "CollisionFilterExtension" => extensions.push(Arc::new(self.collision_filter_extension()?)),
+                "FillStyleExtension" => extensions.push(Arc::new(self.fill_style_extension(&options)?)),
+                "PathStyleExtension" => extensions.push(Arc::new(self.path_style_extension(&options)?)),
                 "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
                 other => self.warn(format!(
                     "extension `{other}` is not supported yet and was ignored"

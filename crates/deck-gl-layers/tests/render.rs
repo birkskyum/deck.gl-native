@@ -2,6 +2,7 @@
 //! Skipped (with a message) when no GPU adapter is available.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use deck_gl::attribute_manager::AttributeSource;
@@ -18,13 +19,13 @@ use deck_gl::{
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
     BitmapLayerProps, BrushingExtension, ClipExtension, CollisionFilterExtension, ColumnLayer,
-    ColumnLayerProps, Contour, ContourLayer, ContourLayerProps, DataFilterExtension, FilterCategories,
-    GeoJsonLayer, GeoJsonLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer,
-    HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
-    LineLayer, LineLayerProps, MaskExtension, PathLayer, PathLayerProps, PointCloudLayer,
-    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
-    ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextLayer,
-    TextLayerProps, TripsLayer, TripsLayerProps,
+    ColumnLayerProps, Contour, ContourLayer, ContourLayerProps, DataFilterExtension, FillPattern,
+    FillPatternAtlas, FillStyleExtension, FilterCategories, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
+    GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
+    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, MaskExtension, PathLayer,
+    PathLayerProps, PathStyleExtension, PathStyleTarget, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
+    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -2711,4 +2712,143 @@ fn extension_attributes_expand_over_tessellated_paths_and_polygons() {
     let pixels = render(&ctx, vec![Box::new(squares)]);
     assert_pixel(&pixels, c - 16, c, [0, 0, 255, 255], 0);
     assert_pixel(&pixels, c + 16, c, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn fill_style_extension_tiles_a_pattern_over_polygons() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let d = 0.0007;
+    let square = Arc::new(vec![vec![
+        [CENTER[0] - d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] - d, 0.0],
+        [CENTER[0] + d, CENTER[1] + d, 0.0],
+        [CENTER[0] - d, CENTER[1] + d, 0.0],
+    ]]);
+    // one pattern per atlas, filling it: a solid green one and a fully transparent one
+    let atlas = |rgba: [u8; 4]| {
+        Arc::new(FillPatternAtlas {
+            image: BitmapImage::new(2, 2, rgba.repeat(4)),
+            mapping: HashMap::from([(
+                "pattern".to_string(),
+                FillPattern {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 2,
+                },
+            )]),
+        })
+    };
+    let green = atlas([0, 255, 0, 255]);
+    let hole = atlas([0, 0, 0, 0]);
+    let polygon = |atlas: &Arc<FillPatternAtlas>, pattern: &'static str, mask: bool| -> Box<dyn Layer> {
+        let square = square.clone();
+        Box::new(SolidPolygonLayer::new(SolidPolygonLayerProps {
+            base: LayerProps {
+                extensions: Extensions::from_one(FillStyleExtension {
+                    fill_pattern_mask: mask,
+                    ..FillStyleExtension::pattern(atlas.clone(), Accessor::Constant(pattern.to_string()))
+                }),
+                ..LayerProps::new("patterned")
+            },
+            data: LayerData::with_length(1),
+            get_polygon: Accessor::func(move |_| (*square).clone()),
+            get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+            ..Default::default()
+        }))
+    };
+    // the pattern's colours replace the fill
+    let pixels = render(&ctx, vec![polygon(&green, "pattern", false)]);
+    assert_pixel(&pixels, c, c, [0, 255, 0, 255], 0);
+    assert_pixel(&pixels, c - 8, c + 8, [0, 255, 0, 255], 0);
+    // as a mask the fill keeps its colour where the pattern is opaque
+    let pixels = render(&ctx, vec![polygon(&green, "pattern", true)]);
+    assert_pixel(&pixels, c, c, [0, 0, 255, 255], 0);
+    // a transparent pattern hides the fill, an unknown one leaves it alone
+    let pixels = render(&ctx, vec![polygon(&hole, "pattern", true)]);
+    assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
+    let pixels = render(&ctx, vec![polygon(&green, "missing", true)]);
+    assert_pixel(&pixels, c, c, [0, 0, 255, 255], 0);
+}
+
+#[test]
+fn path_style_extension_dashes_and_offsets_paths() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    // 48 pixels of path, 4 pixels wide: dash lengths count half widths as in deck.gl, so
+    // dashes of 8 are 16 pixels on, 16 off from the start of the path
+    let half = 24.0 / 23301.0;
+    let path = |extension: PathStyleExtension| -> Box<dyn Layer> {
+        Box::new(PathLayer::new(PathLayerProps {
+            base: LayerProps {
+                extensions: Extensions::from_one(extension),
+                ..LayerProps::new("styled")
+            },
+            data: LayerData::with_length(1),
+            get_path: Accessor::func(move |_| {
+                vec![
+                    [CENTER[0] - half, CENTER[1], 0.0],
+                    [CENTER[0] + half, CENTER[1], 0.0],
+                ]
+            }),
+            get_width: Accessor::Constant(4.0),
+            width_units: Unit::Pixels,
+            get_color: Accessor::Constant([255, 0, 0, 255]),
+            ..Default::default()
+        }))
+    };
+    let pixels = render(
+        &ctx,
+        vec![path(PathStyleExtension::dashed(Accessor::Constant([8.0, 8.0])))],
+    );
+    assert_pixel(&pixels, c - 16, c, [255, 0, 0, 255], 0);
+    assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
+    assert_pixel(&pixels, c + 16, c, [255, 0, 0, 255], 0);
+
+    // an offset of one width moves the line four pixels to one side
+    let pixels = render(
+        &ctx,
+        vec![path(PathStyleExtension::offset(Accessor::Constant(1.0)))],
+    );
+    assert_pixel(&pixels, c, c, [0, 0, 0, 0], 0);
+    let above = pixel(&pixels, c, c - 4);
+    let below = pixel(&pixels, c, c + 4);
+    assert!(
+        (above == [255, 0, 0, 255]) != (below == [255, 0, 0, 255]),
+        "the line moved to one side: {above:?} {below:?}"
+    );
+}
+
+#[test]
+fn path_style_extension_dashes_scatterplot_strokes() {
+    let Some(ctx) = context() else { return };
+    let c = SIZE / 2;
+    let circle = |dash: [f32; 2]| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                extensions: Extensions::from_one(PathStyleExtension {
+                    target: PathStyleTarget::Scatterplot,
+                    ..PathStyleExtension::dashed(Accessor::Constant(dash))
+                }),
+                ..LayerProps::new("ring")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_radius: Accessor::Constant(12.0),
+            radius_units: Unit::Pixels,
+            stroked: true,
+            filled: false,
+            get_line_width: Accessor::Constant(4.0),
+            line_width_units: Unit::Pixels,
+            get_line_color: Accessor::Constant([255, 0, 0, 255]),
+            antialiasing: false,
+            ..Default::default()
+        }))
+    };
+    // one long dash keeps the whole ring, a tiny dash with a huge gap removes it
+    let pixels = render(&ctx, vec![circle([1000.0, 0.0])]);
+    assert_pixel(&pixels, c + 12, c, [255, 0, 0, 255], 0);
+    let pixels = render(&ctx, vec![circle([0.1, 1000.0])]);
+    assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
 }

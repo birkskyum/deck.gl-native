@@ -12,7 +12,7 @@ use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
 use deck_gl_layers::{
     BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
-    MaskExtension,
+    MaskExtension, PathStyleExtension, PathStyleTarget,
 };
 use serde_json::{json, Value};
 
@@ -942,4 +942,35 @@ fn collision_filter_extension_props() {
         resolve_f32(&LayerData::with_length(1), &collision.get_collision_priority).unwrap(),
         [3.0]
     );
+}
+
+#[test]
+fn path_style_extension_props_and_target() {
+    let mut warnings = Vec::new();
+    let layers = JsonConverter::new()
+        .convert_layers(
+            &json!([
+                {
+                    "@@type": "PathLayer", "id": "dashed", "data": [],
+                    "extensions": [{"@@type": "PathStyleExtension", "dash": true, "offset": true}],
+                    "getDashArray": [4, 2], "getOffset": 1, "dashJustified": true
+                },
+                {
+                    "@@type": "ScatterplotLayer", "id": "rings", "data": [],
+                    "extensions": [{"@@type": "PathStyleExtension", "dash": true}]
+                }
+            ]),
+            &mut warnings,
+        )
+        .unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let dashed = layers[0].props().extensions.get::<PathStyleExtension>().unwrap();
+    assert!(dashed.dash && dashed.offset && dashed.dash_justified);
+    assert_eq!(dashed.target, PathStyleTarget::Path);
+    assert_eq!(
+        resolve_f32(&LayerData::with_length(1), &dashed.get_offset).unwrap(),
+        [1.0]
+    );
+    let rings = layers[1].props().extensions.get::<PathStyleExtension>().unwrap();
+    assert_eq!(rings.target, PathStyleTarget::Scatterplot);
 }

@@ -37,6 +37,7 @@ pub fn convert_layer(
         .ok_or_else(|| JsonError::Parse(format!("layer object is missing `{TYPE_KEY}`")))?;
     let mut props = Props::new(layer_type, object);
     let options = &converter.options;
+    props.set_options(options);
     let layer: Box<dyn Layer> = match layer_type {
         "ScatterplotLayer" => {
             let data = load_rows(&mut props, options)?;
