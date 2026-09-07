@@ -771,3 +771,26 @@ fn mvt_layer_from_a_url_template() {
     assert_eq!(deck.layers.len(), 1);
     assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
 }
+
+#[test]
+fn wms_layer_from_an_endpoint() {
+    let spec = json!([{
+        "@@type": "WMSLayer",
+        "id": "wms",
+        "data": "https://ows.example/wms",
+        "serviceType": "wms",
+        "layers": ["OSM-WMS"],
+        "srs": "EPSG:4326",
+        "opacity": 0.8,
+        "onImageLoad": "ignored"
+    }]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 1);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let bad = json!([{"@@type": "WMSLayer", "data": "https://ows.example/wms", "srs": "EPSG:2154"}]);
+    assert!(JsonConverter::new()
+        .convert(&bad)
+        .unwrap_err()
+        .to_string()
+        .contains("srs"));
+}

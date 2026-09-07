@@ -36,6 +36,7 @@ pub mod text_layer;
 pub mod tile_layer;
 pub mod tileset;
 pub mod trips_layer;
+pub mod wms_layer;
 
 pub use aggregation::{
     AggregatedBin, AggregationOperation, AggregationProps, ScaleType, DEFAULT_COLOR_RANGE,
@@ -74,3 +75,4 @@ pub use tileset::{
     TileHeader, TileIndex, TileStatus, Tileset, TilesetOptions, TILE_SIZE,
 };
 pub use trips_layer::{TripsLayer, TripsLayerProps};
+pub use wms_layer::{image_url as wms_image_url, WmsFetch, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs};

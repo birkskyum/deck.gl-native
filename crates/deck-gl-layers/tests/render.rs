@@ -1523,6 +1523,70 @@ fn mvt_layer_draws_decoded_vector_tiles() {
 }
 
 #[test]
+fn wms_layer_requests_an_image_for_the_view() {
+    use deck_gl_layers::{WmsFetch, WmsLayer, WmsLayerProps};
+    use std::sync::Mutex;
+    let Some(ctx) = context() else { return };
+    // The stub server records the URL and returns a 2 x 2 green PNG
+    let urls: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = urls.clone();
+    let mut png = Vec::new();
+    image::write_buffer_with_format(
+        &mut std::io::Cursor::new(&mut png),
+        &[0u8, 200, 0, 255, 0, 200, 0, 255, 0, 200, 0, 255, 0, 200, 0, 255],
+        2,
+        2,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .unwrap();
+    let layer = WmsLayer::new(WmsLayerProps {
+        base: LayerProps::new("wms"),
+        data: "https://wms.example/ows".to_string(),
+        layers: vec!["osm".to_string()],
+        debounce_ms: 0.0,
+        fetch: Some(WmsFetch::new(move |url| {
+            seen.lock().unwrap().push(url.to_string());
+            Ok(png.clone())
+        })),
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    let mut shot = deck.snapshot(None).unwrap();
+    for _ in 0..100 {
+        if shot.pixel(SIZE / 2, SIZE / 2)[3] > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        shot = deck.snapshot(None).unwrap();
+    }
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 200, 0, 255]);
+    assert_eq!(shot.pixel(1, 1), [0, 200, 0, 255], "the image covers the view");
+    let requested = urls.lock().unwrap().clone();
+    assert_eq!(requested.len(), 1, "{requested:?}");
+    assert!(
+        requested[0].contains("REQUEST=GetMap&LAYERS=osm") && requested[0].contains("WIDTH=64&HEIGHT=64"),
+        "{requested:?}"
+    );
+    // A moved view asks for a new image
+    deck.set_view_state(ViewState {
+        longitude: CENTER[0] + 0.01,
+        latitude: CENTER[1],
+        zoom: 14.0,
+        pitch: 0.0,
+        bearing: 0.0,
+    });
+    for _ in 0..100 {
+        deck.snapshot(None).unwrap();
+        if urls.lock().unwrap().len() >= 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(urls.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

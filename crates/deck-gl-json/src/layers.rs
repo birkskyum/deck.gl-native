@@ -13,7 +13,8 @@ use deck_gl_layers::{
     LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
     PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer,
     ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
+    TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer,
+    WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -187,6 +188,81 @@ pub fn convert_layer(
                 z_offset: props.f32("zOffset", d.z_offset as f32)? as f64,
                 get_position: props.accessor("getPosition", "position", convert::position)?,
                 get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
+            }))
+        }
+        "WMSLayer" => {
+            let d = WmsLayerProps::default();
+            let data = match props.get("data") {
+                Some(Value::String(url)) => url.clone(),
+                Some(other) => {
+                    return Err(props.error(
+                        "data",
+                        format!(
+                            "expected a WMS endpoint or URL template, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+                None => return Err(props.error("data", "a WMS endpoint or URL template is required")),
+            };
+            let named = |key: &str, parse: fn(&str) -> Option<String>| -> Result<Option<String>> {
+                match props.get(key) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(Value::String(name)) => parse(name)
+                        .map(Some)
+                        .ok_or_else(|| props.error(key, format!("unknown value `{name}`"))),
+                    Some(other) => Err(props.error(
+                        key,
+                        format!("expected a string, got {}", crate::props::describe(other)),
+                    )),
+                }
+            };
+            let service_type = named("serviceType", |n| WmsServiceType::parse(n).map(|_| n.to_string()))?
+                .and_then(|n| WmsServiceType::parse(&n))
+                .unwrap_or(d.service_type);
+            let srs = named("srs", |n| WmsSrs::parse(n).map(|_| n.to_string()))?
+                .and_then(|n| WmsSrs::parse(&n))
+                .unwrap_or(d.srs);
+            let layers = match props.get("layers") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| props.error("layers", "expected layer names"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                Some(Value::String(one)) => vec![one.clone()],
+                Some(other) => {
+                    return Err(props.error(
+                        "layers",
+                        format!(
+                            "expected an array of names, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+            };
+            for ignored in [
+                "onMetadataLoad",
+                "onMetadataLoadError",
+                "onImageLoadStart",
+                "onImageLoad",
+                "onImageLoadError",
+            ] {
+                props.get(ignored);
+            }
+            Box::new(WmsLayer::new(WmsLayerProps {
+                base: props.base()?,
+                data,
+                service_type,
+                layers,
+                srs,
+                format: props.string("format")?.unwrap_or(d.format),
+                transparent: props.bool("transparent", d.transparent)?,
+                debounce_ms: props.f32("debounceTime", d.debounce_ms as f32)? as f64,
+                fetch: None,
             }))
         }
         "MVTLayer" => {
