@@ -7,6 +7,9 @@
 //!
 //! The API is the JSON one: hand it a deck.gl JSON description and it draws it.
 
+#[cfg(feature = "webgl")]
+mod maplibre;
+
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Deck, DeckProps, MapController, ViewState};
 use deck_gl_json::JsonConverter;
@@ -16,7 +19,7 @@ use web_sys::HtmlCanvasElement;
 /// Whether this build draws through WebGL2 rather than WebGPU.
 const WEBGL: bool = cfg!(feature = "webgl");
 
-fn err(message: impl std::fmt::Display) -> JsValue {
+pub(crate) fn err(message: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&message.to_string())
 }
 
@@ -292,7 +295,7 @@ impl DeckGl {
     }
 }
 
-fn depth_texture(
+pub(crate) fn depth_texture(
     device: &wgpu::Device,
     target: &RenderTarget,
     width: u32,
@@ -314,7 +317,7 @@ fn depth_texture(
     })
 }
 
-fn device_pixel_ratio() -> f32 {
+pub(crate) fn device_pixel_ratio() -> f32 {
     web_sys::window()
         .map(|window| window.device_pixel_ratio() as f32)
         .unwrap_or(1.0)

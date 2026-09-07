@@ -14,7 +14,7 @@ esac
 
 # The scenes are the repository's own, so the browser draws exactly what json_render does
 mkdir -p www/scenes
-for scene in osm-tiles san-francisco minimap data-filter; do
+for scene in osm-tiles san-francisco minimap data-filter maplibre-arcs; do
   cp "../json/$scene.json" www/scenes/
 done
 

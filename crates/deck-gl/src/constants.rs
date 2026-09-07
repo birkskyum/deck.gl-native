@@ -77,6 +77,30 @@ pub enum ClipDepthRange {
     NegativeOneToOne,
 }
 
+/// Where the host's framebuffer has its origin.
+///
+/// Every graphics API but OpenGL puts pixel (0, 0) at the top left of a render target, and
+/// deck draws for that. An OpenGL default framebuffer has it at the bottom left, so a host
+/// that hands deck one of those, a maplibre-gl-js custom layer for instance, wants the
+/// layers the other way up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClipOrigin {
+    /// WebGPU, Metal, Vulkan and D3D12, and any texture wgpu owns.
+    #[default]
+    TopLeft,
+    /// An OpenGL or WebGL2 default framebuffer.
+    BottomLeft,
+}
+
+impl ClipOrigin {
+    pub fn shader_value(self) -> i32 {
+        match self {
+            ClipOrigin::TopLeft => 0,
+            ClipOrigin::BottomLeft => 1,
+        }
+    }
+}
+
 impl ClipDepthRange {
     pub fn shader_value(self) -> i32 {
         match self {

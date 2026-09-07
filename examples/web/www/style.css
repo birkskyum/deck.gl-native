@@ -76,3 +76,8 @@ body {
 #status.error {
   color: #ff8f8f;
 }
+
+#map {
+  position: fixed;
+  inset: 0;
+}

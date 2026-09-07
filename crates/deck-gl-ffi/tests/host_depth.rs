@@ -283,6 +283,7 @@ fn project_uniforms_reproduce_the_viewport_depth() {
         coordinate_origin: DVec3::ZERO,
         auto_wrap_longitude: false,
         clip_depth_range: deck_gl::ClipDepthRange::NegativeOneToOne,
+        clip_origin: deck_gl::ClipOrigin::default(),
     });
     eprintln!(
         "mode {} origin {:?} common origin {:?} center {:?}",

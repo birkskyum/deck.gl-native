@@ -36,7 +36,10 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   let origin = attributes.instanceCells * screenGrid.cellSizePixels + margin;
   let size = vec2<f32>(max(screenGrid.cellSizePixels - 2.0 * screenGrid.cellMarginPixels, 0.0));
   let pixel = origin + attributes.positions * size;
-  let ndc = vec2<f32>(pixel.x / logicalSize.x * 2.0 - 1.0, 1.0 - pixel.y / logicalSize.y * 2.0);
+  let ndc = vec2<f32>(
+    pixel.x / logicalSize.x * 2.0 - 1.0,
+    project_clip_y(1.0 - pixel.y / logicalSize.y * 2.0),
+  );
   varyings.position = deckgl_filter_gl_position(vec4<f32>(ndc, 0.0, 1.0), geometry);
   varyings.vColor = vec4<f32>(attributes.instanceColors.rgb, attributes.instanceColors.a * layer.opacity);
   varyings.vColor = deckgl_filter_color(varyings.vColor, geometry);

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deck.gl-native inside maplibre-gl-js</title>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="panel">
+      <h1>deck.gl-native in maplibre-gl-js</h1>
+      <p>
+        A custom layer drawing in the map's own WebGL2 context, sharing its framebuffer and
+        its depth buffer. Each arc is hidden where it passes behind a tower and visible where
+        it clears one.
+      </p>
+      <p id="status"></p>
+    </div>
+    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+    <script type="module" src="maplibre.js"></script>
+  </body>
+</html>

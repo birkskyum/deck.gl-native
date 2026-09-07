@@ -66,6 +66,14 @@ fn make_deck(ctx: &HeadlessContext, layers: Vec<Box<dyn Layer>>) -> Deck {
 
 /// Render layers on a transparent background and return RGBA pixels.
 fn render(ctx: &HeadlessContext, layers: Vec<Box<dyn Layer>>) -> Vec<u8> {
+    render_with_origin(ctx, layers, deck_gl::ClipOrigin::TopLeft)
+}
+
+fn render_with_origin(
+    ctx: &HeadlessContext,
+    layers: Vec<Box<dyn Layer>>,
+    clip_origin: deck_gl::ClipOrigin,
+) -> Vec<u8> {
     let target = RenderTarget::default();
     let color = create_render_texture(&ctx.device, "color", SIZE, SIZE, target.color_format);
     let depth = create_render_texture(&ctx.device, "depth", SIZE, SIZE, target.depth_format.unwrap());
@@ -84,6 +92,7 @@ fn render(ctx: &HeadlessContext, layers: Vec<Box<dyn Layer>>) -> Vec<u8> {
                 bearing: 0.0,
             },
             layers,
+            clip_origin,
             ..Default::default()
         },
     )
@@ -4330,4 +4339,51 @@ fn attribute_transitions_move_objects_between_positions() {
     assert_eq!(shot.pixel(c + 16, c)[3], 255);
     assert_eq!(shot.pixel(c, c)[3], 0);
     assert!(!deck.animating());
+}
+
+/// A host whose framebuffer starts at the bottom left, an OpenGL default framebuffer as a
+/// maplibre-gl-js custom layer is handed, gets the frame the other way up. The whole frame
+/// turns over, including the screen space offsets that give a point its size, so this asks
+/// for the mirror image rather than only a mirrored position.
+#[test]
+fn a_bottom_left_origin_turns_the_frame_over() {
+    let Some(ctx) = context() else { return };
+    let layers = |value: u8| -> Vec<Box<dyn Layer>> {
+        vec![Box::new(TextLayer::new(TextLayerProps {
+            base: LayerProps::new("text"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            // An F is not the same the other way up, so a frame that was only mirrored in
+            // position and not in its screen space offsets would not match
+            get_text: Accessor::Constant("F".to_string()),
+            get_size: Accessor::Constant(40.0),
+            get_color: Accessor::Constant([value, value, value, 255]),
+            ..Default::default()
+        }))]
+    };
+    let top_left = render_with_origin(&ctx, layers(255), deck_gl::ClipOrigin::TopLeft);
+    let bottom_left = render_with_origin(&ctx, layers(255), deck_gl::ClipOrigin::BottomLeft);
+
+    let size = SIZE as usize;
+    let row = |pixels: &[u8], y: usize| pixels[y * size * 4..(y + 1) * size * 4].to_vec();
+    let drawn = (0..size)
+        .filter(|&y| row(&top_left, y).iter().any(|&v| v != 0))
+        .count();
+    assert!(drawn > 4, "the glyph should cover several rows, covered {drawn}");
+    for y in 0..size {
+        let (top, bottom) = (row(&top_left, y), row(&bottom_left, size - 1 - y));
+        // The glyph lands on different sub-pixel positions the two ways up, so the edges of
+        // its antialiasing differ by a level or so
+        let worst = top
+            .iter()
+            .zip(&bottom)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 2,
+            "row {y} of the top left frame should be row {} of the bottom left one, off by {worst}",
+            size - 1 - y
+        );
+    }
 }

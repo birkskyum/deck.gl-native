@@ -30,6 +30,31 @@ in `Cargo.lock` (`cargo install wasm-bindgen-cli --version <that version>`). Set
   instance reads element zero" in WebGPU, Metal, Vulkan and D3D12, but "tightly packed" in
   OpenGL, so `DeckProps::constant_attributes` is false on that path.
 
+## Inside a maplibre-gl-js map
+
+`www/maplibre.html` adds the layers to a maplibre-gl-js map as a custom layer. maplibre hands
+the layer its live WebGL2 context, wgpu adopts that context rather than making one of its own
+(`wgpu_hal::gles::Adapter::new_external`) and draws into the framebuffer maplibre already has
+bound (`TextureInner::DefaultRenderbuffer`). Colour and depth are therefore shared: an arc is
+hidden where it passes behind a tower and visible where it clears one, in one frame, without
+compositing two canvases.
+
+Two things that path needs:
+
+- `DeckProps::clip_origin` is `BottomLeft`. A canvas' default framebuffer starts at the bottom
+  left, while wgpu draws for a top left origin, so without it the layers come out upside down.
+- The map is created with `antialias: false`. A multisampled default framebuffer cannot be
+  drawn into this way.
+
+The browser logs `INVALID_OPERATION: drawBuffers: BACK or NONE` once per frame: wgpu's GL
+backend names a colour attachment where WebGL2 wants `BACK` for a default framebuffer. WebGL
+ignores the call and the draw buffer stays where it should be, so it is noise rather than a
+fault, but it is wgpu's to fix.
+
+A map with terrain or the globe projection renders into a framebuffer of its own, which the
+layers cannot attach a depth buffer to without taking the map's away; the overlay reports that
+rather than doing it.
+
 ## The JavaScript API
 
 ```js

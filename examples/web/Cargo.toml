@@ -31,6 +31,7 @@ version = "0.3"
 features = [
   "HtmlCanvasElement",
   "WebGl2RenderingContext",
+  "WebGlFramebuffer",
   "Window",
 ]
 

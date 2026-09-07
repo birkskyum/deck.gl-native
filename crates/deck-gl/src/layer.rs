@@ -6,7 +6,7 @@ use glam::DMat4;
 use luma_gl::{Model, ModelDescriptor, PipelineCache, RenderTarget};
 
 use crate::collision::CollisionMaps;
-use crate::constants::{ClipDepthRange, CoordinateSystem};
+use crate::constants::{ClipDepthRange, ClipOrigin, CoordinateSystem};
 use crate::data::{Color, Position};
 use crate::deck::PickingInfo;
 use crate::extension::Extensions;
@@ -216,6 +216,10 @@ pub struct LayerContext {
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
     pub clip_depth_range: ClipDepthRange,
+    /// Where the attachment being drawn into has its origin, see [`ClipOrigin`]. The deck
+    /// sets this for the pass that writes the host's attachment and leaves it at the default
+    /// for the shadow, mask, collision and terrain passes, which draw into its own textures.
+    pub clip_origin: ClipOrigin,
     /// Whether a buffer of one element with a zero vertex stride is read by every instance,
     /// deck.gl's constant attributes. True on WebGPU, Metal, Vulkan and D3D12. False on
     /// OpenGL, where a zero stride means tightly packed instead, so the elements have to be
@@ -511,6 +515,7 @@ pub fn project_props<'a>(ctx: &LayerContext, viewport: &'a Viewport, props: &Lay
         coordinate_origin: glam::DVec3::from(props.coordinate_origin),
         auto_wrap_longitude: props.wrap_longitude,
         clip_depth_range: ctx.clip_depth_range,
+        clip_origin: ctx.clip_origin,
     }
 }
 

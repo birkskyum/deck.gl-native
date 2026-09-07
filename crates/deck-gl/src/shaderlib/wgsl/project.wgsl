@@ -47,6 +47,9 @@ struct ProjectUniforms {
   pseudoMeters: i32,
   // 0: remap depth to WebGPU's [0, w]; 1: keep OpenGL's [-w, w] for hosts that write it
   depthRange: i32,
+  // 0: the target's origin is at the top left; 1: at the bottom left, as an OpenGL default
+  // framebuffer's is, so clip space is the other way up
+  clipOrigin: i32,
 };
 
 @group(0) @binding(auto)
@@ -271,9 +274,17 @@ fn project_position_vec2_f32(position: vec2<f32>) -> vec2<f32> {
   return projected_position.xy;
 }
 
+// Turns clip space the other way up for a host whose framebuffer starts at the bottom left.
+// Every clip space position and offset the project helpers hand out goes through this, so a
+// layer that adds pixel offsets to a position stays the right way up as a whole.
+fn project_clip_y(y: f32) -> f32 {
+  return select(y, -y, project.clipOrigin == 1);
+}
+
 // Transforms a common space position to clip space.
 fn project_common_position_to_clipspace_with_projection(position: vec4<f32>, viewProjectionMatrix: mat4x4<f32>, center: vec4<f32>) -> vec4<f32> {
   var clipPosition = viewProjectionMatrix * position + center;
+  clipPosition.y = project_clip_y(clipPosition.y);
   // deck.gl projection matrices use WebGL's [-w, w] depth range; WebGPU clips z to [0, w].
   // Hosts that share an OpenGL style depth buffer keep the original range.
   if (project.depthRange == 0) {
@@ -294,7 +305,8 @@ fn project_common_position_to_clipspace(position: vec4<f32>) -> vec4<f32> {
 // Returns a clip space offset corresponding to a given number of screen pixels.
 fn project_pixel_size_to_clipspace(pixels: vec2<f32>) -> vec2<f32> {
   let offset = pixels / project.viewportSize * project.devicePixelRatio * 2.0;
-  return offset * project.focalDistance;
+  let clip = offset * project.focalDistance;
+  return vec2<f32>(clip.x, project_clip_y(clip.y));
 }
 
 fn project_meter_size_to_pixel(meters: f32) -> f32 {

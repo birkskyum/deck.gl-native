@@ -5,7 +5,7 @@ use luma_gl::{create_rgba8_texture, PipelineCache, RenderTarget, PICKING_FORMAT}
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
 use crate::collision::{CollisionMaps, CollisionTarget, COLLISION_DOWNSCALE, COLLISION_PADDING};
-use crate::constants::{ClipDepthRange, CoordinateSystem, ProjectionMode};
+use crate::constants::{ClipDepthRange, ClipOrigin, CoordinateSystem, ProjectionMode};
 use crate::extension::ExtensionShaders;
 use crate::layer::{
     decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
@@ -68,6 +68,10 @@ pub struct DeckProps {
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
     pub clip_depth_range: ClipDepthRange,
+    /// Where the attachment deck draws into has its origin, see [`ClipOrigin`]. A host that
+    /// hands deck an OpenGL default framebuffer, a maplibre-gl-js custom layer for instance,
+    /// sets `BottomLeft`.
+    pub clip_origin: ClipOrigin,
     /// Draw extra copies of the world when the view spans the antimeridian, deck.gl's
     /// `MapView({repeat: true})`.
     pub repeat: bool,
@@ -96,6 +100,7 @@ impl Default for DeckProps {
             post_process: Vec::new(),
             depth_bias_base: 0,
             clip_depth_range: ClipDepthRange::default(),
+            clip_origin: ClipOrigin::default(),
             repeat: false,
             view: View::Map,
             constant_attributes: true,
@@ -179,6 +184,8 @@ pub struct Deck {
     collisions: Arc<CollisionMaps>,
     /// One colour and depth target per collision group, kept across frames
     collision_targets: HashMap<String, CollisionTarget>,
+    /// Where the host's attachment has its origin; the offscreen passes are always top left
+    clip_origin: ClipOrigin,
     /// When the deck was created, the origin of its own clock
     created: web_time::Instant,
     /// The time of the last `tick`, which replaces the deck's own clock once used
@@ -214,6 +221,8 @@ impl Deck {
             layer_index: 0,
             depth_bias_base: props.depth_bias_base,
             clip_depth_range: props.clip_depth_range,
+            // Set per pass: the offscreen ones draw into deck's own textures
+            clip_origin: ClipOrigin::default(),
             constant_attributes: props.constant_attributes,
             uniform_slot: 0,
             pointer: None,
@@ -261,6 +270,7 @@ impl Deck {
             mask_textures: HashMap::new(),
             collisions,
             collision_targets: HashMap::new(),
+            clip_origin: props.clip_origin,
             created: web_time::Instant::now(),
             now: None,
             post_process: props.post_process,
@@ -1059,6 +1069,7 @@ impl Deck {
         let main_target = self.ctx.target;
         self.ctx.target = HEIGHT_MAP_TARGET;
         self.ctx.terrain_pass = true;
+        self.ctx.clip_origin = ClipOrigin::default();
         self.ctx.uniform_slot = 0;
         // The bounds have to be in place before the layers write their uniforms
         self.publish_terrain(None, bounds);
@@ -1141,6 +1152,7 @@ impl Deck {
                 label: Some("deck.gl shadows"),
             });
         let mut maps = Vec::with_capacity(lights);
+        self.ctx.clip_origin = ClipOrigin::default();
         for light in 0..lights {
             self.ctx.shadow_pass = Some(light);
             self.ctx.uniform_slot = 0;
@@ -1379,6 +1391,11 @@ impl Deck {
     fn update_layers(&mut self, masks: bool) -> Result<()> {
         let main_target = self.ctx.target;
         self.ctx.uniform_slot = 0;
+        self.ctx.clip_origin = if masks {
+            ClipOrigin::default()
+        } else {
+            self.clip_origin
+        };
         for (index, entry) in self.layers.iter_mut().enumerate() {
             if entry.layer.props().operation.mask != masks {
                 continue;
@@ -1701,6 +1718,13 @@ impl Deck {
             &self.post_process,
         )?;
         let post = !self.post_process.is_empty() && self.post_processor.has_passes();
+        if post && self.clip_origin != ClipOrigin::default() {
+            // The effects would have to turn the frame over on the way to the host, which the
+            // passes do not do; a host with a bottom left origin gets the layers as they are.
+            return Err(DeckError::Render(
+                "post-processing effects and a bottom left clip origin cannot be combined".into(),
+            ));
+        }
         let scene_view = post.then(|| {
             self.post_processor
                 .scene_texture(&self.ctx.device, size, self.ctx.target.color_format)
