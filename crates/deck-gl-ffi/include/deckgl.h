@@ -84,6 +84,22 @@ DeckglHandle* deckgl_headless_create(void);
  *  Works on any deck, headless or host bound. Returns 0 on success. */
 int32_t deckgl_snapshot(DeckglHandle* deck, uint32_t width, uint32_t height, uint8_t* rgba);
 
+/** Result of deckgl_pick. */
+typedef struct DeckglPickingInfo {
+    int32_t picked;        /* 1 when an object was hit, 0 otherwise */
+    uint32_t index;        /* data row of the picked object */
+    double x;              /* the queried pixel, logical coordinates */
+    double y;
+    double longitude;      /* the pixel unprojected onto the ground plane */
+    double latitude;
+    const char* layer_id;  /* valid until the next deckgl_pick on this deck */
+} DeckglPickingInfo;
+
+/** Find the object under a pixel (logical coordinates, origin top left) with the current
+ *  camera. Waits for the GPU, so call it at most once per frame. Returns 0 on success and
+ *  fills `info`; `info->picked` says whether anything was hit. */
+int32_t deckgl_pick(DeckglHandle* deck, double x, double y, DeckglPickingInfo* info);
+
 /** Like deckgl_snapshot, written as a PNG file. Returns 0 on success. */
 int32_t deckgl_snapshot_png(DeckglHandle* deck, uint32_t width, uint32_t height, const char* path);
 

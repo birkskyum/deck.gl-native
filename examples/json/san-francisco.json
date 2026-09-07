@@ -162,6 +162,7 @@
         }
       ],
       "pickable": true,
+      "autoHighlight": true,
       "stroked": true,
       "radiusUnits": "meters",
       "radiusMinPixels": 3,

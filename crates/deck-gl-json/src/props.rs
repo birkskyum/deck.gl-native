@@ -299,6 +299,7 @@ impl<'a> Props<'a> {
         base.visible = self.bool("visible", defaults.visible)?;
         base.opacity = self.f64("opacity", defaults.opacity)?;
         base.pickable = self.bool("pickable", defaults.pickable)?;
+        base.auto_highlight = self.bool("autoHighlight", defaults.auto_highlight)?;
         base.coordinate_system = self.coordinate_system()?;
         base.coordinate_origin = self.vec3_f64("coordinateOrigin", defaults.coordinate_origin)?;
         base.model_matrix = match self.numbers("modelMatrix")? {

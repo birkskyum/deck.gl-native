@@ -9,8 +9,8 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Material, Path, PickingInfo, RenderParameters,
-    Unit, ViewState,
+    Accessor, ClickCallback, Deck, DeckProps, HoverCallback, Layer, LayerData, LayerProps, Material, Path,
+    PickingInfo, RenderParameters, Unit, ViewState,
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
@@ -745,6 +745,88 @@ fn snapshot_reads_back_the_rendered_frame() {
         .unwrap();
     assert_eq!(cleared.pixel(1, 1), [0, 0, 255, 255]);
     assert_eq!(cleared.pixel(SIZE / 2, SIZE / 2), [255, 0, 0, 255]);
+}
+
+#[test]
+fn hover_and_click_callbacks_with_auto_highlight() {
+    use std::sync::Mutex;
+    let Some(ctx) = context() else { return };
+    let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let log = |events: &Arc<Mutex<Vec<String>>>, entry: String| events.lock().unwrap().push(entry);
+    let hover_log = events.clone();
+    let click_log = events.clone();
+    let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            pickable: true,
+            auto_highlight: true,
+            highlight_color: [0, 0, 255, 255],
+            on_hover: Some(HoverCallback::new(move |info| {
+                log(
+                    &hover_log,
+                    match info {
+                        Some(hit) => format!("hover {} {}", hit.layer_id, hit.index),
+                        None => "leave".to_string(),
+                    },
+                )
+            })),
+            on_click: Some(ClickCallback::new(move |hit| {
+                log(&click_log, format!("click {} {}", hit.layer_id, hit.index))
+            })),
+            ..LayerProps::new("points")
+        },
+        data: LayerData::with_length(1),
+        get_position: Accessor::Constant(CENTER),
+        get_radius: Accessor::Constant(12.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    let deck_log = events.clone();
+    deck.set_on_hover(Some(HoverCallback::new(move |info| {
+        log(&deck_log, format!("deck hover {}", info.is_some()))
+    })));
+    let c = SIZE as f64 / 2.0;
+    deck.update().unwrap();
+    assert_eq!(
+        deck.snapshot(None).unwrap().pixel(SIZE / 2, SIZE / 2),
+        [255, 0, 0, 255]
+    );
+
+    let hit = deck.pointer_move(c, c).unwrap().expect("hit");
+    assert_eq!((hit.layer_id.as_str(), hit.index), ("points", 0));
+    assert_eq!(deck.hovered().map(|h| h.index), Some(0));
+    // Moving within the same object does not fire again
+    deck.pointer_move(c + 1.0, c).unwrap();
+    // The auto highlight tints the hovered object
+    assert_eq!(
+        deck.snapshot(None).unwrap().pixel(SIZE / 2, SIZE / 2),
+        [0, 0, 255, 255]
+    );
+    deck.click(c, c).unwrap();
+    assert!(deck.pointer_move(1.0, 1.0).unwrap().is_none());
+    assert!(deck.hovered().is_none());
+    assert_eq!(
+        deck.snapshot(None).unwrap().pixel(SIZE / 2, SIZE / 2),
+        [255, 0, 0, 255]
+    );
+    deck.pointer_move(c, c).unwrap();
+    deck.pointer_leave();
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "hover points 0",
+            "deck hover true",
+            "click points 0",
+            "leave",
+            "deck hover false",
+            "hover points 0",
+            "deck hover true",
+            "leave",
+            "deck hover false",
+        ]
+    );
 }
 
 #[test]

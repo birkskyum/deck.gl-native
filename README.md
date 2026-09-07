@@ -26,7 +26,7 @@ Working today, headless and verified pixel by pixel in tests:
 - Arrow record batches as layer data, with column, constant and function accessors
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)
-- Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
+- Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`
 - Per-layer render `parameters`: blend state, depth test and writes, face culling
 - `Deck::snapshot` reads a frame back as RGBA pixels (and saves PNGs with the `png` feature); the C API has `deckgl_snapshot` and `deckgl_snapshot_png`
 - A `MapController` with deck.gl's gestures: drag to pan with inertia, rotate and pitch, zoom

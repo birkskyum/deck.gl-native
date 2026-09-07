@@ -54,6 +54,8 @@ pub struct DeckglHandle {
     pub(crate) lighting: Option<deck_gl::LightingEffect>,
     /// `initialViewState` of the last JSON description, the camera of headless snapshots
     pub(crate) view_state: Option<ViewState>,
+    /// Layer id of the last `deckgl_pick` hit, so its pointer stays valid
+    pub(crate) picked_layer: CString,
     pub(crate) last_error: CString,
     /// Number of frames rendered so far
     pub(crate) frame: u64,
@@ -71,6 +73,7 @@ impl DeckglHandle {
             pending_layers: None,
             lighting: None,
             view_state: None,
+            picked_layer: CString::default(),
             last_error: CString::default(),
             frame: 0,
         }
@@ -345,6 +348,87 @@ impl DeckglHandle {
         }
         let deck = self.deck.as_mut().expect("ensured");
         deck.snapshot(None).map_err(|e| e.to_string())
+    }
+}
+
+/// What `deckgl_pick` found under a pixel.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct DeckglPickingInfo {
+    /// 1 when an object was hit, 0 otherwise (the other fields are then zero)
+    pub picked: i32,
+    /// Data row of the picked object
+    pub index: u32,
+    /// The queried pixel in logical coordinates
+    pub x: f64,
+    pub y: f64,
+    /// The pixel unprojected onto the ground plane
+    pub longitude: f64,
+    pub latitude: f64,
+    /// Id of the picked layer; valid until the next `deckgl_pick` on this deck
+    pub layer_id: *const c_char,
+}
+
+impl Default for DeckglPickingInfo {
+    fn default() -> Self {
+        Self {
+            picked: 0,
+            index: 0,
+            x: 0.0,
+            y: 0.0,
+            longitude: 0.0,
+            latitude: 0.0,
+            layer_id: std::ptr::null(),
+        }
+    }
+}
+
+/// Find the object under a pixel (logical coordinates, origin top left) with the current
+/// camera, deck.gl's `pickObject`. Waits for the GPU. Returns 0 on success and fills `info`;
+/// `info.picked` says whether anything was hit.
+///
+/// # Safety
+/// `deck` must be a valid handle and `info` writable.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_pick(
+    deck: *mut DeckglHandle,
+    x: f64,
+    y: f64,
+    info: *mut DeckglPickingInfo,
+) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let Some(info) = (unsafe { info.as_mut() }) else {
+        return handle.set_error("deckgl_pick: info is null");
+    };
+    *info = DeckglPickingInfo::default();
+    let target = handle.target.unwrap_or_default();
+    if let Err(e) = handle.ensure_deck(target) {
+        return handle.set_error(e);
+    }
+    if handle.camera.is_some() {
+        handle.apply_camera();
+    } else if let Some(view_state) = handle.view_state {
+        handle.deck.as_mut().expect("ensured").set_view_state(view_state);
+    }
+    let deck = handle.deck.as_mut().expect("ensured");
+    match deck.pick(x, y) {
+        Ok(Some(hit)) => {
+            handle.picked_layer = CString::new(hit.layer_id).unwrap_or_default();
+            *info = DeckglPickingInfo {
+                picked: 1,
+                index: hit.index,
+                x: hit.pixel[0],
+                y: hit.pixel[1],
+                longitude: hit.coordinate[0],
+                latitude: hit.coordinate[1],
+                layer_id: handle.picked_layer.as_ptr(),
+            };
+            0
+        }
+        Ok(None) => 0,
+        Err(e) => handle.set_error(e.to_string()),
     }
 }
 

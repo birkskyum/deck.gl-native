@@ -5,7 +5,9 @@ use luma_gl::{RenderTarget, PICKING_FORMAT};
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
 use crate::constants::ClipDepthRange;
-use crate::layer::{decode_picking_color, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE};
+use crate::layer::{
+    decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
+};
 use crate::lighting::LightingEffect;
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
 use crate::{DeckError, Result};
@@ -108,6 +110,10 @@ pub struct Deck {
     viewport: Viewport,
     external_viewport: bool,
     picking: Option<PickingTarget>,
+    /// The object under the pointer after the last `pointer_move`
+    hovered: Option<PickingInfo>,
+    on_hover: Option<HoverCallback>,
+    on_click: Option<ClickCallback>,
 }
 
 impl Deck {
@@ -138,6 +144,9 @@ impl Deck {
             viewport,
             external_viewport: false,
             picking: None,
+            hovered: None,
+            on_hover: None,
+            on_click: None,
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -194,6 +203,7 @@ impl Deck {
     /// that layer's GPU resources and only take over the new props (see
     /// [`Layer::update_from`]); everything else is initialized on the next update.
     pub fn set_layers(&mut self, layers: Vec<Box<dyn Layer>>) {
+        let hovered = self.hovered.clone();
         let mut previous: Vec<Option<LayerEntry>> = self.layers.drain(..).map(Some).collect();
         self.layers = layers
             .into_iter()
@@ -206,7 +216,19 @@ impl Deck {
                     Some(mut entry)
                         if entry.initialized && same_pipelines(entry.layer.props(), layer.props()) =>
                     {
+                        // An auto highlight lives in the layer's props; take it out before the
+                        // diff so it does not count as a change, and put it back after.
+                        let auto_highlight = hovered
+                            .as_ref()
+                            .filter(|h| h.layer_id == entry.layer.id() && entry.layer.props().auto_highlight)
+                            .map(|h| h.index);
+                        if auto_highlight.is_some() {
+                            entry.layer.set_highlighted_object(None);
+                        }
                         if entry.layer.update_from(layer.as_mut()) {
+                            if auto_highlight.is_some() && entry.layer.props().auto_highlight {
+                                entry.layer.set_highlighted_object(auto_highlight);
+                            }
                             entry
                         } else {
                             LayerEntry {
@@ -257,6 +279,98 @@ impl Deck {
         for entry in &mut self.layers {
             entry.layer.set_highlighted_object(None);
         }
+    }
+
+    /// A deck level `onHover`, called after the layer callbacks whenever the hovered object
+    /// changes (`None` when the pointer is over nothing).
+    pub fn set_on_hover(&mut self, callback: Option<HoverCallback>) {
+        self.on_hover = callback;
+    }
+
+    /// A deck level `onClick`, called after the layer callback for every click on an object.
+    pub fn set_on_click(&mut self, callback: Option<ClickCallback>) {
+        self.on_click = callback;
+    }
+
+    /// The object under the pointer after the last [`Deck::pointer_move`].
+    pub fn hovered(&self) -> Option<&PickingInfo> {
+        self.hovered.as_ref()
+    }
+
+    /// Pick under the pointer. When the hovered object changed, the layer the pointer left
+    /// gets `on_hover(None)`, the layer it entered gets `on_hover(Some(info))`, layers with
+    /// `auto_highlight` highlight the hovered object, and the deck's own hover callback runs.
+    /// Returns the object under the pointer. Like [`Deck::pick`], this waits for the GPU.
+    pub fn pointer_move(&mut self, x: f64, y: f64) -> Result<Option<PickingInfo>> {
+        let hit = self.pick(x, y)?;
+        self.set_hovered(hit.clone());
+        Ok(hit)
+    }
+
+    /// The pointer left the deck: hover callbacks and auto highlights are cleared.
+    pub fn pointer_leave(&mut self) {
+        self.set_hovered(None);
+    }
+
+    /// Pick under a click and run the picked layer's `on_click`, then the deck's.
+    pub fn click(&mut self, x: f64, y: f64) -> Result<Option<PickingInfo>> {
+        let hit = self.pick(x, y)?;
+        if let Some(info) = &hit {
+            if let Some(callback) = self.layer_props(&info.layer_id).and_then(|p| p.on_click.clone()) {
+                callback.call(info);
+            }
+            if let Some(callback) = self.on_click.clone() {
+                callback.call(info);
+            }
+        }
+        Ok(hit)
+    }
+
+    fn set_hovered(&mut self, hit: Option<PickingInfo>) {
+        let same = match (&self.hovered, &hit) {
+            (Some(a), Some(b)) => a.layer_id == b.layer_id && a.index == b.index,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        if let Some(previous) = self.hovered.take() {
+            let left_layer = hit.as_ref().is_none_or(|h| h.layer_id != previous.layer_id);
+            if left_layer {
+                if let Some(callback) = self
+                    .layer_props(&previous.layer_id)
+                    .and_then(|p| p.on_hover.clone())
+                {
+                    callback.call(None);
+                }
+            }
+            if self
+                .layer_props(&previous.layer_id)
+                .is_some_and(|p| p.auto_highlight)
+            {
+                self.set_highlighted_object(&previous.layer_id, None);
+            }
+        }
+        if let Some(info) = &hit {
+            if let Some(callback) = self.layer_props(&info.layer_id).and_then(|p| p.on_hover.clone()) {
+                callback.call(Some(info));
+            }
+            if self.layer_props(&info.layer_id).is_some_and(|p| p.auto_highlight) {
+                self.set_highlighted_object(&info.layer_id, Some(info.index));
+            }
+        }
+        if let Some(callback) = self.on_hover.clone() {
+            callback.call(hit.as_ref());
+        }
+        self.hovered = hit;
+    }
+
+    fn layer_props(&self, id: &str) -> Option<&LayerProps> {
+        self.layers
+            .iter()
+            .find(|entry| entry.layer.id() == id)
+            .map(|entry| entry.layer.props())
     }
 
     /// Find the object under a pixel (logical coordinates, origin top left).

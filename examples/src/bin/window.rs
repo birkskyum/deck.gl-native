@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, MapController, ViewState};
+use deck_gl::{ClickCallback, Deck, DeckProps, HoverCallback, MapController, ViewState};
 use deck_gl_examples::{scene, spec};
 use deck_gl_layers::TripsLayer;
 use winit::application::ApplicationHandler;
@@ -32,8 +32,9 @@ struct State {
     start: Instant,
     cursor: Option<(f64, f64)>,
     last_cursor: (f64, f64),
-    hovered: Option<(String, u32)>,
     dragging: Option<MouseButton>,
+    /// Where the pressed button went down, to tell clicks from drags
+    press_pixel: [f64; 2],
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -106,6 +107,17 @@ impl State {
         if let Some(lighting) = loaded.lighting {
             deck.set_lighting(lighting);
         }
+        deck.set_on_hover(Some(HoverCallback::new(|info| {
+            if let Some(hit) = info {
+                println!(
+                    "hover: layer {} object {} at {:.5}, {:.5}",
+                    hit.layer_id, hit.index, hit.coordinate[0], hit.coordinate[1]
+                );
+            }
+        })));
+        deck.set_on_click(Some(ClickCallback::new(|hit| {
+            println!("click: layer {} object {}", hit.layer_id, hit.index);
+        })));
 
         State {
             window,
@@ -120,33 +132,18 @@ impl State {
             start: Instant::now(),
             cursor: None,
             last_cursor: (0.0, 0.0),
-            hovered: None,
             dragging: None,
+            press_pixel: [0.0, 0.0],
             modifiers: Default::default(),
         }
     }
 
-    /// Pick under the cursor and highlight the hit. Prints when the hit changes.
+    /// Pick under the cursor: layers with `auto_highlight` tint the hit, and the deck's hover
+    /// callback (set below) prints it.
     fn update_hover(&mut self) {
         let Some((x, y)) = self.cursor.take() else { return };
-        let hit = match self.deck.pick(x, y) {
-            Ok(hit) => hit,
-            Err(e) => {
-                eprintln!("pick error: {e}");
-                return;
-            }
-        };
-        let key = hit.as_ref().map(|h| (h.layer_id.clone(), h.index));
-        if key != self.hovered {
-            self.deck.clear_highlights();
-            if let Some(hit) = &hit {
-                self.deck.set_highlighted_object(&hit.layer_id, Some(hit.index));
-                println!(
-                    "hover: layer {} object {} at {:.5}, {:.5}",
-                    hit.layer_id, hit.index, hit.coordinate[0], hit.coordinate[1]
-                );
-            }
-            self.hovered = key;
+        if let Err(e) = self.deck.pointer_move(x, y) {
+            eprintln!("pick error: {e}");
         }
     }
 
@@ -187,6 +184,7 @@ impl State {
                 return;
             }
             self.dragging = Some(button);
+            self.press_pixel = pixel;
             if rotate {
                 self.controller.rotate_start(pixel);
             } else if button == MouseButton::Left {
@@ -196,6 +194,13 @@ impl State {
             self.dragging = None;
             self.controller.rotate_end();
             self.controller.pan_end(self.now_ms());
+            // A left button released where it was pressed is a click
+            let moved = (pixel[0] - self.press_pixel[0]).abs() + (pixel[1] - self.press_pixel[1]).abs();
+            if button == MouseButton::Left && !rotate && moved < 3.0 {
+                if let Err(e) = self.deck.click(pixel[0], pixel[1]) {
+                    eprintln!("pick error: {e}");
+                }
+            }
         }
     }
 
@@ -318,8 +323,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => {
                 state.cursor = None;
-                state.hovered = None;
-                state.deck.clear_highlights();
+                state.deck.pointer_leave();
             }
             WindowEvent::MouseInput {
                 state: button_state,

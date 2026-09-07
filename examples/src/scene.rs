@@ -81,6 +81,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let scatterplot = ScatterplotLayer::new(ScatterplotLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("points")
         },
         data: LayerData::from_batch(scatterplot_batch()),
@@ -98,6 +99,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let lines = LineLayer::new(LineLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("lines")
         },
         data: LayerData::with_length(line_count),
@@ -143,6 +145,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let solid_polygons = SolidPolygonLayer::new(SolidPolygonLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("blocks")
         },
         data: LayerData::with_length(polygon_count),
@@ -177,6 +180,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let paths = PathLayer::new(PathLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("route")
         },
         data: LayerData::with_length(1),
@@ -194,6 +198,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let arcs = ArcLayer::new(ArcLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("arcs")
         },
         data: LayerData::with_length(arc_count),
@@ -228,6 +233,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let polygons = PolygonLayer::new(PolygonLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("park")
         },
         data: LayerData::with_length(1),
@@ -288,6 +294,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let columns = ColumnLayer::new(ColumnLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("columns")
         },
         data: LayerData::with_length(column_count),
@@ -311,6 +318,7 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
     let icons = IconLayer::new(IconLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("icons")
         },
         data: LayerData::with_length(12),
@@ -432,6 +440,7 @@ pub fn hexagons() -> HexagonLayer {
     HexagonLayer::new(HexagonLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             opacity: 0.9,
             ..LayerProps::new("hexagons")
         },
@@ -462,6 +471,7 @@ pub fn labels() -> TextLayer {
     TextLayer::new(TextLayerProps {
         base: LayerProps {
             pickable: true,
+            auto_highlight: true,
             ..LayerProps::new("labels")
         },
         data: LayerData::with_length(n),

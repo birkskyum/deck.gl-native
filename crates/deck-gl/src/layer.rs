@@ -1,15 +1,77 @@
 //! Port of the parts of `@deck.gl/core/src/lib/layer.ts` that a native layer needs.
 
+use std::sync::Arc;
+
 use glam::DMat4;
 use luma_gl::{Model, RenderTarget};
 
 use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::Color;
+use crate::deck::PickingInfo;
 use crate::lighting::{LightingEffect, Material};
 use crate::parameters::RenderParameters;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
 use crate::viewport::Viewport;
 use crate::Result;
+
+/// The function behind a [`HoverCallback`].
+pub type HoverFn = dyn Fn(Option<&PickingInfo>) + Send + Sync;
+/// The function behind a [`ClickCallback`].
+pub type ClickFn = dyn Fn(&PickingInfo) + Send + Sync;
+
+/// deck.gl's `onHover`: called with the picked object when the pointer moves onto an object of
+/// the layer, and with `None` when it leaves the layer's objects. Compared by identity, so
+/// keep one instance around rather than wrapping a new closure on every `set_layers`.
+#[derive(Clone)]
+pub struct HoverCallback(pub Arc<HoverFn>);
+
+impl HoverCallback {
+    pub fn new(f: impl Fn(Option<&PickingInfo>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(&self, info: Option<&PickingInfo>) {
+        (self.0)(info)
+    }
+}
+
+impl PartialEq for HoverCallback {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for HoverCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HoverCallback")
+    }
+}
+
+/// deck.gl's `onClick`: called with the object under a click. Compared by identity.
+#[derive(Clone)]
+pub struct ClickCallback(pub Arc<ClickFn>);
+
+impl ClickCallback {
+    pub fn new(f: impl Fn(&PickingInfo) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(&self, info: &PickingInfo) {
+        (self.0)(info)
+    }
+}
+
+impl PartialEq for ClickCallback {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for ClickCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ClickCallback")
+    }
+}
 
 /// Properties shared by all layers. Mirrors deck.gl's `LayerProps`.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +93,10 @@ pub struct LayerProps {
     pub material: Material,
     /// Pipeline state overrides (blending, depth test, culling), deck.gl's `parameters`
     pub parameters: RenderParameters,
+    /// Highlight the object under the pointer (see [`crate::Deck::pointer_move`])
+    pub auto_highlight: bool,
+    pub on_hover: Option<HoverCallback>,
+    pub on_click: Option<ClickCallback>,
 }
 
 impl Default for LayerProps {
@@ -48,6 +114,9 @@ impl Default for LayerProps {
             highlight_color: [0, 0, 128, 128],
             material: Material::default(),
             parameters: RenderParameters::default(),
+            auto_highlight: false,
+            on_hover: None,
+            on_click: None,
         }
     }
 }

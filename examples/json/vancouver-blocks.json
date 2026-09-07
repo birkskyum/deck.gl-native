@@ -20,6 +20,7 @@
       "wireframe": true,
       "elevationScale": 0.1,
       "pickable": true,
+      "autoHighlight": true,
       "getElevation": "@@=properties.valuePerSqm",
       "getFillColor": "@@=properties.growth > 0.2 ? [255, 120, 60] : properties.growth > 0.1 ? [255, 190, 110] : [199, 233, 180]",
       "getLineColor": [255, 255, 255]
