@@ -1289,3 +1289,40 @@ fn terrain_layer_reads_tiles_decoders_and_bounds() {
         assert!(JsonConverter::new().convert(&bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn h3_cluster_layer_reads_hexagon_lists() {
+    use deck_gl_layers::H3ClusterLayer;
+    let mut deck = JsonConverter::new()
+        .convert(&json!([{
+            "@@type": "H3ClusterLayer",
+            "id": "clusters",
+            "data": [
+                {"hexagons": ["8928308280fffff", "89283082873ffff"], "name": "a"},
+                {"hexagons": ["8928308280bffff"], "name": "b"}
+            ],
+            "getHexagons": "@@=hexagons",
+            "getFillColor": [255, 100, 0],
+            "filled": true,
+            "stroked": false
+        }]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let layer = deck.layers[0]
+        .as_any_mut()
+        .downcast_mut::<H3ClusterLayer>()
+        .expect("an h3 cluster layer");
+    let props = layer.props();
+    assert!(props.polygon.filled);
+    assert!(!props.polygon.stroked);
+    assert_eq!(
+        props.polygon.get_fill_color,
+        deck_gl::Accessor::Constant([255, 100, 0, 255])
+    );
+    let cells = deck_gl::data::resolve_string_lists(&props.polygon.data, &props.get_hexagons).unwrap();
+    assert_eq!(cells.len(), 2);
+    assert_eq!(cells[0].len(), 2);
+    assert_eq!(cells[1], vec!["8928308280bffff".to_string()]);
+    // Cells that are not indexes are skipped rather than failing the layer
+    assert!(deck_gl_layers::cluster_polygons(&["nope".to_string()]).is_empty());
+}

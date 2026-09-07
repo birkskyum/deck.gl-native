@@ -17,6 +17,7 @@ pub mod geo_cell_layer;
 pub mod geojson_layer;
 pub mod grid_cell_layer;
 pub mod grid_layer;
+pub mod h3_cluster_layer;
 pub mod heatmap_layer;
 pub mod hexagon_layer;
 pub mod icon_layer;
@@ -66,6 +67,7 @@ pub use geo_cell_layer::{
 pub use geojson_layer::{GeoJsonLayer, GeoJsonLayerProps};
 pub use grid_cell_layer::{GridCellLayer, GridCellLayerProps};
 pub use grid_layer::{GridLayer, GridLayerProps};
+pub use h3_cluster_layer::{cluster_polygons, H3ClusterLayer, H3ClusterLayerProps};
 pub use heatmap_layer::{HeatmapAggregation, HeatmapLayer, HeatmapLayerProps};
 pub use hexagon_layer::{HexagonLayer, HexagonLayerProps};
 pub use icon_layer::{IconAtlas, IconLayer, IconLayerProps, IconMapping};

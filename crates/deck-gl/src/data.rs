@@ -569,6 +569,26 @@ pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<
     in_geoarrow_column(data, accessor, result)
 }
 
+/// Resolve lists of strings, such as the cells of an H3 cluster, from a `List<Utf8>` column.
+pub fn resolve_string_lists(data: &LayerData, accessor: &Accessor<Vec<String>>) -> Result<Vec<Vec<String>>> {
+    resolve_with(data, accessor, |column| {
+        let (offsets, values) = list_parts(column.as_ref())?;
+        let strings: Vec<String> = if let Some(array) = values.as_string_opt::<i32>() {
+            array.iter().map(|v| v.unwrap_or_default().to_string()).collect()
+        } else if let Some(array) = values.as_string_opt::<i64>() {
+            array.iter().map(|v| v.unwrap_or_default().to_string()).collect()
+        } else {
+            return Err(DeckError::Data(format!(
+                "expected a list of strings, got a list of {}",
+                values.data_type()
+            )));
+        };
+        Ok((0..offsets.len().saturating_sub(1))
+            .map(|i| strings[offsets[i]..offsets[i + 1]].to_vec())
+            .collect())
+    })
+}
+
 /// Resolve lists of numbers, such as timestamps per path vertex, from a `List<numeric>` column.
 pub fn resolve_f32_lists(data: &LayerData, accessor: &Accessor<Vec<f32>>) -> Result<Vec<Vec<f32>>> {
     resolve_with(data, accessor, |column| {

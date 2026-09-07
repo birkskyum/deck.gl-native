@@ -9,14 +9,14 @@ use deck_gl_layers::{
     BitmapLayerProps, CellKind, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
     ContourLayerProps, ContourThreshold, ElevationDecoder, FontSettings, FontSource, GeoCellLayer,
     GeoCellLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps,
-    HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas,
-    IconLayer, IconLayerProps, LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps,
-    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType,
-    ScatterplotLayer, ScatterplotLayerProps, Scenegraph, ScenegraphLayer, ScenegraphLayerProps,
-    ScenegraphLighting, ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps, TerrainLayer, TerrainLayerProps, TextAnchor, TextLayer,
-    TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer, WmsLayerProps,
-    WmsServiceType, WmsSrs, WordBreak,
+    H3ClusterLayer, H3ClusterLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer,
+    HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, MvtLayer,
+    MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
+    PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps, Scenegraph,
+    ScenegraphLayer, ScenegraphLayerProps, ScenegraphLighting, ScreenGridLayer, ScreenGridLayerProps,
+    SimpleMeshLayer, SimpleMeshLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TerrainLayer,
+    TerrainLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer,
+    TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -139,6 +139,14 @@ pub fn convert_layer(
                 polygon,
                 get_cell: props.accessor(accessor, field, convert::string)?,
                 kind: defaults.kind,
+            }))
+        }
+        "H3ClusterLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let polygon = polygon_with(&props, data, Accessor::Constant(Vec::new()))?;
+            Box::new(H3ClusterLayer::new(H3ClusterLayerProps {
+                polygon,
+                get_hexagons: props.accessor("getHexagons", "hexagons", convert::string_list)?,
             }))
         }
         "ContourLayer" => {

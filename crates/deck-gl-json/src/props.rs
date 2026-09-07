@@ -1170,6 +1170,13 @@ pub mod convert {
         items.iter().map(|v| number(v).map(|n| n as f32)).collect()
     }
 
+    pub fn string_list(value: &Value) -> Result<Vec<String>, String> {
+        let items = value
+            .as_array()
+            .ok_or_else(|| format!("expected an array of strings, got {}", describe(value)))?;
+        items.iter().map(string).collect()
+    }
+
     pub fn path(value: &Value) -> Result<Path, String> {
         let items = value
             .as_array()

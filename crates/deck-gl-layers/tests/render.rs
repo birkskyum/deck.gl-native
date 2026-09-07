@@ -1488,6 +1488,62 @@ fn tile_loads_are_cancelled_when_the_view_moves_on() {
 }
 
 #[test]
+fn h3_cluster_layer_draws_the_outline_of_a_set_of_cells() {
+    use deck_gl_layers::{H3ClusterLayer, H3ClusterLayerProps};
+    let Some(ctx) = context() else { return };
+    // A cell at the view centre with its six neighbours: about 75 m across at resolution 11,
+    // which is around 40 pixels of the 64 pixel view at this zoom
+    let centre = h3o::LatLng::new(CENTER[1], CENTER[0])
+        .unwrap()
+        .to_cell(h3o::Resolution::Eleven);
+    let cluster: Vec<String> = std::iter::once(centre)
+        .chain(centre.grid_disk::<Vec<_>>(1))
+        .map(|c| c.to_string())
+        .collect();
+    let ring_only: Vec<String> = centre
+        .grid_ring_fast(1)
+        .flatten()
+        .map(|c| c.to_string())
+        .collect();
+    let layer = |hexagons: Vec<String>| {
+        let mut props = H3ClusterLayerProps {
+            polygon: PolygonLayerProps {
+                base: LayerProps::new("clusters"),
+                data: LayerData::with_length(1),
+                get_fill_color: Accessor::Constant([0, 180, 255, 255]),
+                ..Default::default()
+            },
+            get_hexagons: Accessor::Constant(hexagons),
+        };
+        props.polygon.filled = true;
+        Box::new(H3ClusterLayer::new(props)) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    // The filled cluster covers the centre and its surroundings
+    let shot = render(&ctx, vec![layer(cluster)]);
+    let px = |shot: &[u8], x: u32, y: u32| {
+        let i = ((y * SIZE + x) * 4) as usize;
+        [shot[i], shot[i + 1], shot[i + 2], shot[i + 3]]
+    };
+    assert_eq!(px(&shot, c, c), [0, 180, 255, 255], "the centre is filled");
+    assert_eq!(px(&shot, c, c - 8), [0, 180, 255, 255], "and so is a neighbour");
+    assert_eq!(
+        px(&shot, 1, 1)[3],
+        0,
+        "the corner of the view is outside the cluster"
+    );
+    // The same cells without the middle one leave a hole, so the centre is empty
+    let shot = render(&ctx, vec![layer(ring_only)]);
+    assert_eq!(px(&shot, c, c)[3], 0, "the missing centre cell is a hole");
+    // Far enough from the hole's edge not to land on the polygon's outline
+    assert_eq!(
+        px(&shot, c, c - 13),
+        [0, 180, 255, 255],
+        "the ring around it is filled"
+    );
+}
+
+#[test]
 fn geo_cell_layers_fill_their_cells() {
     use deck_gl_layers::{geohash_bounds, GeoCellLayer, GeoCellLayerProps};
     let Some(ctx) = context() else { return };
