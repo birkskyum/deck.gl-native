@@ -3,7 +3,7 @@
 
 pub mod project;
 
-use luma_gl::ShaderModuleSource;
+use luma_gl::{ShaderHook, ShaderModuleSource};
 
 pub const GEOMETRY: ShaderModuleSource = ShaderModuleSource {
     name: "geometry",
@@ -41,6 +41,41 @@ pub const GOURAUD_MATERIAL: ShaderModuleSource = ShaderModuleSource {
     name: "gouraudMaterial",
     source: include_str!("wgsl/gouraud_material.wgsl"),
 };
+
+/// deck.gl's shader hooks in their WGSL form. Layer shaders call these functions; extensions
+/// inject code into them under the `key` (see [`luma_gl::ShaderInjection`]). The value is
+/// returned rather than passed `inout`, and the fragment stage colour hook has its own name
+/// because WGSL has no overloading.
+pub const HOOKS: [ShaderHook; 4] = [
+    ShaderHook {
+        key: "vs:DECKGL_FILTER_SIZE",
+        function: "deckgl_filter_size",
+        value: "size",
+        value_type: "vec3<f32>",
+        context: "geometry: Geometry",
+    },
+    ShaderHook {
+        key: "vs:DECKGL_FILTER_GL_POSITION",
+        function: "deckgl_filter_gl_position",
+        value: "position",
+        value_type: "vec4<f32>",
+        context: "geometry: Geometry",
+    },
+    ShaderHook {
+        key: "vs:DECKGL_FILTER_COLOR",
+        function: "deckgl_filter_color",
+        value: "color",
+        value_type: "vec4<f32>",
+        context: "geometry: Geometry",
+    },
+    ShaderHook {
+        key: "fs:DECKGL_FILTER_COLOR",
+        function: "deckgl_filter_fragment_color",
+        value: "color",
+        value_type: "vec4<f32>",
+        context: "geometry: FragmentGeometry",
+    },
+];
 
 /// The modules every deck.gl layer shader depends on, in dependency order.
 /// Equivalent to `modules: [project32, color, picking]` plus the default `geometry` and

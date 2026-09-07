@@ -104,6 +104,7 @@ struct Varyings {
 
 @vertex
 fn vertexMain(inp: Attributes) -> Varyings {
+  deckgl_vertex_start(inp);
   geometry.worldPosition = inp.instancePositions;
   geometry.uv = inp.positions;
   geometry.pickingColor = picking_getPickingColorFromIndex(inp.rowIndexes);
@@ -128,18 +129,23 @@ fn vertexMain(inp: Attributes) -> Varyings {
   var anchorPosScreen: vec2<f32>;
   if (icon.billboard != 0) {
     pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, vec3<f32>(0.0));
+    pos = deckgl_filter_gl_position(pos, geometry);
     anchorPosScreen = pos.xy / pos.w;
 
-    let clipOffset = project_pixel_size_to_clipspace(pixelOffset);
+    var offset = vec3<f32>(pixelOffset, 0.0);
+    offset = deckgl_filter_size(offset, geometry);
+    let clipOffset = project_pixel_size_to_clipspace(offset.xy);
     pos = vec4<f32>(pos.x + clipOffset.x, pos.y + clipOffset.y, pos.z, pos.w);
   } else {
     var offsetCommon = vec3<f32>(project_pixel_size_vec2(pixelOffset), 0.0);
     if (text.flipY > 0.5) {
       offsetCommon.y = offsetCommon.y * -1.0;
     }
+    offsetCommon = deckgl_filter_size(offsetCommon, geometry);
     let anchorPos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, vec3<f32>(0.0));
     anchorPosScreen = anchorPos.xy / anchorPos.w;
     pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, offsetCommon);
+    pos = deckgl_filter_gl_position(pos, geometry);
   }
 
   anchorPosScreen = vec2<f32>(anchorPosScreen.x + 1.0, 1.0 - anchorPosScreen.y) / 2.0 *
@@ -192,15 +198,18 @@ fn vertexMain(inp: Attributes) -> Varyings {
 
   outp.position = pos;
   outp.vColor = inp.instanceColors;
+  outp.vColor = deckgl_filter_color(outp.vColor, geometry);
   outp.vColorMode = inp.instanceColorModes;
   outp.pickingColor = geometry.pickingColor;
 
+  deckgl_vertex_end(&outp);
   return outp;
 }
 
 @fragment
 fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
-  geometry.uv = inp.uv;
+  deckgl_fragment_start(inp);
+  fragmentGeometry.uv = inp.uv;
 
   let texColor = textureSample(iconsTexture, iconsTextureSampler, inp.vTextureCoords);
   var alpha = texColor.a;
@@ -232,7 +241,8 @@ fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
     return vec4<f32>(inp.pickingColor, 1.0);
   }
 
-  var fragColor = deckgl_premultiplied_alpha(vec4<f32>(color.rgb, a));
+  var fragColor = deckgl_filter_fragment_color(vec4<f32>(color.rgb, a), fragmentGeometry);
+  fragColor = deckgl_premultiplied_alpha(fragColor);
 
   if (picking.isHighlightActive > 0.5) {
     let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);

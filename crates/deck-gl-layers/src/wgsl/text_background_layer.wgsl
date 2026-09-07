@@ -63,6 +63,7 @@ struct Varyings {
 
 @vertex
 fn vertexMain(inp: Attributes) -> Varyings {
+  deckgl_vertex_start(inp);
   geometry.worldPosition = inp.instancePositions;
   geometry.uv = inp.positions;
   geometry.pickingColor = picking_getPickingColorFromIndex(inp.rowIndexes);
@@ -105,21 +106,28 @@ fn vertexMain(inp: Attributes) -> Varyings {
   var pos: vec4<f32>;
   if (textBackground.billboard > 0.5) {
     pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, vec3<f32>(0.0));
-    let clipOffset = project_pixel_size_to_clipspace(pixelOffset);
+    var offset = vec3<f32>(pixelOffset, 0.0);
+    offset = deckgl_filter_size(offset, geometry);
+    let clipOffset = project_pixel_size_to_clipspace(offset.xy);
     pos = vec4<f32>(pos.x + clipOffset.x, pos.y + clipOffset.y, pos.z, pos.w);
   } else {
     var offsetCommon = vec3<f32>(project_pixel_size_vec2(pixelOffset), 0.0);
     if (text.flipY > 0.5) {
       offsetCommon.y = offsetCommon.y * -1.0;
     }
+    offsetCommon = deckgl_filter_size(offsetCommon, geometry);
     pos = project_position_to_clipspace(inp.instancePositions, inp.instancePositions64Low, offsetCommon);
   }
+  pos = deckgl_filter_gl_position(pos, geometry);
   outp.position = pos;
 
   // Apply opacity to instance color
   outp.vFillColor = vec4<f32>(inp.instanceFillColors.rgb, inp.instanceFillColors.a * layer.opacity);
+  outp.vFillColor = deckgl_filter_color(outp.vFillColor, geometry);
   outp.vLineColor = vec4<f32>(inp.instanceLineColors.rgb, inp.instanceLineColors.a * layer.opacity);
+  outp.vLineColor = deckgl_filter_color(outp.vLineColor, geometry);
   outp.pickingColor = geometry.pickingColor;
+  deckgl_vertex_end(&outp);
   return outp;
 }
 
@@ -151,7 +159,8 @@ fn get_stroked_color(dist: f32, fillColor: vec4<f32>, lineColor: vec4<f32>, line
 
 @fragment
 fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
-  geometry.uv = inp.uv;
+  deckgl_fragment_start(inp);
+  fragmentGeometry.uv = inp.uv;
 
   var fragColor: vec4<f32>;
   if (any(textBackground.borderRadius != vec4<f32>(0.0))) {
@@ -174,6 +183,8 @@ fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
       fragColor = inp.vFillColor;
     }
   }
+
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(inp.pickingColor)) {

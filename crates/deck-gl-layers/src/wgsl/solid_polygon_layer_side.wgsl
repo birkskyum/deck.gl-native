@@ -21,6 +21,7 @@ struct Attributes {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var outp: Varyings;
+  deckgl_vertex_start(attributes);
   outp.position = vec4<f32>(0.0);
   outp.vColor = vec4<f32>(0.0);
   outp.pickingColor = picking_getPickingColorFromIndex(attributes.rowIndexes);
@@ -59,7 +60,7 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     vec3<f32>(0.0)
   );
   geometry.position = projectedPosition.commonPosition;
-  outp.position = projectedPosition.clipPosition;
+  outp.position = deckgl_filter_gl_position(projectedPosition.clipPosition, geometry);
 
   let normal = project_offset_normal(vec3<f32>(
     pos.y - nextPos.y + (pos64Low.y - nextPos64Low.y),
@@ -73,8 +74,9 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     attributes.lineColors,
     solidPolygon.isWireframe > 0.5
   );
-  outp.vColor = apply_polygon_color(colors, normal, geometry.position);
+  outp.vColor = deckgl_filter_color(apply_polygon_color(colors, normal, geometry.position), geometry);
   outp.pickingColor = geometry.pickingColor;
 
+  deckgl_vertex_end(&outp);
   return outp;
 }

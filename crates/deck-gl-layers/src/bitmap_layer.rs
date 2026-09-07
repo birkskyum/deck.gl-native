@@ -8,7 +8,7 @@ use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Layer, LayerContext, LayerProps, Result, Viewport};
 use glam::{Vec3, Vec4};
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from, split_f64};
-use luma_gl::{assemble_shader, create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/bitmap_layer.wgsl");
@@ -127,7 +127,11 @@ impl Layer for BitmapLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        let shader = self.props.base.extensions.assemble_without_attributes(
+            &self.props.base.id,
+            &STANDARD_MODULES,
+            SHADER,
+        )?;
         let layouts = [
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x3),
             VertexBufferLayout::vertex("positions64Low", 1, VertexFormat::Float32x3),

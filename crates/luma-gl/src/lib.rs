@@ -22,7 +22,10 @@ pub use model::{
     create_rgba8_texture, default_sampler, Model, ModelDescriptor, RenderTarget, VertexBufferLayout,
     PICKING_FORMAT,
 };
-pub use shader::{assemble_shader, AssembledShader, ShaderModuleSource};
+pub use shader::{
+    assemble, assemble_shader, AssembledShader, ShaderAssembly, ShaderField, ShaderHook, ShaderInjection,
+    ShaderModuleSource,
+};
 pub use uniform::UniformBlock;
 pub use wgpu;
 

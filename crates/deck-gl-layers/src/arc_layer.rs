@@ -6,7 +6,7 @@ use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
-use luma_gl::{assemble_shader, Model, ModelDescriptor};
+use luma_gl::{Model, ModelDescriptor};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/arc_layer.wgsl");
@@ -111,7 +111,12 @@ impl ArcLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base) {
+            self.model = None;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -133,32 +138,29 @@ impl ArcLayer {
         let props = &self.props;
         let data = &props.data;
         let model = initialized(self.model.as_mut(), &props.base.id)?;
-        self.attributes.update(
-            &ctx.device,
-            model,
-            data,
-            &[
-                (
-                    "source",
-                    AttributeSource::Positions(props.get_source_position.clone()),
-                ),
-                (
-                    "target",
-                    AttributeSource::Positions(props.get_target_position.clone()),
-                ),
-                (
-                    "sourceColor",
-                    AttributeSource::Colors(props.get_source_color.clone()),
-                ),
-                (
-                    "targetColor",
-                    AttributeSource::Colors(props.get_target_color.clone()),
-                ),
-                ("width", AttributeSource::Floats(props.get_width.clone())),
-                ("height", AttributeSource::Floats(props.get_height.clone())),
-                ("tilt", AttributeSource::Floats(props.get_tilt.clone())),
-            ],
-        )?;
+        let mut sources = vec![
+            (
+                "source",
+                AttributeSource::Positions(props.get_source_position.clone()),
+            ),
+            (
+                "target",
+                AttributeSource::Positions(props.get_target_position.clone()),
+            ),
+            (
+                "sourceColor",
+                AttributeSource::Colors(props.get_source_color.clone()),
+            ),
+            (
+                "targetColor",
+                AttributeSource::Colors(props.get_target_color.clone()),
+            ),
+            ("width", AttributeSource::Floats(props.get_width.clone())),
+            ("height", AttributeSource::Floats(props.get_height.clone())),
+            ("tilt", AttributeSource::Floats(props.get_tilt.clone())),
+        ];
+        sources.extend(props.base.extensions.sources());
+        self.attributes.update(&ctx.device, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())
     }
@@ -182,7 +184,10 @@ impl Layer for ArcLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        let extensions = &self.props.base.extensions;
+        let shader = extensions.assemble(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        self.attributes = arc_attributes();
+        self.attributes.extend(extensions.buffer_specs(&shader)?);
         let layouts = self.attributes.layouts();
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
@@ -198,11 +203,13 @@ impl Layer for ArcLayer {
         model.set_vertex_count(self.props.num_segments.max(1) * 2);
         self.model = Some(model);
         self.data_dirty = true;
-        self.attributes.invalidate_all();
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.model.is_none() {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

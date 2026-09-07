@@ -51,6 +51,7 @@ struct Varyings {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var varyings: Varyings;
+  deckgl_vertex_start(attributes);
 
   geometry.worldPosition = attributes.instancePositions;
 
@@ -84,26 +85,35 @@ fn vertexMain(attributes: Attributes) -> Varyings {
 
   if (scatterplot.billboard != 0) {
     varyings.position = project_position_to_clipspace(attributes.instancePositions, attributes.instancePositions64Low, vec3<f32>(0.0));
+    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
     var offset = edgePadding * attributes.positions * varyings.outerRadiusPixels;
     offset = vec3<f32>(offset.xy + attributes.instancePixelOffset, offset.z);
+    offset = deckgl_filter_size(offset, geometry);
     let clipPixels = project_pixel_size_to_clipspace(offset.xy);
     varyings.position = vec4<f32>(varyings.position.x + clipPixels.x, varyings.position.y + clipPixels.y, varyings.position.z, varyings.position.w);
   } else {
     var offset = edgePadding * attributes.positions * project_pixel_size_float(varyings.outerRadiusPixels);
     offset = vec3<f32>(offset.xy + project_pixel_size_vec2(attributes.instancePixelOffset), offset.z);
+    offset = deckgl_filter_size(offset, geometry);
     varyings.position = project_position_to_clipspace(attributes.instancePositions, attributes.instancePositions64Low, offset);
+    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
   }
 
   // Apply opacity to instance color, or return instance picking color
   varyings.vFillColor = vec4<f32>(attributes.instanceFillColors.rgb, attributes.instanceFillColors.a * layer.opacity);
+  varyings.vFillColor = deckgl_filter_color(varyings.vFillColor, geometry);
   varyings.vLineColor = vec4<f32>(attributes.instanceLineColors.rgb, attributes.instanceLineColors.a * layer.opacity);
+  varyings.vLineColor = deckgl_filter_color(varyings.vLineColor, geometry);
   varyings.pickingColor = geometry.pickingColor;
 
+  deckgl_vertex_end(&varyings);
   return varyings;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(varyings);
+  fragmentGeometry.uv = varyings.unitPosition;
   let distToCenter = length(varyings.unitPosition) * varyings.outerRadiusPixels;
   let inCircle = select(
     smoothedge(distToCenter, varyings.outerRadiusPixels),
@@ -139,6 +149,7 @@ fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
   }
 
   fragColor.a *= inCircle;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(varyings.pickingColor)) {

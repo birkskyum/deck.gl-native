@@ -8,6 +8,7 @@ use luma_gl::{Model, RenderTarget};
 use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::Color;
 use crate::deck::PickingInfo;
+use crate::extension::Extensions;
 use crate::lighting::{LightingEffect, Material};
 use crate::parameters::RenderParameters;
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
@@ -97,6 +98,9 @@ pub struct LayerProps {
     pub auto_highlight: bool,
     pub on_hover: Option<HoverCallback>,
     pub on_click: Option<ClickCallback>,
+    /// Extensions that add shader code and attributes to the layer, see
+    /// [`LayerExtension`](crate::LayerExtension).
+    pub extensions: Extensions,
 }
 
 impl Default for LayerProps {
@@ -117,6 +121,7 @@ impl Default for LayerProps {
             auto_highlight: false,
             on_hover: None,
             on_click: None,
+            extensions: Extensions::default(),
         }
     }
 }
@@ -127,6 +132,15 @@ impl LayerProps {
             id: id.into(),
             ..Default::default()
         }
+    }
+
+    /// True when replacing these props with `next` needs a new model: the pipeline state,
+    /// the picking variant or the shader code the extensions contribute changed. Extension
+    /// options that only feed attributes and uniforms do not.
+    pub fn needs_new_model(&self, next: &LayerProps) -> bool {
+        self.pickable != next.pickable
+            || self.parameters != next.parameters
+            || self.extensions.shaders() != next.extensions.shaders()
     }
 }
 
@@ -372,6 +386,7 @@ pub fn update_standard_uniforms(
     if model.has_uniforms("floatColors") {
         model.uniforms("floatColors")?.set_f32("useByteColors", 1.0)?;
     }
+    props.extensions.update_uniforms(model, ctx, viewport)?;
 
     model.upload_uniforms(&ctx.queue);
     Ok(())

@@ -86,6 +86,7 @@ fn packUVsIntoRGB(uv: vec2<f32>) -> vec3<f32> {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var output: Varyings;
+  deckgl_vertex_start(attributes);
   geometry.worldPosition = attributes.positions;
   geometry.uv = attributes.texCoords;
   geometry.pickingColor = picking_getPickingColorFromIndex(0u);
@@ -96,7 +97,7 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     vec3<f32>(0.0)
   );
   geometry.position = projectedPosition.commonPosition;
-  output.position = projectedPosition.clipPosition;
+  output.position = deckgl_filter_gl_position(projectedPosition.clipPosition, geometry);
   output.vTexCoord = attributes.texCoords;
   output.vTexPos = vec2<f32>(0.0);
   output.pickingColor = geometry.pickingColor;
@@ -108,11 +109,13 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     output.vTexPos = geometry.worldPosition.xy;
   }
 
+  deckgl_vertex_end(&output);
   return output;
 }
 
 @fragment
 fn fragmentMain(input: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(input);
   var uv = input.vTexCoord;
   if (bitmap.coordinateConversion < -0.5) {
     uv = getUV(mercator_to_lnglat(input.vTexPos));
@@ -126,7 +129,8 @@ fn fragmentMain(input: Varyings) -> @location(0) vec4<f32> {
     bitmapColor.a * layer.opacity
   );
 
-  geometry.uv = uv;
+  fragmentGeometry.uv = uv;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isActive > 0.5) {
     if (picking.isAttribute > 0.5) {

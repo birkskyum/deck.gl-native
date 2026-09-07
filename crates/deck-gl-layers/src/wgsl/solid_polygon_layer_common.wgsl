@@ -45,7 +45,8 @@ struct Varyings {
 
 @fragment
 fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
-  geometry.uv = vec2<f32>(0.0, 0.0);
+  deckgl_fragment_start(inp);
+  fragmentGeometry.uv = vec2<f32>(0.0, 0.0);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(inp.pickingColor)) {
@@ -55,6 +56,7 @@ fn fragmentMain(inp: Varyings) -> @location(0) vec4<f32> {
   }
 
   var fragColor = inp.vColor;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isHighlightActive > 0.5) {
     let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);

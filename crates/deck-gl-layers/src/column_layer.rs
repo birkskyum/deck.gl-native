@@ -9,7 +9,7 @@ use deck_gl::{
 };
 use glam::Vec2;
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
-use luma_gl::{assemble_shader, Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/column_layer.wgsl");
@@ -176,6 +176,7 @@ pub struct ColumnLayer {
     wireframe: Option<Model>,
     data_dirty: bool,
     attributes: AttributeManager,
+    models_dirty: bool,
 }
 
 impl ColumnLayer {
@@ -187,6 +188,7 @@ impl ColumnLayer {
             wireframe: None,
             data_dirty: true,
             attributes: column_attributes(),
+            models_dirty: false,
         }
     }
 
@@ -199,10 +201,26 @@ impl ColumnLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if Self::models_changed(&self.props, &props) {
+            self.models_dirty = true;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
+    }
+
+    /// Whether the new props need the models rebuilt: which of fill, stroke and wireframe
+    /// exist, the tessellation, or anything the base props say about the pipeline.
+    fn models_changed(old: &ColumnLayerProps, new: &ColumnLayerProps) -> bool {
+        old.base.needs_new_model(&new.base)
+            || old.filled != new.filled
+            || old.stroked != new.stroked
+            || old.extruded != new.extruded
+            || old.wireframe != new.wireframe
+            || old.disk_resolution != new.disk_resolution
     }
 
     /// Whether the new props need the attributes rebuilt: everything except the props that
@@ -236,18 +254,16 @@ impl ColumnLayer {
             .into_iter()
             .flatten()
             .collect();
-        self.attributes.update_many(
-            &ctx.device,
-            &mut models,
-            data,
-            &[
-                ("position", AttributeSource::Positions(props.get_position.clone())),
-                ("elevation", AttributeSource::Floats(props.get_elevation.clone())),
-                ("fillColor", AttributeSource::Colors(props.get_fill_color.clone())),
-                ("lineColor", AttributeSource::Colors(props.get_line_color.clone())),
-                ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
-            ],
-        )?;
+        let mut sources = vec![
+            ("position", AttributeSource::Positions(props.get_position.clone())),
+            ("elevation", AttributeSource::Floats(props.get_elevation.clone())),
+            ("fillColor", AttributeSource::Colors(props.get_fill_color.clone())),
+            ("lineColor", AttributeSource::Colors(props.get_line_color.clone())),
+            ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
+        ];
+        sources.extend(props.base.extensions.sources());
+        self.attributes
+            .update_many(&ctx.device, &mut models, data, &sources)?;
         for model in models {
             model.set_instance_count(data.len() as u32);
         }
@@ -261,13 +277,19 @@ impl Layer for ColumnLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
+        self.fill = None;
+        self.stroke = None;
+        self.wireframe = None;
         let props = &self.props;
         let modules: Vec<ShaderModuleSource> = STANDARD_MODULES
             .iter()
             .chain(LIGHTING_MODULES.iter())
             .copied()
             .collect();
-        let shader = assemble_shader(&props.base.id, &modules, SHADER)?;
+        let extensions = &props.base.extensions;
+        let shader = extensions.assemble(&props.base.id, &modules, SHADER)?;
+        self.attributes = column_attributes();
+        self.attributes.extend(extensions.buffer_specs(&shader)?);
         let layouts = [VertexBufferLayout::interleaved(
             "geometry",
             std::mem::size_of::<GeometryVertex>() as u64,
@@ -319,11 +341,14 @@ impl Layer for ColumnLayer {
             self.wireframe = Some(wireframe);
         }
         self.data_dirty = true;
-        self.attributes.invalidate_all();
+        self.models_dirty = false;
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.models_dirty {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

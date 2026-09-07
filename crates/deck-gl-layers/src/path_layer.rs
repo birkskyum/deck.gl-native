@@ -3,14 +3,17 @@
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
-use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Path, Result, Unit, Viewport};
+use deck_gl::{
+    Accessor, Color, DeckError, ExtensionShaders, Layer, LayerContext, LayerData, LayerProps, Path, Result,
+    Unit, Viewport,
+};
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
-use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 use crate::path::{tesselate, TesselatedPaths};
 
-const SHADER: &str = include_str!("wgsl/path_layer.wgsl");
+pub(crate) const SHADER: &str = include_str!("wgsl/path_layer.wgsl");
 
 /// Per-instance stroke data, interleaved like deck.gl's `path-instance-data` buffer group.
 #[repr(C)]
@@ -158,15 +161,15 @@ pub(crate) fn upload_path_attributes(
     Ok(tesselated)
 }
 
-/// The path layer's vertex buffer layouts, plus any extra instance buffers of an extension.
+/// A model with the path shader and the path layer's vertex buffer layouts, plus the shader
+/// contributions and instance buffers a layer built on the path layer adds (`own`).
 pub(crate) fn path_model(
     ctx: &LayerContext,
     id: &str,
-    shader_source: &str,
-    extra_layouts: &[VertexBufferLayout],
+    own: &ExtensionShaders,
     base: &LayerProps,
 ) -> Result<Model> {
-    let shader = assemble_shader(id, &STANDARD_MODULES, shader_source)?;
+    let shader = base.extensions.assemble_own(id, &STANDARD_MODULES, SHADER, own)?;
     let position_stride = 24 * 4;
     let mut layouts = vec![
         VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
@@ -197,7 +200,19 @@ pub(crate) fn path_model(
             ],
         ),
     ];
-    layouts.extend_from_slice(extra_layouts);
+    for attribute in &own.attributes {
+        let location = shader
+            .attribute_location(attribute.name)
+            .ok_or_else(|| DeckError::Layer {
+                layer: id.to_string(),
+                message: format!("attribute `{}` was not assembled into the shader", attribute.name),
+            })?;
+        layouts.push(VertexBufferLayout::instance(
+            attribute.name,
+            location,
+            attribute.format,
+        ));
+    }
     let mut desc = ModelDescriptor::new(
         id,
         &shader,
@@ -258,7 +273,12 @@ impl Layer for PathLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = path_model(ctx, &self.props.base.id, SHADER, &[], &self.props.base)?;
+        let model = path_model(
+            ctx,
+            &self.props.base.id,
+            &ExtensionShaders::default(),
+            &self.props.base,
+        )?;
         self.model = Some(model);
         self.data_dirty = true;
         Ok(())

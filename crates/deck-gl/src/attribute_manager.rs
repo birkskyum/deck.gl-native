@@ -170,6 +170,12 @@ impl AttributeManager {
         }
     }
 
+    /// Add buffers (extension attributes, typically) after construction.
+    pub fn extend(&mut self, buffers: Vec<BufferSpec>) {
+        self.buffers.extend(buffers);
+        self.force = true;
+    }
+
     /// The vertex buffer layouts for the model, in declaration order.
     pub fn layouts(&self) -> Vec<VertexBufferLayout> {
         self.buffers.iter().map(BufferSpec::layout).collect()

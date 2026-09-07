@@ -1,16 +1,19 @@
 //! GPU integration tests: render each layer headlessly and check pixels.
 //! Skipped (with a message) when no GPU adapter is available.
 
+use std::any::Any;
 use std::sync::Arc;
 
+use deck_gl::attribute_manager::AttributeSource;
 use deck_gl::luma_gl::device::{
     create_headless_context, create_render_texture, read_texture_rgba8, HeadlessContext,
 };
-use deck_gl::luma_gl::RenderTarget;
+use deck_gl::luma_gl::{Model, RenderTarget, ShaderField, ShaderInjection, ShaderModuleSource};
 use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, ClickCallback, Deck, DeckProps, HoverCallback, Layer, LayerData, LayerProps, Material, Path,
-    PickingInfo, RenderParameters, Unit, ViewState,
+    same_extension, Accessor, ClickCallback, Deck, DeckProps, ExtensionAttribute, ExtensionShaders,
+    Extensions, HoverCallback, Layer, LayerContext, LayerData, LayerExtension, LayerProps, Material, Path,
+    PickingInfo, RenderParameters, Unit, ViewState, Viewport,
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
@@ -2272,4 +2275,104 @@ fn screen_grid_layer_bins_in_screen_space_and_follows_the_view() {
     let before: Vec<(u32, u32)> = bins.iter().map(|b| (b.col, b.row)).collect();
     assert!(!zoomed.is_empty());
     assert_ne!(zoomed, before, "cells move when the view changes");
+}
+
+/// A test extension: a per object `tintValues` attribute travels to the fragment stage as a
+/// varying and scales the colour there, together with a uniform from the extension's module.
+#[derive(Debug, PartialEq)]
+struct TintExtension {
+    get_tint: Accessor<f32>,
+    scale: f32,
+}
+
+const TINT_MODULE: ShaderModuleSource = ShaderModuleSource {
+    name: "tint",
+    source:
+        "struct TintUniforms { scale: f32, };\n@group(0) @binding(auto) var<uniform> tint: TintUniforms;\n",
+};
+
+impl LayerExtension for TintExtension {
+    fn name(&self) -> &'static str {
+        "TintExtension"
+    }
+
+    fn shaders(&self) -> ExtensionShaders {
+        ExtensionShaders {
+            modules: vec![TINT_MODULE],
+            injections: vec![
+                ShaderInjection::new("vs:#main-start", "tint_value = tintValues;"),
+                ShaderInjection::new(
+                    "fs:DECKGL_FILTER_COLOR",
+                    "color = vec4<f32>(color.rgb * tint_value * tint.scale, color.a);",
+                ),
+            ],
+            attributes: vec![ExtensionAttribute {
+                name: "tintValues",
+                format: wgpu::VertexFormat::Float32,
+            }],
+            varyings: vec![ShaderField {
+                name: "tint_value",
+                ty: "f32",
+            }],
+        }
+    }
+
+    fn attributes(&self) -> Vec<(&'static str, AttributeSource)> {
+        vec![("tintValues", AttributeSource::Floats(self.get_tint.clone()))]
+    }
+
+    fn update_uniforms(
+        &self,
+        model: &mut Model,
+        _ctx: &LayerContext,
+        _viewport: &Viewport,
+    ) -> deck_gl::Result<()> {
+        model.uniforms("tint")?.set_f32("scale", self.scale)?;
+        Ok(())
+    }
+
+    fn equals(&self, other: &dyn LayerExtension) -> bool {
+        same_extension(self, other)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+fn tinted_circles(scale: f32) -> Box<dyn Layer> {
+    let d = 0.0007;
+    Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+        base: LayerProps {
+            extensions: Extensions::from_one(TintExtension {
+                get_tint: Accessor::func(|i| if i == 0 { 1.0 } else { 0.0 }),
+                scale,
+            }),
+            ..LayerProps::new("tinted")
+        },
+        data: LayerData::with_length(2),
+        get_position: Accessor::func(move |i| [CENTER[0] + if i == 0 { -d } else { d }, CENTER[1], 0.0]),
+        get_radius: Accessor::Constant(8.0),
+        radius_units: Unit::Pixels,
+        get_fill_color: Accessor::Constant([200, 100, 0, 255]),
+        antialiasing: false,
+        ..Default::default()
+    }))
+}
+
+#[test]
+fn extensions_add_attributes_varyings_uniforms_and_hook_code() {
+    let Some(ctx) = context() else { return };
+    let pixels = render(&ctx, vec![tinted_circles(0.5)]);
+    let c = SIZE / 2;
+    // tint 1 times the uniform scale of 0.5
+    assert_pixel(&pixels, c - 16, c, [100, 50, 0, 255], 2);
+    // tint 0
+    assert_pixel(&pixels, c + 16, c, [0, 0, 0, 255], 2);
+
+    // A new extension instance with other options rebuilds the model with the new uniforms.
+    let mut deck = make_deck(&ctx, vec![tinted_circles(0.5)]);
+    deck.set_layers(vec![tinted_circles(1.0)]);
+    let snapshot = deck.snapshot(Some(wgpu::Color::TRANSPARENT)).expect("snapshot");
+    assert_pixel(&snapshot.rgba, c - 16, c, [200, 100, 0, 255], 2);
 }

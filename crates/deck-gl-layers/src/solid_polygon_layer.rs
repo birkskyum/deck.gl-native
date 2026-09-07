@@ -8,7 +8,7 @@ use deck_gl::{
     Accessor, Color, CoordinateSystem, Layer, LayerContext, LayerData, LayerProps, Polygon, Result, Viewport,
 };
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from, split_f64};
-use luma_gl::{assemble_shader, Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 use crate::polygon::tesselate;
@@ -245,7 +245,11 @@ impl Layer for SolidPolygonLayer {
         let wireframe_label = format!("{id}-wireframe");
 
         if self.props.filled {
-            let top_shader = assemble_shader(&format!("{id}-top"), &modules, &format!("{COMMON}\n{TOP}"))?;
+            let top_shader = self.props.base.extensions.assemble_without_attributes(
+                &top_label,
+                &modules,
+                &format!("{COMMON}\n{TOP}"),
+            )?;
             let layouts = [
                 VertexBufferLayout::vertex("vertexPositions", 0, VertexFormat::Float32x3),
                 VertexBufferLayout::vertex("vertexPositions64Low", 1, VertexFormat::Float32x3),
@@ -265,7 +269,11 @@ impl Layer for SolidPolygonLayer {
         }
 
         if self.props.extruded {
-            let side_shader = assemble_shader(&format!("{id}-side"), &modules, &format!("{COMMON}\n{SIDE}"))?;
+            let side_shader = self.props.base.extensions.assemble_without_attributes(
+                &side_label,
+                &modules,
+                &format!("{COMMON}\n{SIDE}"),
+            )?;
             let layouts = [
                 VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
                 VertexBufferLayout::instance("vertexPositions", 1, VertexFormat::Float32x3),

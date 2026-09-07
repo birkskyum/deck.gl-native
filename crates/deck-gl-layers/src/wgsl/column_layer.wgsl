@@ -73,6 +73,7 @@ struct Varyings {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var varyings: Varyings;
+  deckgl_vertex_start(attributes);
 
   geometry.worldPosition = attributes.instancePositions;
   geometry.pickingColor = picking_getPickingColorFromIndex(attributes.instanceIndex);
@@ -110,7 +111,8 @@ fn vertexMain(attributes: Attributes) -> Varyings {
       attributes.instancePositions.xy,
       attributes.instancePositions.z + elevation
     );
-  let offset = getOffset(attributes.positions, strokeOffsetRatio, dotRadius, rotationMatrix);
+  var offset = getOffset(attributes.positions, strokeOffsetRatio, dotRadius, rotationMatrix);
+  offset = deckgl_filter_size(offset, geometry);
   let projected = project_position_to_clipspace_and_commonspace(
     centroidPosition,
     attributes.instancePositions64Low,
@@ -128,18 +130,22 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   );
 
   varyings.position = projected.clipPosition;
+  varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
   varyings.color = vec4<f32>(
     select(baseColor.rgb, lightColor, column.extruded > 0.5 && !isStroke),
     baseColor.a * layer.opacity
   );
+  varyings.color = deckgl_filter_color(varyings.color, geometry);
   varyings.pickingColor = geometry.pickingColor;
 
+  deckgl_vertex_end(&varyings);
   return varyings;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
-  geometry.uv = vec2<f32>(0.0);
+  deckgl_fragment_start(varyings);
+  fragmentGeometry.uv = vec2<f32>(0.0);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(varyings.pickingColor)) {
@@ -149,6 +155,7 @@ fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
   }
 
   var fragColor = varyings.color;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
   if (picking.isHighlightActive > 0.5) {
     let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);
     if (picking_isColorZero(abs(varyings.pickingColor - highlightedObjectColor))) {

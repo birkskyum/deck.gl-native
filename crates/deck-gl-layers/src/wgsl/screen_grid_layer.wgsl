@@ -28,6 +28,7 @@ struct Varyings {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var varyings: Varyings;
+  deckgl_vertex_start(attributes);
   geometry.pickingColor = picking_getPickingColorFromIndex(attributes.rowIndexes);
 
   let logicalSize = project.viewportSize / project.devicePixelRatio;
@@ -36,21 +37,25 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   let size = vec2<f32>(max(screenGrid.cellSizePixels - 2.0 * screenGrid.cellMarginPixels, 0.0));
   let pixel = origin + attributes.positions * size;
   let ndc = vec2<f32>(pixel.x / logicalSize.x * 2.0 - 1.0, 1.0 - pixel.y / logicalSize.y * 2.0);
-  varyings.position = vec4<f32>(ndc, 0.0, 1.0);
+  varyings.position = deckgl_filter_gl_position(vec4<f32>(ndc, 0.0, 1.0), geometry);
   varyings.vColor = vec4<f32>(attributes.instanceColors.rgb, attributes.instanceColors.a * layer.opacity);
+  varyings.vColor = deckgl_filter_color(varyings.vColor, geometry);
   varyings.pickingColor = geometry.pickingColor;
+  deckgl_vertex_end(&varyings);
   return varyings;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(varyings);
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(varyings.pickingColor)) {
       discard;
     }
     return vec4<f32>(varyings.pickingColor, 1.0);
   }
-  var fragColor = deckgl_premultiplied_alpha(varyings.vColor);
+  var fragColor = deckgl_filter_fragment_color(varyings.vColor, fragmentGeometry);
+  fragColor = deckgl_premultiplied_alpha(fragColor);
   if (picking.isHighlightActive > 0.5) {
     let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);
     if (picking_isColorZero(abs(varyings.pickingColor - highlightedObjectColor))) {

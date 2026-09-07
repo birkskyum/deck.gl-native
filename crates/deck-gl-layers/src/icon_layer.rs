@@ -12,7 +12,7 @@ use deck_gl::{
 };
 use glam::Vec2;
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 use crate::BitmapImage;
@@ -215,7 +215,12 @@ impl IconLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base) {
+            self.model = None;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -277,34 +282,31 @@ impl IconLayer {
                 .collect(),
         );
         let (frames, modes, offsets) = (lookups.clone(), lookups.clone(), lookups);
-        self.attributes.update(
-            &ctx.device,
-            model,
-            data,
-            &[
-                ("position", AttributeSource::Positions(props.get_position.clone())),
-                ("size", AttributeSource::Floats(props.get_size.clone())),
-                ("angle", AttributeSource::Floats(props.get_angle.clone())),
-                ("color", AttributeSource::Colors(props.get_color.clone())),
-                (
-                    "frame",
-                    AttributeSource::Vec4(Accessor::Func(Arc::new(move |i| frames[i].frame))),
-                ),
-                (
-                    "colorMode",
-                    AttributeSource::Floats(Accessor::Func(Arc::new(move |i| modes[i].color_mode))),
-                ),
-                (
-                    "offset",
-                    AttributeSource::Vec2(Accessor::Func(Arc::new(move |i| offsets[i].offset))),
-                ),
-                (
-                    "pixelOffset",
-                    AttributeSource::Vec2(props.get_pixel_offset.clone()),
-                ),
-                ("rowIndex", AttributeSource::RowIndex),
-            ],
-        )?;
+        let mut sources = vec![
+            ("position", AttributeSource::Positions(props.get_position.clone())),
+            ("size", AttributeSource::Floats(props.get_size.clone())),
+            ("angle", AttributeSource::Floats(props.get_angle.clone())),
+            ("color", AttributeSource::Colors(props.get_color.clone())),
+            (
+                "frame",
+                AttributeSource::Vec4(Accessor::Func(Arc::new(move |i| frames[i].frame))),
+            ),
+            (
+                "colorMode",
+                AttributeSource::Floats(Accessor::Func(Arc::new(move |i| modes[i].color_mode))),
+            ),
+            (
+                "offset",
+                AttributeSource::Vec2(Accessor::Func(Arc::new(move |i| offsets[i].offset))),
+            ),
+            (
+                "pixelOffset",
+                AttributeSource::Vec2(props.get_pixel_offset.clone()),
+            ),
+            ("rowIndex", AttributeSource::RowIndex),
+        ];
+        sources.extend(props.base.extensions.sources());
+        self.attributes.update(&ctx.device, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())
     }
@@ -316,7 +318,10 @@ impl Layer for IconLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        let extensions = &self.props.base.extensions;
+        let shader = extensions.assemble(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        self.attributes = icon_attributes();
+        self.attributes.extend(extensions.buffer_specs(&shader)?);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -342,11 +347,13 @@ impl Layer for IconLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
-        self.attributes.invalidate_all();
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.model.is_none() {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

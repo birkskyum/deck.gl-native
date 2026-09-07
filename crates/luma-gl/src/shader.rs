@@ -5,6 +5,19 @@
 //! This assembler concatenates module sources, assigns concrete binding slots, moves every
 //! uniform into bind group 0, and then parses the result with naga to discover the layout of
 //! each uniform struct so that [`crate::UniformBlock`]s can be written by field name.
+//!
+//! It also generates the shader hooks that layer shaders call so that extensions can inject
+//! code (luma.gl's `vs:DECKGL_FILTER_COLOR` and friends). WGSL has no preprocessor, no
+//! function overloading and no `inout` parameters, so the convention differs from GLSL:
+//!
+//! - a [`ShaderHook`] is a plain function taking the filtered value and returning it, whose body
+//!   is generated from the [`ShaderInjection`]s registered for it;
+//! - extension vertex attributes and varyings are appended to the main shader's `Attributes`
+//!   and `Varyings` structs with the next free `@location`, and mirrored in module scope
+//!   `var<private>` variables of the same name so injected code can read and write them;
+//! - the generated `deckgl_vertex_start(attributes)`, `deckgl_vertex_end(&varyings)` and
+//!   `deckgl_fragment_start(varyings)` functions move those values in and out of the structs
+//!   and host the `#main-start` and `#main-end` injections.
 
 use std::collections::BTreeSet;
 
@@ -14,11 +27,86 @@ use regex::Regex;
 use crate::{LumaError, Result};
 
 /// A named WGSL source fragment. Mirrors luma.gl's `ShaderModule.source`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShaderModuleSource {
     pub name: &'static str,
     pub source: &'static str,
 }
+
+/// A function the layer shader calls so that extensions can modify a value on its way through
+/// the shader. Mirrors luma.gl's shader hooks (`vs:DECKGL_FILTER_COLOR(inout vec4 color, ...)`):
+/// the assembler generates the function from the injections registered under `key`. WGSL has
+/// no `inout`, so the hook takes the value and returns the filtered one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShaderHook {
+    /// Injection key, for example `vs:DECKGL_FILTER_COLOR`.
+    pub key: &'static str,
+    /// WGSL function name, for example `deckgl_filter_color`.
+    pub function: &'static str,
+    /// Name of the filtered value inside injected code, for example `color`.
+    pub value: &'static str,
+    /// WGSL type of the value.
+    pub value_type: &'static str,
+    /// Further parameters the hook takes, for example `geometry: Geometry`. May be empty.
+    pub context: &'static str,
+}
+
+/// Code an extension inserts into a layer shader. `hook` is a [`ShaderHook::key`] or one of
+/// the fixed points `vs:#decl`, `vs:#main-start`, `vs:#main-end`, `fs:#decl` and
+/// `fs:#main-start`. Declarations land in module scope; the others inside the generated
+/// `deckgl_vertex_start`, `deckgl_vertex_end` and `deckgl_fragment_start` functions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShaderInjection {
+    pub hook: &'static str,
+    pub code: String,
+    /// Injections at the same hook run in ascending order, equal orders in registration order.
+    pub order: i32,
+}
+
+impl ShaderInjection {
+    pub fn new(hook: &'static str, code: impl Into<String>) -> Self {
+        Self {
+            hook,
+            code: code.into(),
+            order: 0,
+        }
+    }
+
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = order;
+        self
+    }
+}
+
+/// A field an extension appends to the layer shader's `Attributes` struct (a vertex attribute)
+/// or `Varyings` struct (a value interpolated from the vertex to the fragment stage). The field
+/// is also available as a module scope variable of the same name inside injected code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShaderField {
+    pub name: &'static str,
+    /// WGSL type, for example `f32` or `vec2<f32>`.
+    pub ty: &'static str,
+}
+
+/// Everything [`assemble`] combines into one WGSL shader.
+#[derive(Clone, Copy, Debug)]
+pub struct ShaderAssembly<'a> {
+    pub label: &'a str,
+    pub modules: &'a [ShaderModuleSource],
+    pub main: &'a str,
+    pub hooks: &'a [ShaderHook],
+    pub injections: &'a [ShaderInjection],
+    pub attributes: &'a [ShaderField],
+    pub varyings: &'a [ShaderField],
+}
+
+const FIXED_INJECTION_POINTS: [&str; 5] = [
+    "vs:#decl",
+    "vs:#main-start",
+    "vs:#main-end",
+    "fs:#decl",
+    "fs:#main-start",
+];
 
 /// Kind of a uniform struct field, as far as the writer needs to know.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,13 +178,15 @@ pub struct ResourceBinding {
     pub kind: ResourceKind,
 }
 
-/// Result of [`assemble_shader`].
+/// Result of [`assemble`].
 #[derive(Clone, Debug)]
 pub struct AssembledShader {
     pub label: String,
     pub wgsl: String,
     pub uniforms: Vec<UniformBinding>,
     pub resources: Vec<ResourceBinding>,
+    /// Shader locations assigned to the extension attributes, in declaration order.
+    pub attribute_locations: Vec<(String, u32)>,
 }
 
 impl AssembledShader {
@@ -107,22 +197,52 @@ impl AssembledShader {
     pub fn resource(&self, name: &str) -> Option<&ResourceBinding> {
         self.resources.iter().find(|r| r.name == name)
     }
+
+    /// The `@location` an extension attribute was appended at.
+    pub fn attribute_location(&self, name: &str) -> Option<u32> {
+        self.attribute_locations
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, location)| *location)
+    }
 }
 
 /// Concatenate shader modules and the main shader, resolve `@binding(auto)`, and extract
-/// uniform block layouts.
+/// uniform block layouts. [`assemble`] without hooks or extensions.
 pub fn assemble_shader(label: &str, modules: &[ShaderModuleSource], main: &str) -> Result<AssembledShader> {
+    assemble(&ShaderAssembly {
+        label,
+        modules,
+        main,
+        hooks: &[],
+        injections: &[],
+        attributes: &[],
+        varyings: &[],
+    })
+}
+
+/// Concatenate shader modules, the generated hooks and the main shader, resolve
+/// `@binding(auto)`, and extract uniform block layouts.
+pub fn assemble(assembly: &ShaderAssembly<'_>) -> Result<AssembledShader> {
+    let label = assembly.label;
+    // Sources checked out with CRLF line endings must still match exact text anchors.
+    let main = assembly.main.replace("\r\n", "\n");
+    let (main, attribute_locations) = append_fields(&main, "Attributes", assembly.attributes, false, label)?;
+    let (main, _) = append_fields(&main, "Varyings", assembly.varyings, true, label)?;
+    let hooks = generate_hooks(assembly, &main)?;
+
     let mut wgsl = String::new();
-    for module in modules {
+    for module in assembly.modules {
         wgsl.push_str(&format!("// ---- module: {} ----\n", module.name));
         wgsl.push_str(module.source);
         wgsl.push('\n');
     }
+    wgsl.push_str("// ---- shader hooks ----\n");
+    wgsl.push_str(&hooks);
     wgsl.push_str("// ---- main shader ----\n");
-    wgsl.push_str(main);
+    wgsl.push_str(&main);
     wgsl.push('\n');
 
-    // Sources checked out with CRLF line endings must still match exact text anchors.
     let wgsl = resolve_bindings(&wgsl.replace("\r\n", "\n"));
 
     let module = naga::front::wgsl::parse_str(&wgsl)
@@ -204,7 +324,166 @@ pub fn assemble_shader(label: &str, modules: &[ShaderModuleSource], main: &str) 
         wgsl,
         uniforms,
         resources,
+        attribute_locations,
     })
+}
+
+fn has_struct(wgsl: &str, name: &str) -> bool {
+    struct_regex(name).is_match(wgsl)
+}
+
+fn struct_regex(name: &str) -> Regex {
+    #[allow(clippy::expect_used)] // literal pattern around an identifier
+    Regex::new(&format!(r"\bstruct\s+{name}\s*\{{")).expect("regex")
+}
+
+fn is_integer_type(ty: &str) -> bool {
+    let ty = ty.trim();
+    ty == "u32" || ty == "i32" || ty.ends_with("<u32>") || ty.ends_with("<i32>")
+}
+
+/// Append `fields` to the `struct <name>` of `main` with the next free `@location`s. Varyings
+/// of integer type get `@interpolate(flat)`, as WGSL requires. Returns the new source and the
+/// assigned locations.
+fn append_fields(
+    main: &str,
+    name: &str,
+    fields: &[ShaderField],
+    varying: bool,
+    label: &str,
+) -> Result<(String, Vec<(String, u32)>)> {
+    if fields.is_empty() {
+        return Ok((main.to_string(), Vec::new()));
+    }
+    let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
+    let Some(found) = struct_regex(name).find(main) else {
+        return Err(LumaError::Shader(format!(
+            "{label}: the shader has no `{name}` struct to add {} to",
+            names.join(", ")
+        )));
+    };
+    let body_start = found.end();
+    let Some(body_len) = main[body_start..].find('}') else {
+        return Err(LumaError::Shader(format!(
+            "{label}: unterminated `{name}` struct"
+        )));
+    };
+    let body = &main[body_start..body_start + body_len];
+    #[allow(clippy::expect_used)] // literal pattern
+    let location = Regex::new(r"@location\((\d+)\)").expect("regex");
+    let first_free = location
+        .captures_iter(body)
+        .filter_map(|c| c[1].parse::<u32>().ok())
+        .max()
+        .map_or(0, |max| max + 1);
+
+    let kept = body.trim_end();
+    let mut insert = String::new();
+    if !kept.is_empty() && !kept.ends_with(',') {
+        insert.push(',');
+    }
+    insert.push('\n');
+    let mut locations = Vec::with_capacity(fields.len());
+    for (i, field) in fields.iter().enumerate() {
+        let slot = first_free + i as u32;
+        let interpolate = if varying && is_integer_type(field.ty) {
+            "@interpolate(flat) "
+        } else {
+            ""
+        };
+        insert.push_str(&format!(
+            "  @location({slot}) {interpolate}{}: {},\n",
+            field.name, field.ty
+        ));
+        locations.push((field.name.to_string(), slot));
+    }
+    let mut out = String::with_capacity(main.len() + insert.len());
+    out.push_str(&main[..body_start + kept.len()]);
+    out.push_str(&insert);
+    out.push_str(&main[body_start + body_len..]);
+    Ok((out, locations))
+}
+
+/// The generated hook section: private mirrors of the extension fields, declarations, the
+/// stage entry helpers and one function per hook.
+fn generate_hooks(assembly: &ShaderAssembly<'_>, main: &str) -> Result<String> {
+    let label = assembly.label;
+    let mut injections: Vec<&ShaderInjection> = assembly.injections.iter().collect();
+    injections.sort_by_key(|i| i.order);
+    for injection in &injections {
+        let known = FIXED_INJECTION_POINTS.contains(&injection.hook)
+            || assembly.hooks.iter().any(|h| h.key == injection.hook);
+        if !known {
+            return Err(LumaError::Shader(format!(
+                "{label}: unknown shader hook `{}`",
+                injection.hook
+            )));
+        }
+    }
+    let at = |hook: &str, indent: &str| -> String {
+        injections
+            .iter()
+            .filter(|i| i.hook == hook)
+            .map(|i| format!("{indent}{}\n", i.code.trim()))
+            .collect()
+    };
+    let has_attributes = has_struct(main, "Attributes");
+    let has_varyings = has_struct(main, "Varyings");
+
+    let mut out = String::new();
+    for field in assembly.attributes.iter().chain(assembly.varyings) {
+        out.push_str(&format!("var<private> {}: {};\n", field.name, field.ty));
+    }
+    out.push_str(&at("vs:#decl", ""));
+    out.push_str(&at("fs:#decl", ""));
+
+    if has_attributes {
+        out.push_str("fn deckgl_vertex_start(attributes: Attributes) {\n");
+        for field in assembly.attributes {
+            out.push_str(&format!("  {0} = attributes.{0};\n", field.name));
+        }
+        out.push_str(&at("vs:#main-start", "  "));
+        out.push_str("}\n");
+    } else if injections.iter().any(|i| i.hook == "vs:#main-start") {
+        return Err(LumaError::Shader(format!(
+            "{label}: `vs:#main-start` needs an `Attributes` struct in the shader"
+        )));
+    }
+    if has_varyings {
+        out.push_str("fn deckgl_vertex_end(varyings: ptr<function, Varyings>) {\n");
+        out.push_str(&at("vs:#main-end", "  "));
+        for field in assembly.varyings {
+            out.push_str(&format!("  (*varyings).{0} = {0};\n", field.name));
+        }
+        out.push_str("}\n");
+        out.push_str("fn deckgl_fragment_start(varyings: Varyings) {\n");
+        for field in assembly.varyings {
+            out.push_str(&format!("  {0} = varyings.{0};\n", field.name));
+        }
+        out.push_str(&at("fs:#main-start", "  "));
+        out.push_str("}\n");
+    } else if injections
+        .iter()
+        .any(|i| i.hook == "vs:#main-end" || i.hook == "fs:#main-start")
+    {
+        return Err(LumaError::Shader(format!(
+            "{label}: `vs:#main-end` and `fs:#main-start` need a `Varyings` struct in the shader"
+        )));
+    }
+    for hook in assembly.hooks {
+        let context = if hook.context.trim().is_empty() {
+            String::new()
+        } else {
+            format!(", {}", hook.context)
+        };
+        out.push_str(&format!(
+            "fn {}({1}_in: {2}{context}) -> {2} {{\n  var {1} = {1}_in;\n",
+            hook.function, hook.value, hook.value_type
+        ));
+        out.push_str(&at(hook.key, "  "));
+        out.push_str(&format!("  return {};\n}}\n", hook.value));
+    }
+    Ok(out)
 }
 
 fn classify(inner: &TypeInner) -> UniformKind {
@@ -303,6 +582,138 @@ struct BUniforms { m: mat4x4<f32>, v: vec2<f32>, };
         assert_eq!(b.layout.field("m").unwrap().kind, UniformKind::Mat4F);
         assert_eq!(b.layout.field("v").unwrap().offset, 64);
         assert_eq!(b.layout.size, 80);
+    }
+
+    const HOOKED_MAIN: &str = r#"
+struct Attributes {
+  @builtin(instance_index) instanceIndex: u32,
+  @location(0) p: vec3<f32>,
+  @location(3) c: vec4<f32>
+};
+struct Varyings {
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec4<f32>,
+};
+@vertex fn vertexMain(attributes: Attributes) -> Varyings {
+  var varyings: Varyings;
+  deckgl_vertex_start(attributes);
+  varyings.position = filter_position(vec4<f32>(attributes.p, 1.0));
+  varyings.color = attributes.c;
+  deckgl_vertex_end(&varyings);
+  return varyings;
+}
+@fragment fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(varyings);
+  return filter_color(varyings.color, 2.0) * f32(id);
+}
+"#;
+
+    const HOOKS: [ShaderHook; 2] = [
+        ShaderHook {
+            key: "vs:POSITION",
+            function: "filter_position",
+            value: "position",
+            value_type: "vec4<f32>",
+            context: "",
+        },
+        ShaderHook {
+            key: "fs:COLOR",
+            function: "filter_color",
+            value: "color",
+            value_type: "vec4<f32>",
+            context: "scale: f32",
+        },
+    ];
+
+    #[test]
+    fn generates_hooks_and_extension_fields() {
+        let injections = [
+            ShaderInjection::new(
+                "vs:POSITION",
+                "position = vec4<f32>(position.xy * tint, position.zw);",
+            ),
+            ShaderInjection::new("fs:COLOR", "color = color * scale * tint;").with_order(1),
+            ShaderInjection::new("fs:COLOR", "color = color + extra.offset;").with_order(-1),
+            ShaderInjection::new("vs:#main-start", "tint = weight * 2.0; id = 1u;"),
+            ShaderInjection::new(
+                "vs:#decl",
+                "struct Extra { offset: vec4<f32> };\n@group(0) @binding(auto) var<uniform> extra: Extra;",
+            ),
+        ];
+        let shader = assemble(&ShaderAssembly {
+            label: "hooked",
+            modules: &[],
+            main: HOOKED_MAIN,
+            hooks: &HOOKS,
+            injections: &injections,
+            attributes: &[ShaderField {
+                name: "weight",
+                ty: "f32",
+            }],
+            varyings: &[
+                ShaderField {
+                    name: "tint",
+                    ty: "f32",
+                },
+                ShaderField {
+                    name: "id",
+                    ty: "u32",
+                },
+            ],
+        })
+        .unwrap();
+        assert_eq!(shader.attribute_location("weight"), Some(4));
+        assert!(shader.wgsl.contains("@location(4) weight: f32,"));
+        assert!(shader.wgsl.contains("@location(1) tint: f32,"));
+        assert!(shader.wgsl.contains("@location(2) @interpolate(flat) id: u32,"));
+        assert!(shader.wgsl.contains("var<private> weight: f32;"));
+        assert!(shader
+            .wgsl
+            .contains("  weight = attributes.weight;\n  tint = weight * 2.0; id = 1u;"));
+        assert!(shader.wgsl.contains("(*varyings).tint = tint;"));
+        assert!(shader
+            .wgsl
+            .contains("fn filter_position(position_in: vec4<f32>) -> vec4<f32> {"));
+        assert!(shader
+            .wgsl
+            .contains("fn filter_color(color_in: vec4<f32>, scale: f32) -> vec4<f32> {"));
+        let offset = shader.wgsl.find("color = color + extra.offset;").unwrap();
+        let scale = shader.wgsl.find("color = color * scale * tint;").unwrap();
+        assert!(offset < scale, "injections run in `order`");
+        assert_eq!(shader.uniform("extra").unwrap().layout.size, 16);
+    }
+
+    #[test]
+    fn rejects_unknown_hooks_and_missing_structs() {
+        let bad_hook = assemble(&ShaderAssembly {
+            label: "bad",
+            modules: &[],
+            main: HOOKED_MAIN,
+            hooks: &HOOKS,
+            injections: &[ShaderInjection::new("vs:NOPE", "")],
+            attributes: &[],
+            varyings: &[],
+        });
+        assert!(bad_hook
+            .unwrap_err()
+            .to_string()
+            .contains("unknown shader hook `vs:NOPE`"));
+        let no_struct = assemble(&ShaderAssembly {
+            label: "bad",
+            modules: &[],
+            main: MAIN,
+            hooks: &[],
+            injections: &[],
+            attributes: &[ShaderField {
+                name: "weight",
+                ty: "f32",
+            }],
+            varyings: &[],
+        });
+        assert!(no_struct
+            .unwrap_err()
+            .to_string()
+            .contains("no `Attributes` struct"));
     }
 
     #[test]

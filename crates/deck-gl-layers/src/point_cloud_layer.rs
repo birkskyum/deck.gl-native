@@ -8,7 +8,7 @@ use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, ShaderModuleSource, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/point_cloud_layer.wgsl");
@@ -89,7 +89,12 @@ impl PointCloudLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base) {
+            self.model = None;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -109,16 +114,13 @@ impl PointCloudLayer {
         let props = &self.props;
         let data = &props.data;
         let model = initialized(self.model.as_mut(), &props.base.id)?;
-        self.attributes.update(
-            &ctx.device,
-            model,
-            data,
-            &[
-                ("position", AttributeSource::Positions(props.get_position.clone())),
-                ("normal", AttributeSource::Vec3(props.get_normal.clone())),
-                ("color", AttributeSource::Colors(props.get_color.clone())),
-            ],
-        )?;
+        let mut sources = vec![
+            ("position", AttributeSource::Positions(props.get_position.clone())),
+            ("normal", AttributeSource::Vec3(props.get_normal.clone())),
+            ("color", AttributeSource::Colors(props.get_color.clone())),
+        ];
+        sources.extend(props.base.extensions.sources());
+        self.attributes.update(&ctx.device, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())
     }
@@ -135,7 +137,10 @@ impl Layer for PointCloudLayer {
             .chain(LIGHTING_MODULES.iter())
             .copied()
             .collect();
-        let shader = assemble_shader(&self.props.base.id, &modules, SHADER)?;
+        let extensions = &self.props.base.extensions;
+        let shader = extensions.assemble(&self.props.base.id, &modules, SHADER)?;
+        self.attributes = point_cloud_attributes();
+        self.attributes.extend(extensions.buffer_specs(&shader)?);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -166,11 +171,13 @@ impl Layer for PointCloudLayer {
         model.set_vertex_count(3);
         self.model = Some(model);
         self.data_dirty = true;
-        self.attributes.invalidate_all();
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.model.is_none() {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

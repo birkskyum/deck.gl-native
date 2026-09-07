@@ -45,6 +45,7 @@ struct Varyings {
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var varyings: Varyings;
+  deckgl_vertex_start(attributes);
 
   geometry.worldPosition = attributes.instancePositions;
 
@@ -62,15 +63,15 @@ fn vertexMain(attributes: Attributes) -> Varyings {
   geometry.pickingColor = picking_getPickingColorFromIndex(attributes.instanceIndex);
 
   // Find the center of the point and add the current vertex
-  let offset = vec3<f32>(
+  var offset = vec3<f32>(
     attributes.positions.xy *
       project_unit_size_to_pixel(pointCloudUniforms.radiusPixels, pointCloudUniforms.sizeUnits),
     0.0
   );
-  // DECKGL_FILTER_SIZE(offset, geometry);
+  offset = deckgl_filter_size(offset, geometry);
 
   varyings.position = centerResult.clipPosition;
-  // DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
+  varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
   let clipPixels = project_pixel_size_to_clipspace(offset.xy);
   varyings.position.x += clipPixels.x;
   varyings.position.y += clipPixels.y;
@@ -80,16 +81,17 @@ fn vertexMain(attributes: Attributes) -> Varyings {
 
   // Apply opacity to instance color, or return instance picking color
   varyings.vColor = vec4(lightColor, attributes.instanceColors.a * layer.opacity);
-  // DECKGL_FILTER_COLOR(vColor, geometry);
+  varyings.vColor = deckgl_filter_color(varyings.vColor, geometry);
   varyings.pickingColor = geometry.pickingColor;
 
+  deckgl_vertex_end(&varyings);
   return varyings;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
-  // var geometry: Geometry;
-  // geometry.uv = unitPosition.xy;
+  deckgl_fragment_start(varyings);
+  fragmentGeometry.uv = varyings.unitPosition;
 
   let distToCenter = length(varyings.unitPosition);
   if (distToCenter > 1.0) {
@@ -99,6 +101,7 @@ fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
   var fragColor: vec4<f32>;
 
   fragColor = varyings.vColor;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(varyings.pickingColor)) {

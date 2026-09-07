@@ -14,7 +14,7 @@ use deck_gl::{
 };
 use glam::Vec2;
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{create_rgba8_texture, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 use crate::text::{transform_paragraph, CharacterSet, FontAtlas, FontSettings, WordBreak};
@@ -450,7 +450,11 @@ impl TextLayer {
     }
 
     fn create_character_model(&self, ctx: &LayerContext, id: &str, extra_bias: i32) -> Result<Model> {
-        let shader = assemble_shader(id, &STANDARD_MODULES, CHARACTERS_SHADER)?;
+        let shader = self.props.base.extensions.assemble_without_attributes(
+            id,
+            &STANDARD_MODULES,
+            CHARACTERS_SHADER,
+        )?;
         let layouts = [
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
             VertexBufferLayout::interleaved(
@@ -499,7 +503,11 @@ impl TextLayer {
 
     fn create_background_model(&self, ctx: &LayerContext) -> Result<Model> {
         let id = format!("{}-background", self.props.base.id);
-        let shader = assemble_shader(&id, &STANDARD_MODULES, BACKGROUND_SHADER)?;
+        let shader = self.props.base.extensions.assemble_without_attributes(
+            &id,
+            &STANDARD_MODULES,
+            BACKGROUND_SHADER,
+        )?;
         let layouts = [
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
             VertexBufferLayout::interleaved(

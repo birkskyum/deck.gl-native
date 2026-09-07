@@ -10,7 +10,7 @@ use deck_gl::layer::{initialized, set_model_picking_active, update_standard_unif
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Viewport};
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 use crate::aggregation::{
@@ -215,7 +215,11 @@ impl Layer for ScreenGridLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        let shader = self.props.base.extensions.assemble_without_attributes(
+            &self.props.base.id,
+            &STANDARD_MODULES,
+            SHADER,
+        )?;
         let layouts = [
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
             VertexBufferLayout::interleaved(

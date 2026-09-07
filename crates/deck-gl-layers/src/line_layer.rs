@@ -7,7 +7,7 @@ use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/line_layer.wgsl");
@@ -87,9 +87,13 @@ impl LineLayer {
         &self.props
     }
 
-    /// Replace the props. Attributes are rebuilt on the next update when they changed.
+    /// Replace the props. Attributes are rebuilt on the next update when they changed, the
+    /// model when the pipeline state or the extensions changed.
     pub fn set_props(&mut self, props: LineLayerProps) {
         if self.props != props {
+            if self.props.base.needs_new_model(&props.base) {
+                self.model = None;
+            }
             self.props = props;
             self.data_dirty = true;
         }
@@ -98,23 +102,21 @@ impl LineLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let model = initialized(self.model.as_mut(), &props.base.id)?;
-        self.attributes.update(
-            &ctx.device,
-            model,
-            &props.data,
-            &[
-                (
-                    "source",
-                    AttributeSource::Positions(props.get_source_position.clone()),
-                ),
-                (
-                    "target",
-                    AttributeSource::Positions(props.get_target_position.clone()),
-                ),
-                ("color", AttributeSource::Colors(props.get_color.clone())),
-                ("width", AttributeSource::Floats(props.get_width.clone())),
-            ],
-        )?;
+        let mut sources = vec![
+            (
+                "source",
+                AttributeSource::Positions(props.get_source_position.clone()),
+            ),
+            (
+                "target",
+                AttributeSource::Positions(props.get_target_position.clone()),
+            ),
+            ("color", AttributeSource::Colors(props.get_color.clone())),
+            ("width", AttributeSource::Floats(props.get_width.clone())),
+        ];
+        sources.extend(props.base.extensions.sources());
+        self.attributes
+            .update(&ctx.device, model, &props.data, &sources)?;
         model.set_instance_count(props.data.len() as u32);
         Ok(())
     }
@@ -126,7 +128,10 @@ impl Layer for LineLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        let extensions = &self.props.base.extensions;
+        let shader = extensions.assemble(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
+        self.attributes = line_attributes();
+        self.attributes.extend(extensions.buffer_specs(&shader)?);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -157,11 +162,13 @@ impl Layer for LineLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
-        self.attributes.invalidate_all();
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.model.is_none() {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

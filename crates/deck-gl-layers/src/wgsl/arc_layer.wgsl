@@ -134,6 +134,7 @@ fn vertexMain(
   @builtin(vertex_index) vertexIndex: u32,
   @builtin(instance_index) instanceIndex: u32
 ) -> Varyings {
+  deckgl_vertex_start(attributes);
   geometry.worldPosition = attributes.instanceSourcePositions;
   geometry.worldPositionAlt = attributes.instanceTargetPositions;
 
@@ -298,29 +299,36 @@ fn vertexMain(
     arc.widthMinPixels,
     arc.widthMaxPixels
   );
-  let offset = getExtrusionOffset(
+  var offset = vec3<f32>(getExtrusionOffset(
     (nextClip.xy - currentClip.xy) * indexDirection,
     segmentSide,
     widthPixels
-  );
+  ), 0.0);
+  offset = deckgl_filter_size(offset, geometry);
+  currentClip = deckgl_filter_gl_position(currentClip, geometry);
 
   var output: Varyings;
-  output.position = currentClip + vec4<f32>(project_pixel_size_to_clipspace(offset), 0.0, 0.0);
+  output.position = currentClip + vec4<f32>(project_pixel_size_to_clipspace(offset.xy), 0.0, 0.0);
   let color = mix(attributes.instanceSourceColors, attributes.instanceTargetColors, segmentRatio);
   output.color = vec4<f32>(color.rgb, color.a * layer.opacity);
+  output.color = deckgl_filter_color(output.color, geometry);
   output.uv = geometry.uv;
   output.pickingColor = geometry.pickingColor;
   output.isValid = isValid;
+  deckgl_vertex_end(&output);
   return output;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(varyings);
+  fragmentGeometry.uv = varyings.uv;
   if (varyings.isValid == 0.0) {
     discard;
   }
 
   var color = varyings.color;
+  color = deckgl_filter_fragment_color(color, fragmentGeometry);
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(varyings.pickingColor)) {
       discard;

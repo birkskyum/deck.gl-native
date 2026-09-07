@@ -5,14 +5,6 @@
 
 // ---------- Helper Structures & Functions ----------
 
-// Placeholder filter functions.
-fn deckgl_filter_size(offset: vec3<f32>, geometry: Geometry) -> vec3<f32> {
-  return offset;
-}
-fn deckgl_filter_gl_position(p: vec4<f32>, geometry: Geometry) -> vec4<f32> {
-  return p;
-}
-
 // Compute an extrusion offset given a line direction (in clipspace),
 // an offset direction (-1 or 1), and a width in pixels.
 fn getExtrusionOffset(line_clipspace: vec2<f32>, offset_direction: f32, width: f32) -> vec2<f32> {
@@ -53,8 +45,7 @@ struct Varyings {
 
 // ---------- Vertex Shader Entry Point ----------
 
-@vertex
-fn vertexMain(
+struct Attributes {
   @builtin(instance_index) instanceIndex: u32,
   @location(0) positions: vec3<f32>,
   @location(1) instanceSourcePositions: vec3<f32>,
@@ -62,8 +53,21 @@ fn vertexMain(
   @location(3) instanceSourcePositions64Low: vec3<f32>,
   @location(4) instanceTargetPositions64Low: vec3<f32>,
   @location(5) instanceColors: vec4<f32>,
-  @location(6) instanceWidths: f32
-) -> Varyings {
+  @location(6) instanceWidths: f32,
+};
+
+@vertex
+fn vertexMain(attributes: Attributes) -> Varyings {
+  deckgl_vertex_start(attributes);
+  let instanceIndex = attributes.instanceIndex;
+  let positions = attributes.positions;
+  let instanceSourcePositions = attributes.instanceSourcePositions;
+  let instanceTargetPositions = attributes.instanceTargetPositions;
+  let instanceSourcePositions64Low = attributes.instanceSourcePositions64Low;
+  let instanceTargetPositions64Low = attributes.instanceTargetPositions64Low;
+  let instanceColors = attributes.instanceColors;
+  let instanceWidths = attributes.instanceWidths;
+
   geometry.worldPosition = instanceSourcePositions;
   geometry.worldPositionAlt = instanceTargetPositions;
 
@@ -131,27 +135,26 @@ fn vertexMain(
 
   // Compute color.
   var vColor: vec4<f32> = vec4<f32>(instanceColors.rgb, instanceColors.a * layer.opacity);
+  vColor = deckgl_filter_color(vColor, geometry);
 
   var output: Varyings;
   output.gl_Position = finalPosition;
   output.vColor = vColor;
   output.uv = uv;
   output.pickingColor = geometry.pickingColor;
+  deckgl_vertex_end(&output);
   return output;
 }
 
 @fragment
-fn fragmentMain(
-  @location(0) vColor: vec4<f32>,
-  @location(1) uv: vec2<f32>,
-  @location(2) pickingColor: vec3<f32>
-) -> @location(0) vec4<f32> {
-  // Create and initialize geometry with the provided uv.
-  var geometry: Geometry;
-  geometry.uv = uv;
+fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
+  deckgl_fragment_start(varyings);
+  let pickingColor = varyings.pickingColor;
+  fragmentGeometry.uv = varyings.uv;
 
   // Start with the input color.
-  var fragColor: vec4<f32> = vColor;
+  var fragColor: vec4<f32> = varyings.vColor;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
 
   if (picking.isActive > 0.5) {
     if (!picking_isColorValid(pickingColor)) {

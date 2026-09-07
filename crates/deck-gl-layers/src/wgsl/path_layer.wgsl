@@ -163,6 +163,7 @@ fn getLineJoinOffset(
 @vertex
 fn vertexMain(attributes: Attributes) -> Varyings {
   var varyings: Varyings;
+  deckgl_vertex_start(attributes);
 
   geometry.pickingColor = picking_getPickingColorFromIndex(attributes.rowIndexes);
 
@@ -215,10 +216,12 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     );
 
     geometry.uv = join.pathPosition;
+    let offset = deckgl_filter_size(join.offset, geometry);
     varyings.position = vec4<f32>(
-      currPositionScreen.xyz + join.offset * currPositionScreen.w,
+      currPositionScreen.xyz + offset * currPositionScreen.w,
       currPositionScreen.w
     );
+    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
     varyings.vCornerOffset = join.cornerOffset;
     varyings.vMiterLength = join.miterLength;
     varyings.vPathPosition = join.pathPosition;
@@ -242,9 +245,11 @@ fn vertexMain(attributes: Attributes) -> Varyings {
       attributes.instanceTypes
     );
 
-    geometry.position = vec4<f32>(currPositionCommon + join.offset, 1.0);
     geometry.uv = join.pathPosition;
+    let offset = deckgl_filter_size(join.offset, geometry);
+    geometry.position = vec4<f32>(currPositionCommon + offset, 1.0);
     varyings.position = project_common_position_to_clipspace(geometry.position);
+    varyings.position = deckgl_filter_gl_position(varyings.position, geometry);
     varyings.vCornerOffset = join.cornerOffset;
     varyings.vMiterLength = join.miterLength;
     varyings.vPathPosition = join.pathPosition;
@@ -256,13 +261,16 @@ fn vertexMain(attributes: Attributes) -> Varyings {
     attributes.instanceColors.rgb,
     attributes.instanceColors.a * layer.opacity
   );
+  varyings.vColor = deckgl_filter_color(varyings.vColor, geometry);
   varyings.pickingColor = geometry.pickingColor;
+  deckgl_vertex_end(&varyings);
   return varyings;
 }
 
 @fragment
 fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
-  geometry.uv = varyings.vPathPosition;
+  deckgl_fragment_start(varyings);
+  fragmentGeometry.uv = varyings.vPathPosition;
 
   if (varyings.vPathPosition.y < 0.0 || varyings.vPathPosition.y > varyings.vPathLength) {
     if (varyings.vJointType > 0.5 && length(varyings.vCornerOffset) > 1.0) {
@@ -281,6 +289,7 @@ fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> {
   }
 
   var fragColor = varyings.vColor;
+  fragColor = deckgl_filter_fragment_color(fragColor, fragmentGeometry);
   if (picking.isHighlightActive > 0.5) {
     let highlightedObjectColor = picking_normalizeColor(picking.highlightedObjectColor);
     if (picking_isColorZero(abs(varyings.pickingColor - highlightedObjectColor))) {

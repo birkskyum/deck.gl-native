@@ -3,53 +3,49 @@
 
 use deck_gl::data::resolve_f32_lists;
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
-use deck_gl::{Accessor, DeckError, Layer, LayerContext, LayerProps, Result, Viewport};
+use deck_gl::{
+    Accessor, ExtensionAttribute, ExtensionShaders, Layer, LayerContext, LayerProps, Result, Viewport,
+};
 use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{Model, VertexBufferLayout};
+use luma_gl::{Model, ShaderField, ShaderInjection, ShaderModuleSource};
 use wgpu::VertexFormat;
 
 use crate::path_layer::{path_model, upload_path_attributes, write_path_uniforms, PathLayer, PathLayerProps};
 
-const PATH_SHADER: &str = include_str!("wgsl/path_layer.wgsl");
+const TRIPS_MODULE: ShaderModuleSource = ShaderModuleSource {
+    name: "trips",
+    source: "struct TripsUniforms {\n  fadeTrail: f32,\n  trailLength: f32,\n  currentTime: f32,\n};\n@group(0) @binding(auto) var<uniform> trips: TripsUniforms;\n",
+};
 
-/// deck.gl's WGSL injections for the trips layer, applied to the path shader source.
-const INJECTIONS: [(&str, &str); 5] = [
-    (
-        "@group(0) @binding(auto)",
-        "struct TripsUniforms {\n  fadeTrail: f32,\n  trailLength: f32,\n  currentTime: f32,\n};\n\n@group(0) @binding(auto) var<uniform> trips: TripsUniforms;\n\n@group(0) @binding(auto)",
-    ),
-    (
-        "  @location(12) rowIndexes: u32,",
-        "  @location(12) rowIndexes: u32,\n  @location(13) instanceTimestamps: vec2<f32>,",
-    ),
-    (
-        "  @location(6) pickingColor: vec3<f32>,",
-        "  @location(6) pickingColor: vec3<f32>,\n  @location(7) vTime: f32,",
-    ),
-    (
-        "    attributes.instanceColors.a * layer.opacity\n  );",
-        "    attributes.instanceColors.a * layer.opacity\n  );\n\n  varyings.vTime = mix(\n    attributes.instanceTimestamps.x,\n    attributes.instanceTimestamps.y,\n    varyings.vPathPosition.y / varyings.vPathLength\n  );\n\n  if (trips.fadeTrail > 0.5) {\n    varyings.vColor.a *=\n      1.0 - (trips.currentTime - varyings.vTime) / trips.trailLength;\n  }",
-    ),
-    (
-        "  geometry.uv = varyings.vPathPosition;",
-        "  geometry.uv = varyings.vPathPosition;\n\n  if (\n    varyings.vTime > trips.currentTime ||\n    (trips.fadeTrail > 0.5 && varyings.vTime < trips.currentTime - trips.trailLength)\n  ) {\n    discard;\n  }",
-    ),
-];
-
-/// The path shader with the trips injections applied.
-pub fn trips_shader() -> Result<String> {
-    // Windows checkouts may carry CRLF line endings; anchors are written with LF.
-    let mut source = PATH_SHADER.replace("\r\n", "\n");
-    for (anchor, replacement) in INJECTIONS {
-        if !source.contains(anchor) {
-            return Err(DeckError::Layer {
-                layer: "TripsLayer".into(),
-                message: format!("path shader anchor not found: {anchor:?}"),
-            });
-        }
-        source = source.replacen(anchor, replacement, 1);
+/// deck.gl's trips layer injections into the path shader, at the shader hooks: a timestamp
+/// pair per instance, the interpolated time as a varying, and the fragment stage discarding
+/// what is not travelled yet and fading the trail.
+pub fn trips_shaders() -> ExtensionShaders {
+    ExtensionShaders {
+        modules: vec![TRIPS_MODULE],
+        injections: vec![
+            ShaderInjection::new(
+                "vs:#main-end",
+                "vTime = mix(instanceTimestamps.x, instanceTimestamps.y, (*varyings).vPathPosition.y / (*varyings).vPathLength);",
+            ),
+            ShaderInjection::new(
+                "fs:#main-start",
+                "if (vTime > trips.currentTime || (trips.fadeTrail > 0.5 && vTime < trips.currentTime - trips.trailLength)) {\n    discard;\n  }",
+            ),
+            ShaderInjection::new(
+                "fs:DECKGL_FILTER_COLOR",
+                "if (trips.fadeTrail > 0.5) {\n    color.a *= 1.0 - (trips.currentTime - vTime) / trips.trailLength;\n  }",
+            ),
+        ],
+        attributes: vec![ExtensionAttribute {
+            name: "instanceTimestamps",
+            format: VertexFormat::Float32x2,
+        }],
+        varyings: vec![ShaderField {
+            name: "vTime",
+            ty: "f32",
+        }],
     }
-    Ok(source)
 }
 
 /// Pack timestamps in the padded instance order the path tesselator uses (after deck.gl's
@@ -171,13 +167,10 @@ impl Layer for TripsLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = trips_shader()?;
-        let timestamps = VertexBufferLayout::instance("instanceTimestamps", 13, VertexFormat::Float32x2);
         let model = path_model(
             ctx,
             &self.props.path.base.id,
-            &shader,
-            &[timestamps],
+            &trips_shaders(),
             &self.props.path.base,
         )?;
         self.model = Some(model);
@@ -261,10 +254,22 @@ mod tests {
 
     #[test]
     fn shader_injections_apply() {
-        let source = trips_shader().unwrap();
-        assert!(source.contains("var<uniform> trips: TripsUniforms"));
-        assert!(source.contains("@location(13) instanceTimestamps"));
-        assert!(source.contains("varyings.vTime = mix("));
-        assert!(source.contains("discard;"));
+        let shader = deck_gl::Extensions::default()
+            .assemble_own(
+                "trips",
+                &deck_gl::shaderlib::STANDARD_MODULES,
+                crate::path_layer::SHADER,
+                &trips_shaders(),
+            )
+            .unwrap();
+        assert_eq!(shader.attribute_location("instanceTimestamps"), Some(13));
+        assert!(shader.wgsl.contains("var<uniform> trips: TripsUniforms"));
+        assert!(shader
+            .wgsl
+            .contains("@location(13) instanceTimestamps: vec2<f32>,"));
+        assert!(shader.wgsl.contains("@location(7) vTime: f32,"));
+        assert!(shader.wgsl.contains("vTime = mix("));
+        assert!(shader.wgsl.contains("discard;"));
+        assert!(shader.uniform("trips").is_some());
     }
 }
