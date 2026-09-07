@@ -58,7 +58,15 @@ fn fetch(url: &str, options: &ConvertOptions) -> Result<Vec<u8>> {
         },
         None => Fetcher::global().fetch_blocking(url),
     };
-    result.map(|bytes| (*bytes).clone()).map_err(load_error)
+    match result {
+        Ok(bytes) => Ok((*bytes).clone()),
+        // In a browser a blocking fetch cannot block, so a URL that has not arrived yet is
+        // pending rather than failed and the conversion is repeated on a later frame.
+        Err(message) if deck_gl_layers::fetch::is_still_loading(&message) => {
+            Err(JsonError::Pending { url: url.to_string() })
+        }
+        Err(message) => Err(load_error(message)),
+    }
 }
 
 /// A JSON prop that is either inline or a string pointing at a JSON document. CSV, TSV and

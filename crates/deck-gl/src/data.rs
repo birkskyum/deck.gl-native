@@ -413,11 +413,12 @@ fn resolve_function<T: Clone + Send>(
     offset: usize,
     len: usize,
 ) -> Vec<T> {
-    if len < PARALLEL_ROWS {
-        return (offset..offset + len).map(f).collect();
+    #[cfg(feature = "parallel")]
+    if len >= PARALLEL_ROWS {
+        use rayon::prelude::*;
+        return (offset..offset + len).into_par_iter().map(f).collect();
     }
-    use rayon::prelude::*;
-    (offset..offset + len).into_par_iter().map(f).collect()
+    (offset..offset + len).map(f).collect()
 }
 
 /// The WKB bytes of every row of a binary column, when the column is one.

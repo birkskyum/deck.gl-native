@@ -1,0 +1,44 @@
+# Its own workspace: a wasm32 cdylib, not part of the native build.
+[workspace]
+
+[package]
+name = "deck-gl-web"
+description = "deck.gl-native in a browser: a wasm module that draws layers from a JSON description"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+authors = ["Birk Skyum"]
+repository = "https://github.com/birkskyum/deck.gl-native"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+deck-gl = { path = "../../crates/deck-gl", default-features = false }
+deck-gl-layers = { path = "../../crates/deck-gl-layers", default-features = false, features = ["fetch"] }
+deck-gl-json = { path = "../../crates/deck-gl-json", default-features = false, features = ["fetch"] }
+wgpu = "30"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+serde_json = "1"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "HtmlCanvasElement",
+  "WebGl2RenderingContext",
+  "Window",
+]
+
+[features]
+default = []
+# Draw with WebGL2 instead of WebGPU, for the maplibre-gl-js custom layer.
+webgl = ["deck-gl/webgl", "deck-gl-layers/webgl", "deck-gl-json/webgl", "wgpu/webgl"]
+
+[profile.release]
+opt-level = "s"
+lto = true

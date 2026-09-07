@@ -319,13 +319,68 @@ pub fn assemble(assembly: &ShaderAssembly<'_>) -> Result<AssembledShader> {
     uniforms.sort_by_key(|u| u.binding);
     resources.sort_by_key(|r| r.binding);
 
-    Ok(AssembledShader {
+    let shader = AssembledShader {
         label: label.to_string(),
         wgsl,
         uniforms,
         resources,
         attribute_locations,
-    })
+    };
+    if std::env::var_os("LUMA_GL_CHECK_GLSL").is_some() {
+        to_glsl(&shader)?;
+    }
+    Ok(shader)
+}
+
+/// Lower an assembled shader to GLSL ES 3.00, the dialect WebGL2 speaks, returning one source
+/// per entry point.
+///
+/// wgpu's WebGL2 backend does this itself when it builds a pipeline, so this is not needed to
+/// run. It is here so that a shader that cannot reach WebGL2 fails a test on any machine
+/// rather than only in a browser. Setting `LUMA_GL_CHECK_GLSL` runs it on every shader
+/// [`assemble`] produces.
+pub fn to_glsl(shader: &AssembledShader) -> Result<Vec<(String, String)>> {
+    let label = &shader.label;
+    let module = naga::front::wgsl::parse_str(&shader.wgsl)
+        .map_err(|e| LumaError::Shader(format!("{label}: {}", e.emit_to_string(&shader.wgsl))))?;
+    // The capabilities WebGL2 offers: no more than the base set.
+    let info = naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    )
+    .validate(&module)
+    .map_err(|e| LumaError::Shader(format!("{label}: {}", e.emit_to_string(&shader.wgsl))))?;
+
+    let options = naga::back::glsl::Options {
+        version: naga::back::glsl::Version::Embedded {
+            version: 300,
+            is_webgl: true,
+        },
+        ..Default::default()
+    };
+    let mut sources = Vec::with_capacity(module.entry_points.len());
+    for entry_point in &module.entry_points {
+        let pipeline_options = naga::back::glsl::PipelineOptions {
+            shader_stage: entry_point.stage,
+            entry_point: entry_point.name.clone(),
+            multiview: None,
+        };
+        let mut glsl = String::new();
+        let mut writer = naga::back::glsl::Writer::new(
+            &mut glsl,
+            &module,
+            &info,
+            &options,
+            &pipeline_options,
+            naga::proc::BoundsCheckPolicies::default(),
+        )
+        .map_err(|e| LumaError::Shader(format!("{label}: {} is not WebGL2 ready: {e}", entry_point.name)))?;
+        writer.write().map_err(|e| {
+            LumaError::Shader(format!("{label}: {} is not WebGL2 ready: {e}", entry_point.name))
+        })?;
+        sources.push((entry_point.name.clone(), glsl));
+    }
+    Ok(sources)
 }
 
 fn has_struct(wgsl: &str, name: &str) -> bool {
@@ -729,5 +784,44 @@ struct Varyings {
         assert_eq!(shader.resource("tex").unwrap().binding, 0);
         assert_eq!(shader.resource("texSampler").unwrap().kind, ResourceKind::Sampler);
         assert_eq!(shader.resource("texSampler").unwrap().binding, 1);
+    }
+}
+
+#[cfg(test)]
+mod glsl_tests {
+    use super::*;
+
+    const MAIN: &str = r#"
+struct Attributes { @location(0) position: vec2<f32> };
+struct Varyings { @builtin(position) clip: vec4<f32>, @location(0) color: vec4<f32> };
+@vertex fn vertexMain(attributes: Attributes) -> Varyings {
+  return Varyings(vec4<f32>(attributes.position, 0.0, 1.0), vec4<f32>(1.0));
+}
+@fragment fn fragmentMain(varyings: Varyings) -> @location(0) vec4<f32> { return varyings.color; }
+"#;
+
+    #[test]
+    fn lowers_to_webgl2_glsl() {
+        let shader = assemble_shader("glsl", &[], MAIN).unwrap();
+        let sources = to_glsl(&shader).unwrap();
+        assert_eq!(sources.len(), 2);
+        for (entry, source) in &sources {
+            assert!(source.starts_with("#version 300 es"), "{entry}: {source}");
+        }
+    }
+
+    #[test]
+    fn reports_what_webgl2_cannot_do() {
+        // Storage buffers are a WebGPU feature; GLSL ES 3.00 has no equivalent.
+        let main = format!(
+            "@group(0) @binding(auto) var<storage, read> values: array<f32>;\n{}",
+            MAIN.replace("vec4<f32>(1.0)", "vec4<f32>(values[0])")
+        );
+        // With `LUMA_GL_CHECK_GLSL` set, `assemble` reports it itself; without, `to_glsl` does
+        let error = match assemble_shader("storage", &[], &main) {
+            Ok(shader) => to_glsl(&shader).unwrap_err().to_string(),
+            Err(e) => e.to_string(),
+        };
+        assert!(error.contains("not WebGL2 ready"), "{error}");
     }
 }

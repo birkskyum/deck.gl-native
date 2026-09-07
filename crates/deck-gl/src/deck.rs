@@ -74,6 +74,14 @@ pub struct DeckProps {
     /// The kind of camera: a map by default, or an orthographic, orbit or first person view.
     /// With a non map view, set the camera with [`Deck::set_any_view_state`].
     pub view: View,
+    /// Upload an attribute whose accessors are all constant as a single element that every
+    /// instance reads, rather than one element per row. Saves the upload and the memory, and
+    /// is what deck.gl does.
+    ///
+    /// It works by giving the vertex buffer a zero stride, which every backend but OpenGL
+    /// reads as "every instance reads element zero". OpenGL reads a zero stride as "tightly
+    /// packed", so a host drawing through wgpu's GL or WebGL2 backend must set this to false.
+    pub constant_attributes: bool,
 }
 
 impl Default for DeckProps {
@@ -90,6 +98,7 @@ impl Default for DeckProps {
             clip_depth_range: ClipDepthRange::default(),
             repeat: false,
             view: View::Map,
+            constant_attributes: true,
         }
     }
 }
@@ -171,7 +180,7 @@ pub struct Deck {
     /// One colour and depth target per collision group, kept across frames
     collision_targets: HashMap<String, CollisionTarget>,
     /// When the deck was created, the origin of its own clock
-    created: std::time::Instant,
+    created: web_time::Instant,
     /// The time of the last `tick`, which replaces the deck's own clock once used
     now: Option<f64>,
     /// Post-processing effects applied after the layers, in order
@@ -205,6 +214,7 @@ impl Deck {
             layer_index: 0,
             depth_bias_base: props.depth_bias_base,
             clip_depth_range: props.clip_depth_range,
+            constant_attributes: props.constant_attributes,
             uniform_slot: 0,
             pointer: None,
             masks: Some(masks.clone()),
@@ -251,7 +261,7 @@ impl Deck {
             mask_textures: HashMap::new(),
             collisions,
             collision_targets: HashMap::new(),
-            created: std::time::Instant::now(),
+            created: web_time::Instant::now(),
             now: None,
             post_process: props.post_process,
             post_processor: PostProcessor::default(),
@@ -1676,7 +1686,7 @@ impl Deck {
         depth_load: wgpu::LoadOp<f32>,
     ) -> Result<()> {
         luma_gl::stats::reset();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         self.update()?;
         let update_ms = started.elapsed().as_secs_f64() * 1000.0;
         let size = color_view.texture().size();
@@ -1764,7 +1774,7 @@ impl Deck {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        let draw_started = std::time::Instant::now();
+        let draw_started = web_time::Instant::now();
         let mut result = self.draw(&mut pass);
         drop(pass);
         if post && result.is_ok() {

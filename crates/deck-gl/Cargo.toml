@@ -9,7 +9,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-rayon = { workspace = true }
+web-time = { workspace = true }
+rayon = { workspace = true, optional = true }
 tracing = { workspace = true }
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
@@ -25,6 +26,11 @@ serde_json = { workspace = true }
 image = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["parallel"]
+# Spread big uploads and tessellation over the cores with rayon. Off for wasm32, which has
+# no threads to spread over.
+parallel = ["dep:rayon"]
 # `Snapshot::save_png`
 png = ["dep:image"]
+# Draw through wgpu's WebGL2 backend, see `luma-gl`.
+webgl = ["luma-gl/webgl", "wgpu/webgl"]

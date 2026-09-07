@@ -8,8 +8,17 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["parallel"]
+# Spread big uploads and tessellation over the cores with rayon. Off for wasm32, which has
+# no threads to spread over.
+parallel = ["dep:rayon"]
+# Draw through wgpu's WebGL2 backend rather than WebGPU. naga lowers the WGSL to GLSL ES 3.00,
+# which every layer shader is checked against by `LUMA_GL_CHECK_GLSL=1`.
+webgl = ["wgpu/webgl"]
+
 [dependencies]
-rayon = { workspace = true }
+rayon = { workspace = true, optional = true }
 tracing = { workspace = true }
 wgpu = { workspace = true }
 naga = { workspace = true }

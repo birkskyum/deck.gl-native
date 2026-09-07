@@ -172,6 +172,11 @@ type LoadOutcome = Option<std::result::Result<Option<TileData>, String>>;
 struct LoadPool {
     queue: LoadQueue,
     results: Receiver<(TileIndex, LoadOutcome)>,
+    /// wasm32 has no worker threads, so the pool keeps the loader and runs it itself
+    #[cfg(target_arch = "wasm32")]
+    loader: TileLoader,
+    #[cfg(target_arch = "wasm32")]
+    sender: Sender<(TileIndex, LoadOutcome)>,
     /// Generation of the loader; results from older loaders are dropped
     generation: u64,
     /// Tokens of the tiles queued or loading, deck.gl's `AbortController` per tile
@@ -186,6 +191,11 @@ impl LoadPool {
             AtomicBool::new(false),
         ));
         let (tx, results) = channel();
+        #[cfg(target_arch = "wasm32")]
+        let (pool_loader, pool_sender) = (loader.clone(), tx.clone());
+        #[cfg(target_arch = "wasm32")]
+        let _ = workers;
+        #[cfg(not(target_arch = "wasm32"))]
         for _ in 0..workers.max(1) {
             let queue = queue.clone();
             let tx: Sender<(TileIndex, LoadOutcome)> = tx.clone();
@@ -226,9 +236,42 @@ impl LoadPool {
         Self {
             queue,
             results,
+            #[cfg(target_arch = "wasm32")]
+            loader: pool_loader,
+            #[cfg(target_arch = "wasm32")]
+            sender: pool_sender,
             generation,
             tokens: HashMap::new(),
         }
+    }
+
+    /// wasm32: run the queued loads on the main thread. A load whose bytes have not arrived
+    /// yet says so rather than failing, and stays queued for a later frame; the browser is
+    /// meanwhile fetching them. Off the web the worker threads do this.
+    #[cfg(target_arch = "wasm32")]
+    fn pump(&mut self) {
+        let (lock, _, _) = &*self.queue;
+        let jobs: Vec<(TileIndex, TileBounds, CancelToken)> = {
+            let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+            queue.drain(..).collect()
+        };
+        let mut waiting = VecDeque::new();
+        for (index, bounds, cancel) in jobs {
+            if cancel.is_cancelled() {
+                self.sender.send((index, None)).ok();
+                continue;
+            }
+            match (self.loader.0)(index, bounds, &cancel) {
+                Err(message) if crate::fetch::is_still_loading(&message) => {
+                    waiting.push_back((index, bounds, cancel));
+                }
+                outcome => {
+                    self.sender.send((index, Some(outcome))).ok();
+                }
+            }
+        }
+        let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+        queue.extend(waiting);
     }
 
     fn submit(&mut self, index: TileIndex, bounds: TileBounds) {
@@ -381,6 +424,8 @@ impl TileLayer {
                 self.tileset.set_status(index, TileStatus::Pending, false);
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        pool.pump();
         let mut changed = false;
         while let Ok((index, outcome)) = pool.results.try_recv() {
             if pool.generation != self.generation {

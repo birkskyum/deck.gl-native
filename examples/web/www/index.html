@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deck.gl-native in a browser</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <canvas id="deck"></canvas>
+    <div id="panel">
+      <h1>deck.gl-native</h1>
+      <p id="blurb">
+        The Rust crates compiled to wasm, drawing through <span id="backend">WebGPU</span>.
+        Drag to pan, hold shift to tilt and turn, scroll to zoom.
+      </p>
+      <label for="demo">Scene</label>
+      <select id="demo"></select>
+      <p id="status"></p>
+    </div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

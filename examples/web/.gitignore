@@ -1,0 +1,4 @@
+# built by build.sh: the wasm-bindgen output and the scenes copied from examples/json
+www/pkg/
+www/scenes/
+/target

@@ -8,10 +8,26 @@
 //! request when nothing else wants it. The fetcher's [`generation`](Fetcher::generation)
 //! moves every time a request finishes, so a frame loop can poll it cheaply and rebuild
 //! what depended on the data.
+//!
+//! On wasm32 there are no threads to pool and nothing may block the main thread, so each
+//! request becomes a browser `fetch` that settles it when it resolves. The cache, the
+//! deduplication, the counters and the generation are the same; what changes is that
+//! [`Fetcher::fetch_blocking`] cannot block, and reports [`STILL_LOADING`] instead so the
+//! caller asks again on a later frame.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+
+/// What a blocking fetch reports on wasm32 while the browser is still loading the URL:
+/// there is no thread to block on, so the caller asks again on a later frame rather than
+/// treating the load as failed.
+pub const STILL_LOADING: &str = "still loading";
+
+/// Whether an error message is [`STILL_LOADING`] rather than a real failure.
+pub fn is_still_loading(message: &str) -> bool {
+    message.ends_with(STILL_LOADING)
+}
 
 /// Cancels a load. Clones share the flag.
 #[derive(Clone, Debug, Default)]
@@ -252,7 +268,10 @@ struct Inner {
     counters: Mutex<Counters>,
     loading: AtomicUsize,
     generation: AtomicU64,
+    /// How many worker threads to start; a browser loads through its own `fetch` instead
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     workers: usize,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     spawned: AtomicBool,
     /// Live `Fetcher` handles; the workers stop when the last one is dropped
     handles: AtomicUsize,
@@ -280,6 +299,7 @@ impl Inner {
 
     /// Take the next request that was not cancelled while queued; `None` once the last
     /// `Fetcher` handle is gone.
+    #[cfg(not(target_arch = "wasm32"))]
     fn next(&self) -> Option<Arc<Request>> {
         let mut queue = self.queue();
         loop {
@@ -321,6 +341,36 @@ impl Inner {
         });
     }
 
+    /// wasm32: one browser `fetch` per request, settling it when it resolves.
+    #[cfg(target_arch = "wasm32")]
+    fn start(inner: Arc<Inner>, request: Arc<Request>) {
+        {
+            let mut state = request.lock();
+            if state.0 == FetchStatus::Queued {
+                state.0 = FetchStatus::Loading;
+            }
+        }
+        inner.loading.fetch_add(1, Ordering::SeqCst);
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = browser_get(&request.url, inner.max_bytes).await;
+            inner.loading.fetch_sub(1, Ordering::SeqCst);
+            match result {
+                Ok(bytes) => {
+                    let bytes = Arc::new(bytes);
+                    inner
+                        .cache()
+                        .insert(&request.url, bytes.clone(), inner.cache_limit);
+                    inner.settle(&request, FetchStatus::Done, Ok(bytes));
+                }
+                Err(message) if request.cancel.is_cancelled() => {
+                    inner.settle(&request, FetchStatus::Cancelled, Err(message))
+                }
+                Err(message) => inner.settle(&request, FetchStatus::Failed, Err(message)),
+            }
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn work(inner: Arc<Inner>) {
         while let Some(request) = inner.next() {
             {
@@ -441,9 +491,14 @@ impl Fetcher {
         let request = Request::new(url, FetchStatus::Queued, None);
         inflight.insert(url.to_string(), request.clone());
         drop(inflight);
-        self.spawn_workers();
-        self.inner.queue().push_back(request.clone());
-        self.inner.wake.notify_one();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.spawn_workers();
+            self.inner.queue().push_back(request.clone());
+            self.inner.wake.notify_one();
+        }
+        #[cfg(target_arch = "wasm32")]
+        Inner::start(self.inner.clone(), request.clone());
         FetchHandle {
             request,
             fetcher: Some(self.inner.clone()),
@@ -452,11 +507,37 @@ impl Fetcher {
 
     /// Ask for a URL and block until it arrived. Loads through the pool, so other requests
     /// go on meanwhile and the bytes end up in the cache.
+    #[cfg(target_arch = "wasm32")]
+    pub fn fetch_blocking(&self, url: &str) -> FetchResult {
+        self.fetch_now(url)
+    }
+
+    /// Ask for a URL and block until it arrived. Loads through the pool, so other requests
+    /// go on meanwhile and the bytes end up in the cache.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn fetch_blocking(&self, url: &str) -> FetchResult {
         self.fetch(url).wait()
     }
 
+    /// The wasm32 form of a blocking fetch: hand back what already arrived, and otherwise
+    /// start the browser loading it and say [`STILL_LOADING`].
+    #[cfg(target_arch = "wasm32")]
+    fn fetch_now(&self, url: &str) -> FetchResult {
+        let handle = self.fetch(url);
+        handle
+            .result()
+            .unwrap_or_else(|| Err(format!("{url}: {STILL_LOADING}")))
+    }
+
     /// Like [`fetch_blocking`](Self::fetch_blocking), giving up when `cancel` is set.
+    #[cfg(target_arch = "wasm32")]
+    pub fn fetch_blocking_with(&self, url: &str, _cancel: &CancelToken) -> FetchResult {
+        // Nothing to wait on, so nothing to cancel: a load simply stops being asked for
+        self.fetch_now(url)
+    }
+
+    /// Like [`fetch_blocking`](Self::fetch_blocking), giving up when `cancel` is set.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn fetch_blocking_with(&self, url: &str, cancel: &CancelToken) -> FetchResult {
         let handle = self.fetch(url);
         let mut state = handle.request.lock();
@@ -533,6 +614,7 @@ impl Fetcher {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn spawn_workers(&self) {
         if self.inner.spawned.swap(true, Ordering::SeqCst) {
             return;
@@ -559,8 +641,61 @@ impl Drop for Fetcher {
     }
 }
 
+/// GET a URL through the browser's `fetch`. There is no chunked reading here: a browser
+/// response arrives whole, so the size limit is checked once the bytes are in hand.
+#[cfg(all(target_arch = "wasm32", feature = "fetch"))]
+async fn browser_get(url: &str, max_bytes: usize) -> std::result::Result<Vec<u8>, String> {
+    use wasm_bindgen::JsCast;
+
+    fn describe(value: &wasm_bindgen::JsValue) -> String {
+        value
+            .as_string()
+            .or_else(|| js_sys::Reflect::get(value, &"message".into()).ok()?.as_string())
+            .unwrap_or_else(|| "fetch failed".to_string())
+    }
+
+    let global = js_sys::global();
+    let fetch = js_sys::Reflect::get(&global, &"fetch".into())
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+        .ok_or_else(|| format!("{url}: this JavaScript environment has no fetch"))?;
+    let promise = fetch
+        .call1(&global, &url.into())
+        .map_err(|e| format!("{url}: {}", describe(&e)))?
+        .dyn_into::<js_sys::Promise>()
+        .map_err(|_| format!("{url}: fetch did not return a promise"))?;
+    let response = wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("{url}: {}", describe(&e)))?
+        .dyn_into::<web_sys::Response>()
+        .map_err(|_| format!("{url}: fetch did not resolve to a response"))?;
+    if !response.ok() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    let buffer = response
+        .array_buffer()
+        .map_err(|e| format!("{url}: {}", describe(&e)))?;
+    let buffer = wasm_bindgen_futures::JsFuture::from(buffer)
+        .await
+        .map_err(|e| format!("{url}: {}", describe(&e)))?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "{url}: {} bytes is more than the {max_bytes} byte limit",
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Without the `fetch` feature nothing reaches the network, on the web as elsewhere.
+#[cfg(all(target_arch = "wasm32", not(feature = "fetch")))]
+async fn browser_get(url: &str, _max_bytes: usize) -> std::result::Result<Vec<u8>, String> {
+    Err(format!("{url}: built without the `fetch` feature"))
+}
+
 /// GET a URL, reading in chunks so a cancelled request stops early.
-#[cfg(feature = "fetch")]
+#[cfg(all(feature = "fetch", not(target_arch = "wasm32")))]
 fn http_get(url: &str, cancel: &CancelToken, max_bytes: usize) -> std::result::Result<Vec<u8>, String> {
     use std::io::Read;
     if cancel.is_cancelled() {

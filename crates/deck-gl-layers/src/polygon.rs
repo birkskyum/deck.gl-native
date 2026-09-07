@@ -99,6 +99,7 @@ impl TesselatedPolygons {
 }
 
 /// Polygons above which tessellation runs on all cores.
+#[cfg(feature = "parallel")]
 const PARALLEL_POLYGONS: usize = 64;
 
 /// The tessellation of one polygon, before the parts are joined.
@@ -142,12 +143,21 @@ pub fn tesselate(
     polygons: &[Polygon],
     preproject: impl Fn(&Position) -> [f64; 2] + Sync,
 ) -> TesselatedPolygons {
-    let parts: Vec<TesselatedPolygon> = if polygons.len() >= PARALLEL_POLYGONS {
-        use rayon::prelude::*;
-        polygons
-            .par_iter()
-            .map(|polygon| tesselate_one(polygon, &preproject))
-            .collect()
+    #[cfg(feature = "parallel")]
+    let parallel = polygons.len() >= PARALLEL_POLYGONS;
+    #[cfg(not(feature = "parallel"))]
+    let parallel = false;
+    let parts: Vec<TesselatedPolygon> = if parallel {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            polygons
+                .par_iter()
+                .map(|polygon| tesselate_one(polygon, &preproject))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        unreachable!()
     } else {
         polygons
             .iter()

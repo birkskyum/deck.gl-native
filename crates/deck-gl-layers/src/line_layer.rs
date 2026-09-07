@@ -142,7 +142,7 @@ impl Layer for LineLayer {
         // Attributes whose accessors are constants hold a single element, see `plan`
         self.attributes.set_transitions(&self.props.base.transitions);
         let sources = self.sources()?;
-        self.attributes.plan(&sources, &self.props.data);
+        self.attributes.plan(ctx, &sources, &self.props.data);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -182,7 +182,10 @@ impl Layer for LineLayer {
         self.attributes.set_transitions(&self.props.base.transitions);
         // A constant accessor that stopped being one (or the other way round) changes the
         // vertex layouts, so the model is built again
-        if self.attributes.plan_changed(&self.sources()?, &self.props.data) {
+        if self
+            .attributes
+            .plan_changed(ctx, &self.sources()?, &self.props.data)
+        {
             self.initialize(ctx)?;
         }
         if self.data_dirty {

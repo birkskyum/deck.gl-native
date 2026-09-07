@@ -47,11 +47,18 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       # The core crates build for the web through wgpu's WebGPU backend. The layer and JSON
-      # crates need their native only features off: `fetch` (ureq pulls ring) and `s2-cells`
-      # (the s2 crate has no wasm build).
+      # crates need `s2-cells` off (the s2 crate has no wasm build) and `parallel` off (no
+      # threads); `fetch` works, loading through the browser's own rather than ureq.
       - run: cargo build --target wasm32-unknown-unknown -p math-gl -p luma-gl -p deck-gl
       - run: cargo build --target wasm32-unknown-unknown -p deck-gl-layers --no-default-features
       - run: cargo build --target wasm32-unknown-unknown -p deck-gl-json --no-default-features
+      # With `fetch` the loading goes through the browser's own, so no ureq and no threads
+      - run: cargo build --target wasm32-unknown-unknown -p deck-gl-json --no-default-features --features fetch
+      # The browser example, on both backends
+      - run: cargo build --target wasm32-unknown-unknown
+        working-directory: examples/web
+      - run: cargo build --target wasm32-unknown-unknown --features webgl
+        working-directory: examples/web
 
   coverage:
     name: coverage (ubuntu)

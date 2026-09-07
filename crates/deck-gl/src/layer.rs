@@ -216,6 +216,11 @@ pub struct LayerContext {
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
     pub clip_depth_range: ClipDepthRange,
+    /// Whether a buffer of one element with a zero vertex stride is read by every instance,
+    /// deck.gl's constant attributes. True on WebGPU, Metal, Vulkan and D3D12. False on
+    /// OpenGL, where a zero stride means tightly packed instead, so the elements have to be
+    /// repeated. See [`DeckProps::constant_attributes`](crate::DeckProps::constant_attributes).
+    pub constant_attributes: bool,
     /// Uniform slot models write and draw with (see `Model::set_uniform_slot`): 0 for the main
     /// viewport, one more for each repeated world copy the deck draws.
     pub uniform_slot: usize,

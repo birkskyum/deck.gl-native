@@ -5,7 +5,7 @@
 
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use deck_gl::{Layer, LayerContext, LayerProps, Result, SubLayers, Viewport};
 

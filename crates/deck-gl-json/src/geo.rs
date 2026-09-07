@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use deck_gl::geojson::{Feature, FeatureCollection, Geometry};
+#[cfg(feature = "parquet")]
 use deck_gl::wkb::wkb_geometry;
 use deck_gl::{Path, Polygon, Position};
 use serde_json::{Map, Value};

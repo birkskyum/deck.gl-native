@@ -20,7 +20,7 @@ use crate::data::{
     resolve_colors, resolve_f32, resolve_positions, resolve_vec2, resolve_with, Accessor, Color, LayerData,
     Position,
 };
-use crate::layer::{position_bounds, union_bounds};
+use crate::layer::{position_bounds, union_bounds, LayerContext};
 use crate::transition::{PropTransition, PropTransitions};
 use crate::{DeckError, Result};
 
@@ -268,16 +268,17 @@ impl AttributeAnimation {
 }
 
 fn lerp_into(out: &mut [f64], from: &[f64], to: &[f64], t: f64) {
+    #[cfg(feature = "parallel")]
     if out.len() >= PARALLEL_ROWS {
         use rayon::prelude::*;
         out.par_iter_mut()
             .zip(from.par_iter())
             .zip(to.par_iter())
             .for_each(|((o, a), b)| *o = a + (b - a) * t);
-    } else {
-        for ((o, a), b) in out.iter_mut().zip(from).zip(to) {
-            *o = a + (b - a) * t;
-        }
+        return;
+    }
+    for ((o, a), b) in out.iter_mut().zip(from).zip(to) {
+        *o = a + (b - a) * t;
     }
 }
 
@@ -472,8 +473,13 @@ impl AttributeManager {
 
     /// Work out which buffers are constant for `sources` and keep it; the layouts and the
     /// model must be built after this. Returns whether the answer changed.
-    pub fn plan(&mut self, sources: &[(&'static str, AttributeSource)], data: &LayerData) -> bool {
-        let constant = self.constant_buffers(sources, data);
+    pub fn plan(
+        &mut self,
+        ctx: &LayerContext,
+        sources: &[(&'static str, AttributeSource)],
+        data: &LayerData,
+    ) -> bool {
+        let constant = self.planned_constants(ctx, sources, data);
         let changed = constant != self.constant;
         if changed {
             self.constant = constant;
@@ -483,8 +489,27 @@ impl AttributeManager {
     }
 
     /// Whether [`plan`](Self::plan) would change the layouts, so the layer needs a new model.
-    pub fn plan_changed(&self, sources: &[(&'static str, AttributeSource)], data: &LayerData) -> bool {
-        self.constant_buffers(sources, data) != self.constant
+    pub fn plan_changed(
+        &self,
+        ctx: &LayerContext,
+        sources: &[(&'static str, AttributeSource)],
+        data: &LayerData,
+    ) -> bool {
+        self.planned_constants(ctx, sources, data) != self.constant
+    }
+
+    /// The buffers that would be constant, empty when the backend cannot read a zero stride
+    /// as one shared element.
+    fn planned_constants(
+        &self,
+        ctx: &LayerContext,
+        sources: &[(&'static str, AttributeSource)],
+        data: &LayerData,
+    ) -> HashSet<&'static str> {
+        if !ctx.constant_attributes {
+            return HashSet::new();
+        }
+        self.constant_buffers(sources, data)
     }
 
     /// Whether a buffer holds a single element read by every instance.
@@ -899,12 +924,19 @@ fn build_buffer(
             }
         }
     };
-    if rows >= PARALLEL_ROWS {
-        use rayon::prelude::*;
-        bytes
-            .par_chunks_exact_mut(stride)
-            .enumerate()
-            .for_each(|(row, chunk)| write_row(row, chunk));
+    #[cfg(feature = "parallel")]
+    let parallel = rows >= PARALLEL_ROWS;
+    #[cfg(not(feature = "parallel"))]
+    let parallel = false;
+    if parallel {
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            bytes
+                .par_chunks_exact_mut(stride)
+                .enumerate()
+                .for_each(|(row, chunk)| write_row(row, chunk));
+        }
     } else {
         for (row, chunk) in bytes.chunks_exact_mut(stride).enumerate() {
             write_row(row, chunk);
@@ -935,14 +967,15 @@ const PARALLEL_ROWS: usize = 16_384;
 
 /// The bounds of many positions, folded on all cores when there are many.
 fn parallel_bounds(positions: &[Position]) -> Option<[f64; 4]> {
-    if positions.len() < PARALLEL_ROWS {
-        return position_bounds(positions.iter());
+    #[cfg(feature = "parallel")]
+    if positions.len() >= PARALLEL_ROWS {
+        use rayon::prelude::*;
+        return positions
+            .par_chunks(PARALLEL_ROWS)
+            .map(|chunk| position_bounds(chunk.iter()))
+            .reduce(|| None, union_bounds);
     }
-    use rayon::prelude::*;
-    positions
-        .par_chunks(PARALLEL_ROWS)
-        .map(|chunk| position_bounds(chunk.iter()))
-        .reduce(|| None, union_bounds)
+    position_bounds(positions.iter())
 }
 
 impl Resolved {
@@ -979,10 +1012,10 @@ fn low_part(p: Position) -> [f32; 3] {
 }
 
 fn map_rows(positions: &[Position], f: fn(Position) -> [f32; 3]) -> Vec<[f32; 3]> {
+    #[cfg(feature = "parallel")]
     if positions.len() >= PARALLEL_ROWS {
         use rayon::prelude::*;
-        positions.par_iter().map(|p| f(*p)).collect()
-    } else {
-        positions.iter().map(|p| f(*p)).collect()
+        return positions.par_iter().map(|p| f(*p)).collect();
     }
+    positions.iter().map(|p| f(*p)).collect()
 }

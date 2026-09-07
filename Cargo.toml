@@ -5,12 +5,14 @@ members = [
   "crates/luma-gl",
   "crates/deck-gl",
   "crates/deck-gl-layers",
-    "crates/deck-gl-json",
+  "crates/deck-gl-json",
   "crates/deck-gl-ffi",
   "examples",
 ]
-# Standalone: needs the native MapLibre library and a sibling maplibre-native-ffi checkout.
-exclude = ["examples/maplibre-ffi"]
+# Standalone crates, built on their own:
+# - maplibre-ffi needs the native MapLibre library and a sibling maplibre-native-ffi checkout
+# - web is a wasm32 cdylib, built by examples/web/build.sh
+exclude = ["examples/maplibre-ffi", "examples/web"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,12 +30,15 @@ deck-gl-layers = { path = "crates/deck-gl-layers" }
 deck-gl-json = { path = "crates/deck-gl-json" }
 
 wgpu = "30"
-naga = { version = "30", features = ["wgsl-in"] }
+naga = { version = "30", features = ["wgsl-in", "glsl-out"] }
 glam = "0.33"
 bytemuck = { version = "1", features = ["derive"] }
 regex = "1"
 thiserror = "2"
 pollster = "0.4"
+# `std::time::Instant` panics on wasm32; this is `std::time` everywhere else and
+# `performance.now()` in a browser.
+web-time = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tracing = { version = "0.1", features = ["log"] }
 rayon = "1"

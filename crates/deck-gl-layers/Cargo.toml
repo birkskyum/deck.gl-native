@@ -9,14 +9,19 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["fetch", "s2-cells"]
+default = ["fetch", "s2-cells", "parallel"]
+# Spread tessellation over the cores with rayon, see `deck-gl`.
+parallel = ["dep:rayon", "deck-gl/parallel", "luma-gl/parallel"]
 # Load raster tiles from http(s) URLs (`TileLayer::raster`).
 fetch = ["dep:ureq"]
 # S2 cells in the geo cell layers. The `s2` crate does not build for wasm32, so a wasm build
 # turns this off; the other cell kinds (H3, geohash, quadkey) are unaffected.
 s2-cells = ["dep:s2"]
+# Draw through wgpu's WebGL2 backend, see `luma-gl`.
+webgl = ["deck-gl/webgl", "luma-gl/webgl", "wgpu/webgl"]
 
 [dependencies]
+web-time = { workspace = true }
 tracing = { workspace = true }
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
@@ -30,11 +35,10 @@ fontdue = { workspace = true }
 arrow-array = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
-ureq = { version = "3", optional = true }
 h3o = { version = "0.8", features = ["geo"] }
 s2 = { version = "0.0.12", optional = true }
 flate2 = "1"
-rayon = { workspace = true }
+rayon = { workspace = true, optional = true }
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
 base64 = "0.22"
 a5 = "0.10"
@@ -46,3 +50,14 @@ criterion = { version = "0.5", default-features = false }
 [[bench]]
 name = "layers"
 harness = false
+
+# The `fetch` transport off the web.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3", optional = true }
+
+# In a browser there are no threads to pool, so `fetch` loads through the browser's own.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Response"] }
