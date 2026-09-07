@@ -28,6 +28,7 @@ pub mod lighting;
 pub mod mask;
 pub mod orbit_controller;
 pub mod parameters;
+pub mod post_process;
 pub mod shaderlib;
 pub mod transition;
 pub mod viewport;
@@ -50,6 +51,9 @@ pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, Poi
 pub use mask::{MaskChannel, MaskMaps};
 pub use orbit_controller::{OrbitConstraints, OrbitController};
 pub use parameters::{CullMode, RenderParameters};
+pub use post_process::{
+    builtin_module, PassKind, PassSpec, PostProcessEffect, ShaderPassModule, UniformValue,
+};
 pub use transition::{
     EasingKind, PropTransition, PropTransitions, TransitionDuration, TransitionInterpolator,
     TransitionInterruption, TransitionProps, ViewStateTransition,

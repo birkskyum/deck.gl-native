@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(lighting) = json.lighting {
         deck.set_lighting(lighting);
     }
+    deck.set_post_process(json.post_process);
     deck.set_repeat(json.repeat);
     deck.set_view(json.view);
     if let Some(camera) = json.camera {

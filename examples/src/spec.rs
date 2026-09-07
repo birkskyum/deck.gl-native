@@ -36,6 +36,8 @@ pub struct Scene {
     pub layers: Vec<Box<dyn Layer>>,
     /// The description's `LightingEffect`, when it has one
     pub lighting: Option<LightingEffect>,
+    /// The description's `PostProcessEffect`s, in order
+    pub post_process: Vec<deck_gl::PostProcessEffect>,
     /// Draw world copies across the antimeridian (`views: [{"@@type": "MapView", "repeat": true}]`)
     pub repeat: bool,
     /// The kind of view, and its camera when the description is not a map
@@ -59,6 +61,7 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
                 view_state: json.view_state.unwrap_or_else(|| scene::view_state(bearing)),
                 layers: keep_only(json.layers),
                 lighting: json.lighting,
+                post_process: json.post_process,
                 repeat: json.repeat,
                 view: json.view,
                 camera: json.camera,
@@ -70,6 +73,7 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
             view_state: scene::view_state(bearing),
             layers: keep_only(scene::layers()),
             lighting: None,
+            post_process: Vec::new(),
             repeat: true,
             view: View::Map,
             camera: None,

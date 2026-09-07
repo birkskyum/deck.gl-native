@@ -2076,6 +2076,167 @@ fn scenegraph_layer_draws_gltf_scenes_with_node_transforms_and_size_limits() {
 }
 
 #[test]
+fn post_process_effects_run_over_the_frame_in_order() {
+    use deck_gl::PostProcessEffect;
+    let Some(ctx) = context() else { return };
+    let disk = || -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new("disk"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(10.0),
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        }))
+    };
+    let c = SIZE / 2;
+    let mut deck = make_deck(&ctx, vec![disk()]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [255, 0, 0, 255]);
+    assert_eq!(shot.pixel(c + 14, c), [0, 0, 0, 0], "outside the disk");
+    // Full negative brightness turns the disk black; the transparent background stays
+    deck.set_post_process(vec![PostProcessEffect::new("brightnessContrast")
+        .unwrap()
+        .with_prop("brightness", -1.0)]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [0, 0, 0, 255]);
+    assert_eq!(shot.pixel(2, 2), [0, 0, 0, 0]);
+    // A blur spreads the disk past its edge, and a following hue rotation of a third turn
+    // makes red green
+    deck.set_post_process(vec![
+        PostProcessEffect::new("triangleBlur")
+            .unwrap()
+            .with_prop("radius", 8.0),
+        PostProcessEffect::new("hueSaturation")
+            .unwrap()
+            .with_prop("hue", 2.0 / 3.0),
+    ]);
+    let shot = deck.snapshot(None).unwrap();
+    let centre = shot.pixel(c, c);
+    assert!(
+        centre[1] > 200 && centre[0] < 40 && centre[2] < 40,
+        "hue rotated: {centre:?}"
+    );
+    let edge = shot.pixel(c + 14, c);
+    assert!(edge[3] > 0 && edge[3] < 255, "blurred edge: {edge:?}");
+    // Effects come off again, and props change without rebuilding the passes
+    deck.set_post_process(vec![PostProcessEffect::new("vignette")
+        .unwrap()
+        .with_prop("amount", 0.0)
+        .with_prop("radius", 1.0)]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(
+        shot.pixel(c, c),
+        [255, 0, 0, 255],
+        "a vignette without darkening changes nothing at the centre"
+    );
+    deck.set_post_process(Vec::new());
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [255, 0, 0, 255]);
+    assert_eq!(shot.pixel(c + 14, c), [0, 0, 0, 0]);
+    // Every built-in module renders without error
+    for name in deck_gl::post_process::BUILTIN_MODULES {
+        deck.set_post_process(vec![PostProcessEffect::new(name).unwrap()]);
+        deck.snapshot(None).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+}
+
+#[test]
+fn post_process_composites_onto_a_loaded_target_and_multisampled_decks() {
+    use deck_gl::luma_gl::device::create_render_texture;
+    use deck_gl::PostProcessEffect;
+    let Some(ctx) = context() else { return };
+    let disk = || -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new("disk"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+            get_radius: Accessor::Constant(10.0),
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        }))
+    };
+    let c = SIZE / 2;
+    for sample_count in [1u32, 4] {
+        let target = RenderTarget {
+            sample_count,
+            ..RenderTarget::default()
+        };
+        let color = create_render_texture(&ctx.device, "color", SIZE, SIZE, target.color_format);
+        let depth = create_render_texture(&ctx.device, "depth", SIZE, SIZE, target.depth_format.unwrap());
+        let mut deck = Deck::new(
+            &ctx.device,
+            &ctx.queue,
+            target,
+            DeckProps {
+                width: SIZE,
+                height: SIZE,
+                view_state: ViewState {
+                    longitude: CENTER[0],
+                    latitude: CENTER[1],
+                    zoom: 14.0,
+                    pitch: 0.0,
+                    bearing: 0.0,
+                },
+                layers: vec![disk()],
+                post_process: vec![PostProcessEffect::new("sepia").unwrap().with_prop("amount", 0.0)],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // A host drew a white background and cleared depth first; the deck must keep it
+        let color_view = color.create_view(&Default::default());
+        let depth_view = depth.create_view(&Default::default());
+        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        {
+            let _clear = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("host"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        }
+        deck.render(&mut encoder, &color_view, Some(&depth_view), None)
+            .unwrap_or_else(|e| panic!("sample count {sample_count}: {e}"));
+        ctx.queue.submit([encoder.finish()]);
+        let rgba = read_texture_rgba8(&ctx.device, &ctx.queue, &color).unwrap();
+        let px = |x: u32, y: u32| {
+            let i = ((y * SIZE + x) * 4) as usize;
+            [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]
+        };
+        assert_eq!(
+            px(c, c),
+            [0, 0, 255, 255],
+            "sample count {sample_count}: the disk over the host"
+        );
+        assert_eq!(
+            px(2, 2),
+            [255, 255, 255, 255],
+            "sample count {sample_count}: the host's background stays"
+        );
+    }
+}
+
+#[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };
     let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {

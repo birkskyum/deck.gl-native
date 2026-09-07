@@ -32,7 +32,7 @@ use arrow_array::RecordBatch;
 use deck_gl::{
     AnyViewState, DeckError, DeckView, Extent, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps,
     Layer, LightingEffect, OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps,
-    OrthographicViewState, View, ViewPadding, ViewState,
+    OrthographicViewState, PostProcessEffect, UniformValue, View, ViewPadding, ViewState,
 };
 pub use deck_gl_layers::fetch::Fetcher;
 use serde_json::Value;
@@ -94,6 +94,8 @@ pub struct JsonDeck {
     pub layers: Vec<Box<dyn Layer>>,
     /// The `LightingEffect` among `effects`, when present.
     pub lighting: Option<LightingEffect>,
+    /// The `PostProcessEffect`s among `effects`, in order.
+    pub post_process: Vec<PostProcessEffect>,
     /// `repeat` of the `MapView` among `views`: draw world copies across the antimeridian.
     pub repeat: bool,
     /// The view among `views` (a map unless an `OrthographicView`, `OrbitView` or
@@ -178,6 +180,7 @@ impl JsonConverter {
     pub fn convert(&self, value: &Value) -> Result<JsonDeck> {
         let mut warnings = Vec::new();
         let mut lighting = None;
+        let mut post_process = Vec::new();
         let mut repeat = false;
         let mut view = View::Map;
         let mut camera = None;
@@ -248,6 +251,7 @@ impl JsonConverter {
                     for effect in effects {
                         match effect.get(props::TYPE_KEY).and_then(Value::as_str) {
                             Some("LightingEffect") => lighting = Some(lighting_from_value(effect)?),
+                            Some("PostProcessEffect") => post_process.push(post_process_from_value(effect)?),
                             Some(other) => warnings
                                 .push(format!("effect `{other}` is not available yet and was skipped")),
                             None => warnings.push("effect without @@type was skipped".to_string()),
@@ -267,6 +271,7 @@ impl JsonConverter {
             view_state,
             layers,
             lighting,
+            post_process,
             repeat,
             view,
             camera,
@@ -339,6 +344,79 @@ impl JsonConverter {
             ))),
         }
     }
+}
+
+/// A `PostProcessEffect` object: `module` names one of luma.gl's post-processing passes
+/// (`brightnessContrast`, `vignette`, `triangleBlur` and so on, see
+/// [`deck_gl::post_process::BUILTIN_MODULES`]) and `props`, or any other field, sets its
+/// uniforms: numbers, or arrays of two or four numbers.
+pub fn post_process_from_value(value: &Value) -> Result<PostProcessEffect> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| JsonError::Parse("PostProcessEffect must be an object".into()))?;
+    let module = map
+        .get("module")
+        .and_then(Value::as_str)
+        .ok_or_else(|| JsonError::Parse("PostProcessEffect needs a `module` name".into()))?;
+    let mut effect = PostProcessEffect::new(module).ok_or_else(|| {
+        JsonError::Parse(format!(
+            "PostProcessEffect module `{module}` is not one of {}",
+            deck_gl::post_process::BUILTIN_MODULES.join(", ")
+        ))
+    })?;
+    let mut set = |name: &str, value: &Value| -> Result<()> {
+        let uniform = match value {
+            Value::Number(n) => UniformValue::F32(n.as_f64().unwrap_or(0.0) as f32),
+            Value::Bool(b) => UniformValue::F32(if *b { 1.0 } else { 0.0 }),
+            Value::Array(items) if items.len() == 2 || items.len() == 4 => {
+                let numbers: Vec<f32> = items
+                    .iter()
+                    .map(|v| v.as_f64().map(|n| n as f32))
+                    .collect::<Option<Vec<f32>>>()
+                    .ok_or_else(|| {
+                        JsonError::Parse(format!("PostProcessEffect `{name}` must hold numbers"))
+                    })?;
+                if numbers.len() == 2 {
+                    UniformValue::Vec2([numbers[0], numbers[1]])
+                } else {
+                    UniformValue::Vec4([numbers[0], numbers[1], numbers[2], numbers[3]])
+                }
+            }
+            other => {
+                return Err(JsonError::Parse(format!(
+                    "PostProcessEffect `{name}` must be a number or an array of two or four numbers, got {}",
+                    props::describe(other)
+                )))
+            }
+        };
+        if effect.prop(name).is_none() {
+            return Err(JsonError::Parse(format!(
+                "PostProcessEffect module `{module}` has no prop `{name}`"
+            )));
+        }
+        // Integer uniforms keep their type
+        let uniform = match (effect.prop(name), uniform) {
+            (Some(UniformValue::I32(_)), UniformValue::F32(v)) => UniformValue::I32(v as i32),
+            (_, u) => u,
+        };
+        effect.set_prop(name, uniform);
+        Ok(())
+    };
+    for (key, value) in map {
+        match key.as_str() {
+            props::TYPE_KEY | "module" | "id" => {}
+            "props" => {
+                let props = value
+                    .as_object()
+                    .ok_or_else(|| JsonError::Parse("PostProcessEffect `props` must be an object".into()))?;
+                for (name, value) in props {
+                    set(name, value)?;
+                }
+            }
+            name => set(name, value)?,
+        }
+    }
+    Ok(effect)
 }
 
 /// A `LightingEffect` object: every other field is a light with its own `@@type`

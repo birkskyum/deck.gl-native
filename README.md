@@ -34,6 +34,9 @@ Working today, headless and verified pixel by pixel in tests:
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`
 - Per-layer render `parameters`: blend state, depth test and writes, face culling
+- Post-processing effects over the rendered frame (`PostProcessEffect`): luma.gl's eighteen
+  shader passes ported to WGSL, from brightness and vignette to blurs, halftones and warps,
+  chained in order and composited onto the host's frame
 - Shader hooks for WGSL and layer extensions (`LayerExtension`: shader modules, injections,
   attributes and uniforms), with `DataFilterExtension` filtering objects by value ranges, soft
   ranges and categories on the GPU, `BrushingExtension` showing what lies within a radius of

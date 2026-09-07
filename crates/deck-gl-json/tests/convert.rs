@@ -467,7 +467,7 @@ fn lighting_effects_and_materials() {
                 "sun": {"@@type": "DirectionalLight", "intensity": 2.0, "direction": [-3, -9, -1]},
                 "lamp": {"@@type": "PointLight", "position": [1, 2, 3], "attenuation": [1, 0.1, 0]}
             },
-            {"@@type": "PostProcessEffect"}
+            {"@@type": "WaterEffect"}
         ],
         "layers": [
             {"@@type": "SolidPolygonLayer", "id": "lit", "data": []},
@@ -491,7 +491,7 @@ fn lighting_effects_and_materials() {
     assert_eq!(lighting.point.len(), 1);
     assert_eq!(lighting.point[0].attenuation, [1.0, 0.1, 0.0]);
     assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("PostProcessEffect"));
+    assert!(deck.warnings[0].contains("WaterEffect"));
 
     let material = |index: usize| deck.layers[index].props().material;
     assert_eq!(material(0), Material::default());
@@ -1150,4 +1150,48 @@ fn scenegraph_layer_reads_gltf_files_with_external_buffers() {
     let error = converter.convert(&bad).unwrap_err().to_string();
     assert!(error.contains("_lighting"), "{error}");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn post_process_effects_are_read_from_effects() {
+    use deck_gl::UniformValue;
+    let deck = JsonConverter::new()
+        .convert(&json!({
+            "layers": [],
+            "effects": [
+                {"@@type": "PostProcessEffect", "module": "vignette", "props": {"radius": 0.8}},
+                {"@@type": "PostProcessEffect", "module": "zoomBlur", "center": [0.2, 0.7], "strength": 0.5},
+                {"@@type": "PostProcessEffect", "module": "edgeWork", "radius": 3}
+            ]
+        }))
+        .unwrap();
+    assert_eq!(deck.post_process.len(), 3);
+    assert_eq!(deck.post_process[0].module.name, "vignette");
+    assert_eq!(deck.post_process[0].prop("radius"), Some(UniformValue::F32(0.8)));
+    assert_eq!(
+        deck.post_process[0].prop("amount"),
+        Some(UniformValue::F32(0.5)),
+        "the default"
+    );
+    assert_eq!(
+        deck.post_process[1].prop("center"),
+        Some(UniformValue::Vec2([0.2, 0.7]))
+    );
+    assert_eq!(
+        deck.post_process[1].prop("strength"),
+        Some(UniformValue::F32(0.5))
+    );
+    assert_eq!(deck.post_process[2].prop("radius"), Some(UniformValue::F32(3.0)));
+    let unknown = JsonConverter::new()
+        .convert(&json!({"layers": [], "effects": [{"@@type": "PostProcessEffect", "module": "sparkle"}]}))
+        .unwrap_err()
+        .to_string();
+    assert!(unknown.contains("sparkle"), "{unknown}");
+    let bad_prop = JsonConverter::new()
+        .convert(
+            &json!({"layers": [], "effects": [{"@@type": "PostProcessEffect", "module": "sepia", "hue": 1}]}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(bad_prop.contains("no prop `hue`"), "{bad_prop}");
 }

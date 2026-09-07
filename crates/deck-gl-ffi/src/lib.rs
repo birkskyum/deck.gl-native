@@ -122,6 +122,8 @@ pub struct DeckglHandle {
     pub(crate) pending_layers: Option<Vec<Box<dyn deck_gl::Layer>>>,
     /// Lighting from the last JSON description, applied to every deck
     pub(crate) lighting: Option<deck_gl::LightingEffect>,
+    /// Post-processing effects of the last JSON description, applied to every deck
+    pub(crate) post_process: Vec<deck_gl::PostProcessEffect>,
     /// `initialViewState` of the last JSON description, the camera of headless snapshots
     pub(crate) view_state: Option<ViewState>,
     /// Layer id of the last `deckgl_pick` hit, so its pointer stays valid
@@ -151,6 +153,7 @@ impl DeckglHandle {
             camera: None,
             pending_layers: None,
             lighting: None,
+            post_process: Vec::new(),
             view_state: None,
             picked_layer: CString::default(),
             repeat: false,
@@ -225,6 +228,7 @@ impl DeckglHandle {
             if let Some(lighting) = self.lighting.clone() {
                 deck.set_lighting(lighting);
             }
+            deck.set_post_process(self.post_process.clone());
             deck.set_repeat(self.repeat);
             self.deck = Some(deck);
             self.target = Some(target);
@@ -387,6 +391,10 @@ fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_js
                 }
                 handle.lighting = Some(lighting);
             }
+            if let Some(deck) = handle.deck.as_mut() {
+                deck.set_post_process(json.post_process.clone());
+            }
+            handle.post_process = json.post_process;
             if json.view_state.is_some() {
                 handle.view_state = json.view_state;
             }

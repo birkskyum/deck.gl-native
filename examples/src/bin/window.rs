@@ -116,6 +116,7 @@ impl State {
         if let Some(lighting) = loaded.lighting {
             deck.set_lighting(lighting);
         }
+        deck.set_post_process(loaded.post_process.clone());
         deck.set_repeat(loaded.repeat);
         deck.set_view(loaded.view);
         if let Some(camera) = loaded.camera {

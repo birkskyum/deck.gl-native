@@ -15,6 +15,7 @@ use crate::mask::{
     create_mask_texture, mask_viewport, render_bounds, MaskChannel, MaskMaps, MASK_BORDER, MASK_MAP_SIZE,
     MAX_MASKS,
 };
+use crate::post_process::{PostProcessEffect, PostProcessor};
 use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::Viewport;
 use std::collections::HashMap;
@@ -56,6 +57,8 @@ pub struct DeckProps {
     pub view_state: ViewState,
     pub layers: Vec<Box<dyn Layer>>,
     pub lighting: LightingEffect,
+    /// Post-processing effects applied to the rendered frame, in order.
+    pub post_process: Vec<PostProcessEffect>,
     /// Constant depth bias for all layers, see [`LayerContext::depth_bias_base`].
     pub depth_bias_base: i32,
     /// Depth convention of the depth buffer, see [`ClipDepthRange`].
@@ -77,6 +80,7 @@ impl Default for DeckProps {
             view_state: ViewState::default(),
             layers: Vec::new(),
             lighting: LightingEffect::default(),
+            post_process: Vec::new(),
             depth_bias_base: 0,
             clip_depth_range: ClipDepthRange::default(),
             repeat: false,
@@ -165,6 +169,9 @@ pub struct Deck {
     created: std::time::Instant,
     /// The time of the last `tick`, which replaces the deck's own clock once used
     now: Option<f64>,
+    /// Post-processing effects applied after the layers, in order
+    post_process: Vec<PostProcessEffect>,
+    post_processor: PostProcessor,
 }
 
 impl Deck {
@@ -228,6 +235,8 @@ impl Deck {
             collision_targets: HashMap::new(),
             created: std::time::Instant::now(),
             now: None,
+            post_process: props.post_process,
+            post_processor: PostProcessor::default(),
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -486,6 +495,17 @@ impl Deck {
 
     pub fn set_lighting(&mut self, lighting: LightingEffect) {
         self.ctx.lighting = lighting;
+    }
+
+    /// Replace the post-processing effects. With any, the layers render into a texture of
+    /// the deck and each effect's passes run over it in order, the last one blending onto
+    /// the render target; see [`PostProcessEffect`].
+    pub fn set_post_process(&mut self, effects: Vec<PostProcessEffect>) {
+        self.post_process = effects;
+    }
+
+    pub fn post_process(&self) -> &[PostProcessEffect] {
+        &self.post_process
     }
 
     /// Draw extra copies of the world across the antimeridian, see [`DeckProps::repeat`].
@@ -1412,8 +1432,26 @@ impl Deck {
         let size = color_view.texture().size();
         self.attachment_size = Some((size.width, size.height));
         let sample_count = self.ctx.target.sample_count;
+        // With effects, the layers draw into the deck's scene texture and the passes end on
+        // the caller's attachment
+        self.post_processor.prepare(
+            &self.ctx.device,
+            self.ctx.target,
+            &self.ctx.pipelines,
+            &self.post_process,
+        )?;
+        let post = !self.post_process.is_empty() && self.post_processor.has_passes();
+        let scene_view = post.then(|| {
+            self.post_processor
+                .scene_texture(&self.ctx.device, size, self.ctx.target.color_format)
+                .create_view(&Default::default())
+        });
+        let (layer_view, layer_load) = match &scene_view {
+            Some(view) => (view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)),
+            None => (color_view, color_load),
+        };
         let (msaa_color_view, msaa_depth_view) = if sample_count > 1 {
-            if matches!(color_load, wgpu::LoadOp::Load) {
+            if matches!(layer_load, wgpu::LoadOp::Load) {
                 return Err(DeckError::Render(
                     "a multisampled deck cannot load the target's contents; clear it or use sample_count 1"
                         .into(),
@@ -1431,21 +1469,29 @@ impl Deck {
             Some(view) => wgpu::RenderPassColorAttachment {
                 view,
                 depth_slice: None,
-                resolve_target: Some(color_view),
+                resolve_target: Some(layer_view),
                 ops: wgpu::Operations {
-                    load: color_load,
+                    load: layer_load,
                     store: wgpu::StoreOp::Discard,
                 },
             },
             None => wgpu::RenderPassColorAttachment {
-                view: color_view,
+                view: layer_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: color_load,
+                    load: layer_load,
                     store: wgpu::StoreOp::Store,
                 },
             },
+        };
+        // The multisampled depth buffer is the deck's own: with effects the layers start on
+        // a cleared scene, so it is cleared too rather than loaded from a host that never
+        // wrote it
+        let depth_load = if post && msaa_color_view.is_some() {
+            wgpu::LoadOp::Clear(1.0)
+        } else {
+            depth_load
         };
         let depth_view = if msaa_color_view.is_some() {
             msaa_depth_view.as_ref()
@@ -1469,7 +1515,17 @@ impl Deck {
             multiview_mask: None,
         });
         let draw_started = std::time::Instant::now();
-        let result = self.draw(&mut pass);
+        let mut result = self.draw(&mut pass);
+        drop(pass);
+        if post && result.is_ok() {
+            result = self.post_processor.render(
+                encoder,
+                &self.ctx.queue,
+                &self.post_process,
+                color_view,
+                color_load,
+            );
+        }
         let counters = luma_gl::stats::snapshot();
         self.stats = FrameStats {
             frame: self.stats.frame + 1,

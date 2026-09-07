@@ -1,0 +1,19 @@
+{
+  "initialViewState": {"longitude": -122.42, "latitude": 37.78, "zoom": 12, "pitch": 40, "bearing": -10},
+  "effects": [
+    {"@@type": "PostProcessEffect", "module": "vignette", "props": {"radius": 0.6, "amount": 0.7}},
+    {"@@type": "PostProcessEffect", "module": "hueSaturation", "saturation": 0.4}
+  ],
+  "layers": [
+    {
+      "@@type": "HexagonLayer",
+      "id": "hexagons",
+      "data": "https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/sf-bike-parking.json",
+      "getPosition": "@@=COORDINATES",
+      "radius": 200,
+      "elevationScale": 8,
+      "extruded": true,
+      "opacity": 0.9
+    }
+  ]
+}

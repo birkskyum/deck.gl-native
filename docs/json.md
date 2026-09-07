@@ -161,6 +161,22 @@ Other effect types produce a warning and are skipped.
 }
 ```
 
+`PostProcessEffect` entries run shader passes over the rendered frame, in order. `module`
+names one of luma.gl's post-processing passes: `brightnessContrast`, `hueSaturation`, `sepia`,
+`vibrance`, `vignette`, `noise`, `denoise`, `triangleBlur`, `tiltShift`, `zoomBlur`,
+`colorHalftone`, `dotScreen`, `edgeWork`, `hexagonalPixelate`, `ink`, `magnify`, `bulgePinch`
+and `swirl`. Their uniforms are set through `props` (or given directly next to `module`) with
+numbers or arrays of two or four numbers, and keep luma.gl's defaults otherwise. The layers
+render into a texture of the deck and the last pass blends onto the render target, so a host's
+basemap underneath is kept.
+
+```json
+"effects": [
+  {"@@type": "PostProcessEffect", "module": "vignette", "props": {"radius": 0.7, "amount": 0.6}},
+  {"@@type": "PostProcessEffect", "module": "triangleBlur", "radius": 4}
+]
+```
+
 ## Extensions
 
 deck.gl's `extensions` prop takes a list of extension objects, and the extension's own props
