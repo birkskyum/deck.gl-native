@@ -244,6 +244,7 @@ pub fn assemble(assembly: &ShaderAssembly<'_>) -> Result<AssembledShader> {
     wgsl.push('\n');
 
     let wgsl = resolve_bindings(&wgsl.replace("\r\n", "\n"));
+    let wgsl = pad_uniform_blocks(&wgsl, label)?;
 
     let module = naga::front::wgsl::parse_str(&wgsl)
         .map_err(|e| LumaError::Shader(format!("{label}: {}", e.emit_to_string(&wgsl))))?;
@@ -327,9 +328,36 @@ pub fn assemble(assembly: &ShaderAssembly<'_>) -> Result<AssembledShader> {
         attribute_locations,
     };
     if std::env::var_os("LUMA_GL_CHECK_GLSL").is_some() {
-        to_glsl(&shader)?;
+        check_webgl2(&shader)?;
     }
     Ok(shader)
+}
+
+/// Whether an assembled shader can run on WebGL2: its WGSL lowers to GLSL ES 3.00, and its
+/// uniform blocks are sized the way a WebGL2 device wants them.
+///
+/// wgpu checks all of this itself when it builds a pipeline, so this is not needed to run.
+/// It is here so that a shader that cannot reach WebGL2 fails a test on any machine rather
+/// than only in a browser. `LUMA_GL_CHECK_GLSL=1` runs it on every shader [`assemble`]
+/// produces, which the layer render tests then cover.
+pub fn check_webgl2(shader: &AssembledShader) -> Result<()> {
+    // WebGL2 has no `DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED`: a uniform block's
+    // type has to be a whole number of 16 byte rows.
+    let unaligned: Vec<String> = shader
+        .uniforms
+        .iter()
+        .filter(|u| !u.layout.size.is_multiple_of(16))
+        .map(|u| format!("{} ({}, {} bytes)", u.name, u.layout.struct_name, u.layout.size))
+        .collect();
+    if !unaligned.is_empty() {
+        return Err(LumaError::Shader(format!(
+            "{}: uniform blocks are not a multiple of 16 bytes, which WebGL2 needs: {}",
+            shader.label,
+            unaligned.join(", ")
+        )));
+    }
+    to_glsl(shader)?;
+    Ok(())
 }
 
 /// Lower an assembled shader to GLSL ES 3.00, the dialect WebGL2 speaks, returning one source
@@ -381,6 +409,64 @@ pub fn to_glsl(shader: &AssembledShader) -> Result<Vec<(String, String)>> {
         sources.push((entry_point.name.clone(), glsl));
     }
     Ok(sources)
+}
+
+/// Round every uniform block up to a whole number of 16 byte rows.
+///
+/// WebGL2 devices have no `DownlevelFlags::BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED`, so a uniform
+/// block whose type is, say, 8 bytes is rejected when the pipeline is built. Rather than
+/// leave that to each shader to remember, the assembler appends a padding member to any
+/// uniform struct that needs one. It costs a few bytes per block and nothing else: the field
+/// is never written, since [`crate::UniformBlock`] writes by name.
+fn pad_uniform_blocks(wgsl: &str, label: &str) -> Result<String> {
+    let module = naga::front::wgsl::parse_str(wgsl)
+        .map_err(|e| LumaError::Shader(format!("{label}: {}", e.emit_to_string(wgsl))))?;
+    let mut pads: Vec<(String, u32)> = Vec::new();
+    for (_, var) in module.global_variables.iter() {
+        if var.space != AddressSpace::Uniform {
+            continue;
+        }
+        let ty = &module.types[var.ty];
+        let TypeInner::Struct { span, .. } = &ty.inner else {
+            continue;
+        };
+        if span.is_multiple_of(16) {
+            continue;
+        }
+        let Some(name) = ty.name.clone() else {
+            continue;
+        };
+        if pads.iter().any(|(n, _)| *n == name) {
+            continue;
+        }
+        pads.push((name, 16 - span % 16));
+    }
+    if pads.is_empty() {
+        return Ok(wgsl.to_string());
+    }
+
+    let mut out = wgsl.to_string();
+    for (name, pad) in pads {
+        let Some(opening) = struct_regex(&name).find(&out) else {
+            continue;
+        };
+        let Some(offset) = out[opening.end()..].find('}') else {
+            return Err(LumaError::Shader(format!(
+                "{label}: struct {name} is never closed"
+            )));
+        };
+        let close = opening.end() + offset;
+        // A body whose last member has no trailing comma needs one before the padding
+        let separator = match out[opening.end()..close].trim_end().chars().last() {
+            Some(',') | None => "",
+            _ => ",",
+        };
+        out.insert_str(
+            close,
+            &format!("{separator}\n  // WebGL2 wants a uniform block to be a whole number of 16 byte rows\n  @size({pad}) _uniformBlockPadding: f32,\n"),
+        );
+    }
+    Ok(out)
 }
 
 fn has_struct(wgsl: &str, name: &str) -> bool {

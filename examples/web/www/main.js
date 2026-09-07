@@ -1,6 +1,10 @@
 // Drives the wasm module: loads a scene, forwards pointer events to the Rust map controller
 // and asks for a frame whenever something moved or is still loading.
-import init, { create } from './pkg/deck_gl_web.js'
+// ?webgl loads the WebGL2 build instead, the one the maplibre-gl-js layer uses
+const module = new URLSearchParams(location.search).has('webgl')
+  ? await import('./pkg/deck_gl_web_gl.js')
+  : await import('./pkg/deck_gl_web.js')
+const { default: init, create } = module
 
 const SCENES = [
   { file: 'osm-tiles.json', label: 'TileLayer: a raster basemap' },
@@ -8,6 +12,17 @@ const SCENES = [
   { file: 'minimap.json', label: 'Two views of the same layers' },
   { file: 'data-filter.json', label: 'DataFilterExtension' },
 ]
+
+// Keep everything the module logs so a failure can be read back from the page
+window.deckLog = []
+for (const level of ['log', 'warn', 'error']) {
+  const original = console[level].bind(console)
+  console[level] = (...args) => {
+    window.deckLog.push(`${level}: ${args.map(String).join(' ')}`)
+    original(...args)
+  }
+}
+window.addEventListener('error', (event) => window.deckLog.push(`error: ${event.message}`))
 
 const canvas = document.querySelector('#deck')
 const status = document.querySelector('#status')
