@@ -10,6 +10,7 @@ use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Deck, DeckProps, ViewState};
 use deck_gl_examples::{scene, spec};
+use deck_gl_layers::TripsLayer;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -150,9 +151,17 @@ impl State {
     }
 
     fn render(&mut self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
         let mut view = self.base_view;
-        view.bearing += self.start.elapsed().as_secs_f64() * 8.0;
+        view.bearing += elapsed * 8.0;
         self.deck.set_view_state(view);
+        if let Some(trips) = self
+            .deck
+            .layer_mut("trips")
+            .and_then(|layer| layer.as_any_mut().downcast_mut::<TripsLayer>())
+        {
+            trips.set_current_time((elapsed as f32) % scene::TRIP_LOOP_SECONDS);
+        }
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {

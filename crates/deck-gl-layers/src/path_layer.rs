@@ -8,7 +8,7 @@ use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
 use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
-use crate::path::tesselate;
+use crate::path::{tesselate, TesselatedPaths};
 
 const SHADER: &str = include_str!("wgsl/path_layer.wgsl");
 
@@ -91,42 +91,145 @@ impl PathLayer {
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
-        let props = &self.props;
-        let data = &props.data;
-        let device = &ctx.device;
         let model = self.model.as_mut().expect("initialized");
-
-        let paths = resolve_paths(data, &props.get_path)?;
-        let widths = resolve_f32(data, &props.get_width)?;
-        let colors = resolve_colors(data, &props.get_color)?;
-        let tesselated = tesselate(&paths);
-
-        let packed = tesselated.packed_neighbor_positions();
-        let instance_data: Vec<InstanceData> = tesselated
-            .row_index
-            .iter()
-            .map(|&r| InstanceData {
-                width: widths[r as usize],
-                color: colors[r as usize],
-                row_index: data.source_row(r as usize),
-            })
-            .collect();
-
-        model.set_vertex_buffer(
-            "instanceTypes",
-            create_vertex_buffer_from(device, "instanceTypes", &tesselated.segment_types),
-        )?;
-        model.set_vertex_buffer(
-            "instancePositions",
-            create_vertex_buffer_from(device, "instancePositions", &packed),
-        )?;
-        model.set_vertex_buffer(
-            "instanceData",
-            create_vertex_buffer_from(device, "instanceData", &instance_data),
-        )?;
-        model.set_instance_count(tesselated.instance_count() as u32);
+        upload_path_attributes(model, ctx, &self.props)?;
         Ok(())
     }
+}
+
+/// Tesselate the paths and upload the path layer's instance buffers. Shared with layers that
+/// extend the path shader, such as [`TripsLayer`](crate::TripsLayer).
+pub(crate) fn upload_path_attributes(
+    model: &mut Model,
+    ctx: &LayerContext,
+    props: &PathLayerProps,
+) -> Result<TesselatedPaths> {
+    let data = &props.data;
+    let device = &ctx.device;
+
+    let paths = resolve_paths(data, &props.get_path)?;
+    let widths = resolve_f32(data, &props.get_width)?;
+    let colors = resolve_colors(data, &props.get_color)?;
+    let tesselated = tesselate(&paths);
+
+    let packed = tesselated.packed_neighbor_positions();
+    let instance_data: Vec<InstanceData> = tesselated
+        .row_index
+        .iter()
+        .map(|&r| InstanceData {
+            width: widths[r as usize],
+            color: colors[r as usize],
+            row_index: data.source_row(r as usize),
+        })
+        .collect();
+
+    model.set_vertex_buffer(
+        "instanceTypes",
+        create_vertex_buffer_from(device, "instanceTypes", &tesselated.segment_types),
+    )?;
+    model.set_vertex_buffer(
+        "instancePositions",
+        create_vertex_buffer_from(device, "instancePositions", &packed),
+    )?;
+    model.set_vertex_buffer(
+        "instanceData",
+        create_vertex_buffer_from(device, "instanceData", &instance_data),
+    )?;
+    model.set_instance_count(tesselated.instance_count() as u32);
+    Ok(tesselated)
+}
+
+/// The path layer's vertex buffer layouts, plus any extra instance buffers of an extension.
+pub(crate) fn path_model(
+    ctx: &LayerContext,
+    id: &str,
+    shader_source: &str,
+    extra_layouts: &[VertexBufferLayout],
+    pickable: bool,
+) -> Result<Model> {
+    let shader = assemble_shader(id, &STANDARD_MODULES, shader_source)?;
+    let position_stride = 24 * 4;
+    let mut layouts = vec![
+        VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
+        VertexBufferLayout::instance("instanceTypes", 1, VertexFormat::Float32),
+        VertexBufferLayout::interleaved(
+            "instancePositions",
+            position_stride,
+            wgpu::VertexStepMode::Instance,
+            &[
+                (2, VertexFormat::Float32x3, 0),
+                (3, VertexFormat::Float32x3, 12),
+                (4, VertexFormat::Float32x3, 24),
+                (5, VertexFormat::Float32x3, 36),
+                (6, VertexFormat::Float32x3, 48),
+                (7, VertexFormat::Float32x3, 60),
+                (8, VertexFormat::Float32x3, 72),
+                (9, VertexFormat::Float32x3, 84),
+            ],
+        ),
+        VertexBufferLayout::interleaved(
+            "instanceData",
+            std::mem::size_of::<InstanceData>() as u64,
+            wgpu::VertexStepMode::Instance,
+            &[
+                (10, VertexFormat::Float32, 0),
+                (11, VertexFormat::Unorm8x4, 4),
+                (12, VertexFormat::Uint32, 8),
+            ],
+        ),
+    ];
+    layouts.extend_from_slice(extra_layouts);
+    let mut desc = ModelDescriptor::new(
+        id,
+        &shader,
+        &layouts,
+        wgpu::PrimitiveTopology::TriangleList,
+        ctx.target,
+    );
+    desc.depth_bias = ctx.depth_bias();
+    desc.pickable = pickable;
+    let mut model = Model::new(&ctx.device, &desc)?;
+
+    // [0] position on segment - 0: start, 1: end
+    // [1] side of path - -1: left, 0: center (joint), 1: right
+    let positions: [f32; 12] = [
+        0.0, 0.0, // bevel start corner
+        0.0, -1.0, // start inner corner
+        0.0, 1.0, // start outer corner
+        1.0, -1.0, // end inner corner
+        1.0, 1.0, // end outer corner
+        1.0, 0.0, // bevel end corner
+    ];
+    let indices: [u32; 12] = [
+        0, 1, 2, // start corner
+        1, 4, 2, // body
+        1, 3, 4, //
+        3, 5, 4, // end corner
+    ];
+    model.set_vertex_buffer(
+        "positions",
+        create_vertex_buffer_from(&ctx.device, "positions", &positions),
+    )?;
+    model.set_index_buffer(
+        create_index_buffer(&ctx.device, "indices", &indices),
+        wgpu::IndexFormat::Uint32,
+        12,
+    );
+    Ok(model)
+}
+
+/// Write the `path` uniform block from the props.
+pub(crate) fn write_path_uniforms(model: &mut Model, props: &PathLayerProps) -> Result<()> {
+    let u = model.uniforms("path")?;
+    u.set_f32("widthScale", props.width_scale)?;
+    u.set_f32("widthMinPixels", props.width_min_pixels)?;
+    u.set_f32("widthMaxPixels", props.width_max_pixels)?;
+    u.set_f32("jointType", if props.joint_rounded { 1.0 } else { 0.0 })?;
+    u.set_f32("capType", if props.cap_rounded { 1.0 } else { 0.0 })?;
+    u.set_f32("miterLimit", props.miter_limit)?;
+    u.set_f32("billboard", if props.billboard { 1.0 } else { 0.0 })?;
+    u.set_i32("widthUnits", props.width_units.shader_value())?;
+    Ok(())
 }
 
 impl Layer for PathLayer {
@@ -135,73 +238,7 @@ impl Layer for PathLayer {
     }
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
-        let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
-        let position_stride = 24 * 4;
-        let layouts = [
-            VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
-            VertexBufferLayout::instance("instanceTypes", 1, VertexFormat::Float32),
-            VertexBufferLayout::interleaved(
-                "instancePositions",
-                position_stride,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (2, VertexFormat::Float32x3, 0),
-                    (3, VertexFormat::Float32x3, 12),
-                    (4, VertexFormat::Float32x3, 24),
-                    (5, VertexFormat::Float32x3, 36),
-                    (6, VertexFormat::Float32x3, 48),
-                    (7, VertexFormat::Float32x3, 60),
-                    (8, VertexFormat::Float32x3, 72),
-                    (9, VertexFormat::Float32x3, 84),
-                ],
-            ),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (10, VertexFormat::Float32, 0),
-                    (11, VertexFormat::Unorm8x4, 4),
-                    (12, VertexFormat::Uint32, 8),
-                ],
-            ),
-        ];
-        let mut desc = ModelDescriptor::new(
-            &self.props.base.id,
-            &shader,
-            &layouts,
-            wgpu::PrimitiveTopology::TriangleList,
-            ctx.target,
-        );
-        desc.depth_bias = ctx.depth_bias();
-        desc.pickable = self.props.base.pickable;
-        let mut model = Model::new(&ctx.device, &desc)?;
-
-        // [0] position on segment - 0: start, 1: end
-        // [1] side of path - -1: left, 0: center (joint), 1: right
-        let positions: [f32; 12] = [
-            0.0, 0.0, // bevel start corner
-            0.0, -1.0, // start inner corner
-            0.0, 1.0, // start outer corner
-            1.0, -1.0, // end inner corner
-            1.0, 1.0, // end outer corner
-            1.0, 0.0, // bevel end corner
-        ];
-        let indices: [u32; 12] = [
-            0, 1, 2, // start corner
-            1, 4, 2, // body
-            1, 3, 4, //
-            3, 5, 4, // end corner
-        ];
-        model.set_vertex_buffer(
-            "positions",
-            create_vertex_buffer_from(&ctx.device, "positions", &positions),
-        )?;
-        model.set_index_buffer(
-            create_index_buffer(&ctx.device, "indices", &indices),
-            wgpu::IndexFormat::Uint32,
-            12,
-        );
+        let model = path_model(ctx, &self.props.base.id, SHADER, &[], self.props.base.pickable)?;
         self.model = Some(model);
         self.data_dirty = true;
         Ok(())
@@ -215,16 +252,7 @@ impl Layer for PathLayer {
         let props = &self.props;
         let model = self.model.as_mut().expect("initialized");
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
-
-        let u = model.uniforms("path")?;
-        u.set_f32("widthScale", props.width_scale)?;
-        u.set_f32("widthMinPixels", props.width_min_pixels)?;
-        u.set_f32("widthMaxPixels", props.width_max_pixels)?;
-        u.set_f32("jointType", if props.joint_rounded { 1.0 } else { 0.0 })?;
-        u.set_f32("capType", if props.cap_rounded { 1.0 } else { 0.0 })?;
-        u.set_f32("miterLimit", props.miter_limit)?;
-        u.set_f32("billboard", if props.billboard { 1.0 } else { 0.0 })?;
-        u.set_i32("widthUnits", props.width_units.shader_value())?;
+        write_path_uniforms(model, props)?;
         model.upload_uniforms(&ctx.queue);
         Ok(())
     }

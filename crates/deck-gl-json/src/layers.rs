@@ -11,7 +11,7 @@ use deck_gl_layers::{
     IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
     PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType, ScatterplotLayer,
     ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
-    WordBreak,
+    TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -50,6 +50,21 @@ pub fn convert_layer(
         "PathLayer" => {
             let data = load_rows(&mut props, options)?;
             Box::new(PathLayer::new(path(&props, data)?))
+        }
+        "TripsLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = TripsLayerProps::default();
+            Box::new(TripsLayer::new(TripsLayerProps {
+                path: path(&props, data)?,
+                fade_trail: props.bool("fadeTrail", d.fade_trail)?,
+                trail_length: props.f32("trailLength", d.trail_length)?,
+                current_time: props.f32("currentTime", d.current_time)?,
+                get_timestamps: props.accessor("getTimestamps", "timestamps", convert::f32_list)?,
+            }))
+        }
+        "GreatCircleLayer" => {
+            let data = load_rows(&mut props, options)?;
+            Box::new(ArcLayer::great_circle(arc(&props, data)?))
         }
         "SolidPolygonLayer" => {
             let data = load_rows(&mut props, options)?;

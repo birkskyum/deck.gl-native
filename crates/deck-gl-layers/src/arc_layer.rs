@@ -166,6 +166,18 @@ impl ArcLayer {
     }
 }
 
+impl ArcLayer {
+    /// deck.gl's GreatCircleLayer: an arc layer drawing flat great circle paths.
+    pub fn great_circle(props: ArcLayerProps) -> ArcLayer {
+        ArcLayer::new(ArcLayerProps {
+            great_circle: true,
+            num_segments: 100,
+            get_height: Accessor::Constant(0.0),
+            ..props
+        })
+    }
+}
+
 impl Layer for ArcLayer {
     fn props(&self) -> &LayerProps {
         &self.props.base

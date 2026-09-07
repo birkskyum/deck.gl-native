@@ -7,7 +7,9 @@ use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, UInt8Builder};
 use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
-use deck_gl_layers::{AggregationOperation, AggregationProps, HexagonLayer, HexagonLayerProps};
+use deck_gl_layers::{
+    AggregationOperation, AggregationProps, HexagonLayer, HexagonLayerProps, TripsLayer, TripsLayerProps,
+};
 use deck_gl_layers::{
     ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
     IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
@@ -340,11 +342,68 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         Box::new(arcs),
         Box::new(icons),
         Box::new(hexagons()),
+        Box::new(trips()),
         Box::new(labels()),
     ]
 }
 
 /// A 64x32 atlas with a map pin on the left and a ring on the right, as alpha masks.
+/// Length of the trip animation loop in seconds.
+pub const TRIP_LOOP_SECONDS: f32 = 12.0;
+
+/// Two vehicles circling the blocks; `TripsLayer::set_current_time` animates them.
+pub fn trips() -> TripsLayer {
+    let loops: Vec<Path> = vec![
+        vec![
+            [CENTER[0] - 0.012, CENTER[1] - 0.008, 0.0],
+            [CENTER[0] + 0.012, CENTER[1] - 0.008, 0.0],
+            [CENTER[0] + 0.012, CENTER[1] + 0.008, 0.0],
+            [CENTER[0] - 0.012, CENTER[1] + 0.008, 0.0],
+            [CENTER[0] - 0.012, CENTER[1] - 0.008, 0.0],
+        ],
+        vec![
+            [CENTER[0] + 0.03, CENTER[1] - 0.02, 0.0],
+            [CENTER[0] + 0.03, CENTER[1] + 0.02, 0.0],
+            [CENTER[0] + 0.05, CENTER[1] + 0.02, 0.0],
+            [CENTER[0] + 0.05, CENTER[1] - 0.02, 0.0],
+            [CENTER[0] + 0.03, CENTER[1] - 0.02, 0.0],
+        ],
+    ];
+    let timestamps: Vec<Vec<f32>> = loops
+        .iter()
+        .map(|path| {
+            (0..path.len())
+                .map(|i| i as f32 * TRIP_LOOP_SECONDS / 4.0)
+                .collect()
+        })
+        .collect();
+    let paths = Arc::new(loops);
+    let stamps = Arc::new(timestamps);
+    TripsLayer::new(TripsLayerProps {
+        path: PathLayerProps {
+            base: LayerProps::new("trips"),
+            data: LayerData::with_length(paths.len()),
+            get_path: Accessor::func(move |i| paths[i].clone()),
+            get_color: Accessor::func(|i| {
+                if i == 0 {
+                    [255, 80, 40, 255]
+                } else {
+                    [40, 220, 255, 255]
+                }
+            }),
+            get_width: Accessor::Constant(6.0),
+            width_units: Unit::Pixels,
+            cap_rounded: true,
+            joint_rounded: true,
+            ..Default::default()
+        },
+        get_timestamps: Accessor::func(move |i| stamps[i].clone()),
+        current_time: 5.0,
+        trail_length: 4.0,
+        fade_trail: true,
+    })
+}
+
 /// Pseudo random points south west of the centre, aggregated into extruded hexagons.
 pub fn hexagons() -> HexagonLayer {
     // a small deterministic generator so the scene is stable across runs

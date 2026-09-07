@@ -112,6 +112,8 @@ number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 | `LineLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getColor`, `getWidth` |
 | `ArcLayer` | `greatCircle`, `numSegments`, `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getSourceColor`, `getTargetColor`, `getWidth`, `getHeight`, `getTilt` |
 | `PathLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `jointRounded`, `capRounded`, `miterLimit`, `billboard`, `getPath`, `getColor`, `getWidth` |
+| `TripsLayer` | all `PathLayer` props plus `getTimestamps` (one per path vertex), `currentTime`, `trailLength`, `fadeTrail` |
+| `GreatCircleLayer` | the `ArcLayer` props, drawn as flat great circles |
 | `SolidPolygonLayer` | `filled`, `extruded`, `wireframe`, `elevationScale`, `getPolygon`, `getElevation`, `getFillColor`, `getLineColor` |
 | `PolygonLayer` | `stroked`, `filled`, `extruded`, `wireframe`, `elevationScale`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `lineJointRounded`, `lineMiterLimit`, `getPolygon`, `getFillColor`, `getLineColor`, `getLineWidth`, `getElevation` |
 | `GeoJsonLayer` | `filled`, `stroked`, `extruded`, `wireframe`, `elevationScale`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `lineJointRounded`, `lineCapRounded`, `lineMiterLimit`, `pointRadiusUnits`, `pointRadiusScale`, `pointRadiusMinPixels`, `pointRadiusMaxPixels`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPointRadius`, `getElevation` |

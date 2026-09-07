@@ -336,6 +336,22 @@ pub fn resolve_paths(data: &LayerData, accessor: &Accessor<Path>) -> Result<Vec<
     })
 }
 
+/// Resolve lists of numbers, such as timestamps per path vertex, from a `List<numeric>` column.
+pub fn resolve_f32_lists(data: &LayerData, accessor: &Accessor<Vec<f32>>) -> Result<Vec<Vec<f32>>> {
+    resolve_with(data, accessor, |column| {
+        let (offsets, values) = list_parts(column.as_ref())?;
+        let values = primitive_to_f64(values.as_ref())?;
+        Ok((0..offsets.len().saturating_sub(1))
+            .map(|i| {
+                values[offsets[i]..offsets[i + 1]]
+                    .iter()
+                    .map(|v| *v as f32)
+                    .collect()
+            })
+            .collect())
+    })
+}
+
 /// Resolve polygons. Columns may be GeoArrow polygons
 /// (`List<List<FixedSizeList<Float64, 2|3>>>`) or single rings (`List<FixedSizeList<..>>`).
 pub fn resolve_polygons(data: &LayerData, accessor: &Accessor<Polygon>) -> Result<Vec<Polygon>> {

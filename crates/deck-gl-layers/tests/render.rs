@@ -7,14 +7,14 @@ use deck_gl::luma_gl::device::{
     create_headless_context, create_render_texture, read_texture_rgba8, HeadlessContext,
 };
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
+use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Path, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
     BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
     GridLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
     LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
     PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps, TextLayer, TextLayerProps,
+    SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -847,4 +847,51 @@ fn grid_layer_extrudes_cells_by_weight() {
         .filter(|i| pixel(&pixels, i % SIZE, i / SIZE)[3] > 200)
         .count();
     assert!(colored > 50, "cells cover pixels: {colored}");
+}
+
+#[test]
+fn trips_layer_shows_only_the_travelled_part() {
+    let Some(ctx) = context() else { return };
+    // A horizontal path across the view, timestamps 0 on the left to 100 on the right
+    let path: Path = vec![
+        [CENTER[0] - 0.002, CENTER[1], 0.0],
+        [CENTER[0] + 0.002, CENTER[1], 0.0],
+    ];
+    let make = |current_time: f32, fade: bool| {
+        let path = path.clone();
+        TripsLayer::new(TripsLayerProps {
+            path: PathLayerProps {
+                base: LayerProps::new("trips"),
+                data: LayerData::with_length(1),
+                get_path: Accessor::func(move |_| path.clone()),
+                get_color: Accessor::Constant([0, 255, 0, 255]),
+                get_width: Accessor::Constant(6.0),
+                width_units: Unit::Pixels,
+                ..Default::default()
+            },
+            get_timestamps: Accessor::Constant(vec![0.0, 100.0]),
+            current_time,
+            trail_length: 1000.0,
+            fade_trail: fade,
+        })
+    };
+    let pixels = render(&ctx, vec![Box::new(make(50.0, false))]);
+    let c = SIZE / 2;
+    assert_pixel(&pixels, c - 12, c, [0, 255, 0, 255], 1);
+    assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
+
+    // With fading, older parts of the trail are more transparent
+    let faded = render(
+        &ctx,
+        vec![Box::new(TripsLayer::new(TripsLayerProps {
+            trail_length: 60.0,
+            ..make(60.0, true).props().clone()
+        }))],
+    );
+    let old = pixel(&faded, c - 20, c);
+    let recent = pixel(&faded, c + 2, c);
+    assert!(
+        recent[3] > old[3] + 50,
+        "recent {recent:?} is more opaque than old {old:?}"
+    );
 }

@@ -220,6 +220,14 @@ impl Deck {
         });
     }
 
+    /// A layer by id, to change it in place (for instance a `TripsLayer`'s current time).
+    pub fn layer_mut(&mut self, id: &str) -> Option<&mut (dyn Layer + 'static)> {
+        self.layers
+            .iter_mut()
+            .find(|e| e.layer.id() == id)
+            .map(|e| e.layer.as_mut())
+    }
+
     pub fn layers(&self) -> impl Iterator<Item = &dyn Layer> {
         self.layers.iter().map(|e| e.layer.as_ref())
     }

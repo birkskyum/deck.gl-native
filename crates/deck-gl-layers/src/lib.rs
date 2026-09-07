@@ -21,6 +21,7 @@ pub mod scatterplot_layer;
 pub mod solid_polygon_layer;
 pub mod text;
 pub mod text_layer;
+pub mod trips_layer;
 
 pub use aggregation::{
     AggregatedBin, AggregationOperation, AggregationProps, ScaleType, DEFAULT_COLOR_RANGE,
@@ -41,3 +42,4 @@ pub use scatterplot_layer::{ScatterplotLayer, ScatterplotLayerProps};
 pub use solid_polygon_layer::{SolidPolygonLayer, SolidPolygonLayerProps};
 pub use text::{CharacterSet, FontAtlas, FontSettings, FontSource, WordBreak};
 pub use text_layer::{AlignmentBaseline, TextAnchor, TextLayer, TextLayerProps};
+pub use trips_layer::{TripsLayer, TripsLayerProps};

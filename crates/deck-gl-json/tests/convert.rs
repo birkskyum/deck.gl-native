@@ -419,3 +419,29 @@ fn arrow_tables_feed_layers_through_column_accessors() {
     let error = converter.convert(&geojson).unwrap_err().to_string();
     assert!(error.contains("GeoJSON"), "{error}");
 }
+
+#[test]
+fn trips_and_great_circle_layers() {
+    let spec = json!([
+        {
+            "@@type": "TripsLayer",
+            "id": "trips",
+            "data": [{"path": [[-122.4, 37.8], [-122.41, 37.81]], "timestamps": [0, 60]}],
+            "getPath": "@@=path",
+            "getTimestamps": "@@=timestamps",
+            "currentTime": 30,
+            "trailLength": 100,
+            "widthMinPixels": 2
+        },
+        {
+            "@@type": "GreatCircleLayer",
+            "id": "routes",
+            "data": [{"from": [-122.4, 37.8], "to": [2.35, 48.85]}],
+            "getSourcePosition": "@@=from",
+            "getTargetPosition": "@@=to"
+        }
+    ]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 2);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+}

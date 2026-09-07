@@ -20,7 +20,7 @@ and the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
 
 Working today, headless and verified pixel by pixel in tests:
 
-- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, the composite `PolygonLayer` and `GeoJsonLayer`, and the aggregation layers `HexagonLayer` and `GridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs)
+- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, the composite `PolygonLayer` and `GeoJsonLayer`, the aggregation layers `HexagonLayer` and `GridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs), and `TripsLayer` and `GreatCircleLayer` from `@deck.gl/geo-layers`
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it
 - deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
 - Arrow record batches as layer data, with column, constant and function accessors
@@ -56,7 +56,7 @@ Not yet: transitions, controllers, and the wider layer catalog. See
 | `math-gl` | `@math.gl/web-mercator` | Web Mercator projection and camera math, f64 |
 | `luma-gl` | `@luma.gl/core`, `@luma.gl/shadertools` | Shader assembly, uniform blocks, textures, `Model`, headless device helpers |
 | `deck-gl` | `@deck.gl/core` | `Deck`, `Layer`, `Viewport`, the `project` shader module, Arrow data accessors |
-| `deck-gl-layers` | `@deck.gl/layers`, `@deck.gl/aggregation-layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer`, `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, `PolygonLayer`, `GeoJsonLayer`, `HexagonLayer`, `GridLayer` |
+| `deck-gl-layers` | `@deck.gl/layers`, `@deck.gl/aggregation-layers`, `@deck.gl/geo-layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer`, `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, `PolygonLayer`, `GeoJsonLayer`, `HexagonLayer`, `GridLayer`, `TripsLayer`, `GreatCircleLayer` |
 | `deck-gl-json` | `@deck.gl/json` | JSON descriptions (pydeck format) with expression accessors |
 | `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop; JSON layers |
 | `deck-gl-examples` | | Example binaries |

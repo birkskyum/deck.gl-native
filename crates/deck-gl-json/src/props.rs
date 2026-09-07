@@ -454,6 +454,13 @@ pub mod convert {
         Ok([v[0] as f32, v[1] as f32, v[2] as f32])
     }
 
+    pub fn f32_list(value: &Value) -> Result<Vec<f32>, String> {
+        let items = value
+            .as_array()
+            .ok_or_else(|| format!("expected an array of numbers, got {}", describe(value)))?;
+        items.iter().map(|v| number(v).map(|n| n as f32)).collect()
+    }
+
     pub fn path(value: &Value) -> Result<Path, String> {
         let items = value
             .as_array()
