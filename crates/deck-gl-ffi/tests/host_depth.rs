@@ -33,6 +33,14 @@ fn render(near_far: Option<(f64, f64)>, name: &str) -> Vec<u8> {
         width: SIZE,
         height: SIZE,
         pixel_ratio: 1.0,
+        padding_left: 0.0,
+        padding_right: 0.0,
+        padding_top: 0.0,
+        padding_bottom: 0.0,
+        roll_degrees: 0.0,
+        center_elevation_meters: 0.0,
+        has_projection_matrix: 0,
+        projection_matrix: [0.0; 16],
     };
     let target = RenderTarget::default();
     let color = create_render_texture(&ctx.device, "color", SIZE, SIZE, target.color_format);
@@ -112,6 +120,14 @@ fn gpu_depth_matches_cpu_projection_for_elevated_points() {
         width: w,
         height: h,
         pixel_ratio: 1.0,
+        padding_left: 0.0,
+        padding_right: 0.0,
+        padding_top: 0.0,
+        padding_bottom: 0.0,
+        roll_degrees: 0.0,
+        center_elevation_meters: 0.0,
+        has_projection_matrix: 0,
+        projection_matrix: [0.0; 16],
     };
     let target = RenderTarget {
         depth_format: Some(wgpu::TextureFormat::Depth32Float),
@@ -249,6 +265,14 @@ fn project_uniforms_reproduce_the_viewport_depth() {
         width: w,
         height: h,
         pixel_ratio: 1.0,
+        padding_left: 0.0,
+        padding_right: 0.0,
+        padding_top: 0.0,
+        padding_bottom: 0.0,
+        roll_degrees: 0.0,
+        center_elevation_meters: 0.0,
+        has_projection_matrix: 0,
+        projection_matrix: [0.0; 16],
     };
     let viewport = viewport_from_camera(&camera);
     let u = get_uniforms_from_viewport(&ProjectProps {

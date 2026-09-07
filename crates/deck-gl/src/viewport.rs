@@ -43,6 +43,13 @@ pub struct WebMercatorViewportOptions {
     pub near_z: Option<f64>,
     /// Optionally override the far plane position.
     pub far_z: Option<f64>,
+    /// Padding in pixels; the projection centre moves to the centre of the unpadded area
+    pub padding: Option<Padding>,
+    /// Rotation around the view axis in degrees (a host's roll)
+    pub roll: f64,
+    /// A projection matrix from the host instead of one built from `fovy` and the planes;
+    /// the field of view is read back from it
+    pub projection_matrix: Option<DMat4>,
 }
 
 impl Default for WebMercatorViewportOptions {
@@ -65,6 +72,9 @@ impl Default for WebMercatorViewportOptions {
             far_z_multiplier: 1.01,
             near_z: None,
             far_z: None,
+            padding: None,
+            roll: 0.0,
+            projection_matrix: None,
         }
     }
 }
@@ -462,9 +472,14 @@ impl Viewport {
         let height = if opts.height > 0.0 { opts.height } else { 1.0 };
         let scale = wm::zoom_to_scale(opts.zoom);
 
-        let (fovy, altitude) = match opts.fovy {
-            Some(fovy) => (fovy, wm::fovy_to_altitude(fovy)),
-            None => (wm::altitude_to_fovy(opts.altitude), opts.altitude),
+        let (fovy, altitude) = match (opts.projection_matrix, opts.fovy) {
+            // deck.gl reads the field of view back from a given projection matrix
+            (Some(matrix), _) => {
+                let altitude = matrix.y_axis.y / 2.0;
+                (wm::altitude_to_fovy(altitude), altitude)
+            }
+            (None, Some(fovy)) => (fovy, wm::fovy_to_altitude(fovy)),
+            (None, None) => (wm::altitude_to_fovy(opts.altitude), opts.altitude),
         };
 
         let mut projection_parameters = get_projection_parameters(&ProjectionOptions {
@@ -490,7 +505,7 @@ impl Viewport {
 
         // The uncentered matrix allows us to move the center addition to the shader (cheap)
         // which gives a coordinate system that has its center in the layer's center position.
-        let view_matrix_uncentered = get_view_matrix(&ViewMatrixOptions {
+        let mut view_matrix_uncentered = get_view_matrix(&ViewMatrixOptions {
             height,
             pitch: opts.pitch,
             bearing: opts.bearing,
@@ -498,6 +513,10 @@ impl Viewport {
             altitude,
             center: None,
         });
+        if opts.roll != 0.0 {
+            // Roll turns the camera around its own view axis
+            view_matrix_uncentered = DMat4::from_rotation_z(opts.roll.to_radians()) * view_matrix_uncentered;
+        }
 
         // Base Viewport initialization (`_initProps` and `_initMatrices`)
         let distance_scales = get_distance_scales(opts.longitude, opts.latitude, false);
@@ -507,12 +526,14 @@ impl Viewport {
             DVec3::new(center_ll[0], center_ll[1], 0.0) + meter_offset * distance_scales.units_per_meter;
 
         let view_matrix = view_matrix_uncentered * DMat4::from_translation(-center);
-        let projection_matrix = wm::perspective(
-            projection_parameters.fov,
-            projection_parameters.aspect,
-            projection_parameters.near,
-            projection_parameters.far,
-        );
+        let projection_matrix = opts.projection_matrix.unwrap_or_else(|| {
+            wm::perspective(
+                projection_parameters.fov,
+                projection_parameters.aspect,
+                projection_parameters.near,
+                projection_parameters.far,
+            )
+        });
         let view_projection_matrix = projection_matrix * view_matrix;
         let view_matrix_inverse = view_matrix.inverse();
         let camera_position = view_matrix_inverse.w_axis.truncate();
@@ -523,7 +544,7 @@ impl Viewport {
         let pixel_projection_matrix = viewport_matrix * view_projection_matrix;
         let pixel_unprojection_matrix = pixel_projection_matrix.inverse();
 
-        Self {
+        let viewport = Self {
             id: opts.id.clone(),
             x: opts.x,
             y: opts.y,
@@ -558,6 +579,10 @@ impl Viewport {
             padding: None,
             globe: false,
             resolution: 0.0,
+        };
+        match opts.padding {
+            Some(padding) => viewport.with_padding(padding),
+            None => viewport,
         }
     }
 
@@ -1336,6 +1361,62 @@ mod tests {
     }
 
     #[test]
+    fn host_projection_matrix_roll_and_padding_options() {
+        let plain = sf();
+        // A given projection matrix is used as is and its field of view read back
+        let custom = Viewport::web_mercator(&WebMercatorViewportOptions {
+            projection_matrix: Some(plain.projection_matrix),
+            fovy: None,
+            ..sf_options()
+        });
+        assert!((custom.fovy - plain.fovy).abs() < 1e-9 && (custom.altitude - plain.altitude).abs() < 1e-9);
+        assert_eq!(custom.projection_matrix, plain.projection_matrix);
+        // A shifted projection centre (as a host's padding would give) moves every point by a
+        // quarter of the width, while the field of view read back stays the same
+        let mut shifted = plain.projection_matrix;
+        shifted.z_axis.x -= 0.5;
+        let squeezed = Viewport::web_mercator(&WebMercatorViewportOptions {
+            projection_matrix: Some(shifted),
+            ..sf_options()
+        });
+        let p = plain.project(DVec3::new(plain.longitude + 0.001, plain.latitude, 0.0), true);
+        let q = squeezed.project(DVec3::new(plain.longitude + 0.001, plain.latitude, 0.0), true);
+        assert!((q.x - p.x - plain.width / 4.0).abs() < 1e-6, "{p:?} {q:?}");
+        // Roll turns the scene on screen: with a north up flat view, a point east of the centre
+        // moves straight up by the same distance under a 90 degree roll
+        let flat_options = WebMercatorViewportOptions {
+            bearing: 0.0,
+            pitch: 0.0,
+            ..sf_options()
+        };
+        let flat = Viewport::web_mercator(&flat_options);
+        let rolled = Viewport::web_mercator(&WebMercatorViewportOptions {
+            roll: 90.0,
+            ..flat_options
+        });
+        let east_point = DVec3::new(plain.longitude + 0.001, plain.latitude, 0.0);
+        let p0 = flat.project(east_point, true);
+        let r = rolled.project(east_point, true);
+        let dx = p0.x - flat.width / 2.0;
+        assert!(dx > 1.0, "{p0:?}");
+        assert!((r.x - flat.width / 2.0).abs() < 1e-6, "{r:?}");
+        assert!(((flat.height / 2.0 - r.y) - dx).abs() < 1e-6, "{p0:?} {r:?}");
+        // Padding through the options shifts the centre like with_padding
+        let padded = Viewport::web_mercator(&WebMercatorViewportOptions {
+            padding: Some(Padding {
+                left: 100.0,
+                ..Default::default()
+            }),
+            ..sf_options()
+        });
+        let c = padded.project(DVec3::new(padded.longitude, padded.latitude, 0.0), true);
+        assert!(
+            (c.x - (100.0 + (padded.width - 100.0) / 2.0)).abs() < 1e-6,
+            "{c:?}"
+        );
+    }
+
+    #[test]
     fn padding_moves_the_projection_centre() {
         let v = sf().with_padding(Padding {
             left: 200.0,
@@ -1355,8 +1436,8 @@ mod tests {
         assert!((back.x - v.longitude).abs() < 1e-9 && (back.y - v.latitude).abs() < 1e-9);
     }
 
-    fn sf() -> Viewport {
-        Viewport::web_mercator(&WebMercatorViewportOptions {
+    fn sf_options() -> WebMercatorViewportOptions {
+        WebMercatorViewportOptions {
             width: 800.0,
             height: 600.0,
             longitude: -122.45,
@@ -1365,7 +1446,11 @@ mod tests {
             pitch: 30.0,
             bearing: 20.0,
             ..Default::default()
-        })
+        }
+    }
+
+    fn sf() -> Viewport {
+        Viewport::web_mercator(&sf_options())
     }
 
     // Golden values from @math.gl/web-mercator WebMercatorViewport with nearZMultiplier 0.1

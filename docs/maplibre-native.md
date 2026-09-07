@@ -18,7 +18,8 @@ frame is presented once. No texture copies, no compositing pass.
    deck submits is committed on that queue, so it runs after whatever the host committed
    before it.
 2. `deckgl_set_camera` receives the map camera each frame: center, zoom, bearing, pitch,
-   field of view, the host's near and far planes in pixels, the viewport size and the pixel
+   field of view, the host's near and far planes in pixels, padding, roll, the elevation of the
+   centre (terrain) or the host's own projection matrix, the viewport size and the pixel
    ratio. deck builds a `WebMercatorViewport` from it the way `@deck.gl/mapbox` does, so
    projection and depth match the map.
 3. `deckgl_metal_render(color, depth, clear_depth)` wraps the host's `MTLTexture`s as wgpu

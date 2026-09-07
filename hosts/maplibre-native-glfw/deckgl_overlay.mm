@@ -85,6 +85,14 @@ void setCamera(const mln::CameraOptions& camera, uint32_t width, uint32_t height
     c.width = width;
     c.height = height;
     c.pixel_ratio = pixelRatio;
+    if (camera.padding) {
+        c.padding_left = camera.padding->left();
+        c.padding_right = camera.padding->right();
+        c.padding_top = camera.padding->top();
+        c.padding_bottom = camera.padding->bottom();
+    }
+    // Hosts with terrain can set c.center_elevation_meters, and c.has_projection_matrix with
+    // the map's projection matrix to match its projection exactly.
 
     pendingCamera = c;
     if (handle) {

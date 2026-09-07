@@ -38,6 +38,46 @@ pub struct DeckglCamera {
     pub width: u32,
     pub height: u32,
     pub pixel_ratio: f32,
+    /// Padding in logical pixels: the map centre sits in the middle of the unpadded area
+    pub padding_left: f64,
+    pub padding_right: f64,
+    pub padding_top: f64,
+    pub padding_bottom: f64,
+    /// Rotation around the view axis in degrees
+    pub roll_degrees: f64,
+    /// Elevation of the map centre in meters (terrain), the camera looks at this height
+    pub center_elevation_meters: f64,
+    /// When nonzero, `projection_matrix` replaces the projection built from the field of view
+    /// and the planes
+    pub has_projection_matrix: i32,
+    /// Column major, OpenGL clip conventions (as maplibre's), used with `has_projection_matrix`
+    pub projection_matrix: [f64; 16],
+}
+
+impl Default for DeckglCamera {
+    fn default() -> Self {
+        Self {
+            longitude: 0.0,
+            latitude: 0.0,
+            zoom: 0.0,
+            bearing: 0.0,
+            pitch: 0.0,
+            fov_degrees: 0.0,
+            near_z_pixels: 0.0,
+            far_z_pixels: 0.0,
+            width: 1,
+            height: 1,
+            pixel_ratio: 1.0,
+            padding_left: 0.0,
+            padding_right: 0.0,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            roll_degrees: 0.0,
+            center_elevation_meters: 0.0,
+            has_projection_matrix: 0,
+            projection_matrix: [0.0; 16],
+        }
+    }
 }
 
 /// Opaque handle returned to the host.
@@ -99,19 +139,7 @@ impl DeckglHandle {
                 deck.set_layers(layers);
             }
         } else {
-            let camera = self.camera.unwrap_or(DeckglCamera {
-                longitude: 0.0,
-                latitude: 0.0,
-                zoom: 0.0,
-                bearing: 0.0,
-                pitch: 0.0,
-                fov_degrees: 0.0,
-                near_z_pixels: 0.0,
-                far_z_pixels: 0.0,
-                width: 1,
-                height: 1,
-                pixel_ratio: 1.0,
-            });
+            let camera = self.camera.unwrap_or_default();
             let mut deck = Deck::new(
                 &self.device,
                 &self.queue,
@@ -194,6 +222,31 @@ pub fn viewport_from_camera(camera: &DeckglCamera) -> Viewport {
     if camera.near_z_pixels > 0.0 && camera.far_z_pixels > camera.near_z_pixels {
         opts.near_z = Some(camera.near_z_pixels / height);
         opts.far_z = Some(camera.far_z_pixels / height);
+    }
+    let padding = [
+        camera.padding_left,
+        camera.padding_right,
+        camera.padding_top,
+        camera.padding_bottom,
+    ];
+    if padding.iter().any(|p| *p != 0.0) {
+        opts.padding = Some(deck_gl::Padding {
+            left: padding[0],
+            right: padding[1],
+            top: padding[2],
+            bottom: padding[3],
+        });
+    }
+    opts.roll = camera.roll_degrees;
+    if camera.center_elevation_meters != 0.0 {
+        opts.position = Some(deck_gl::glam::DVec3::new(
+            0.0,
+            0.0,
+            camera.center_elevation_meters,
+        ));
+    }
+    if camera.has_projection_matrix != 0 {
+        opts.projection_matrix = Some(deck_gl::glam::DMat4::from_cols_array(&camera.projection_matrix));
     }
     let viewport = Viewport::web_mercator(&opts);
     if std::env::var_os("DECKGL_DEBUG").is_some() {
@@ -599,6 +652,7 @@ mod tests {
             width: 1024,
             height: 768,
             pixel_ratio: 2.0,
+            ..Default::default()
         };
         let viewport = viewport_from_camera(&camera);
         assert!((viewport.near - 1.0 / 768.0).abs() < 1e-12);
@@ -626,6 +680,7 @@ mod tests {
             width: 1400,
             height: 1000,
             pixel_ratio: 2.0,
+            ..Default::default()
         };
         let host = viewport_from_camera(&camera);
         let plain = Viewport::web_mercator(&WebMercatorViewportOptions {
@@ -677,6 +732,7 @@ mod tests {
             width: 100,
             height: 100,
             pixel_ratio: 1.0,
+            ..Default::default()
         };
         let viewport = viewport_from_camera(&camera);
         assert_eq!(
@@ -684,5 +740,64 @@ mod tests {
             "longitude is wrapped into [-180, 180)"
         );
         assert!((viewport.near - 0.1).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+
+    fn camera() -> DeckglCamera {
+        DeckglCamera {
+            longitude: 10.0,
+            latitude: 50.0,
+            zoom: 12.0,
+            bearing: 0.0,
+            pitch: 0.0,
+            fov_degrees: 36.87,
+            near_z_pixels: 0.0,
+            far_z_pixels: 0.0,
+            width: 400,
+            height: 300,
+            pixel_ratio: 1.0,
+            padding_left: 0.0,
+            padding_right: 0.0,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            roll_degrees: 0.0,
+            center_elevation_meters: 0.0,
+            has_projection_matrix: 0,
+            projection_matrix: [0.0; 16],
+        }
+    }
+
+    #[test]
+    fn padding_elevation_and_host_projection_reach_the_viewport() {
+        let plain = viewport_from_camera(&camera());
+        let padded = viewport_from_camera(&DeckglCamera {
+            padding_left: 200.0,
+            ..camera()
+        });
+        let c = padded.project(deck_gl::glam::DVec3::new(10.0, 50.0, 0.0), true);
+        assert!((c.x - 300.0).abs() < 1e-6 && (c.y - 150.0).abs() < 1e-6, "{c:?}");
+        // A centre on terrain: the ground at the centre sits below the screen centre
+        let raised = viewport_from_camera(&DeckglCamera {
+            center_elevation_meters: 100.0,
+            pitch: 45.0,
+            ..camera()
+        });
+        let ground = raised.project(deck_gl::glam::DVec3::new(10.0, 50.0, 0.0), true);
+        let top = raised.project(deck_gl::glam::DVec3::new(10.0, 50.0, 100.0), true);
+        assert!(
+            (top.y - 150.0).abs() < 1e-6 && ground.y > 150.0,
+            "{ground:?} {top:?}"
+        );
+        // The host's projection matrix is used as is
+        let mut host = camera();
+        host.has_projection_matrix = 1;
+        host.projection_matrix = plain.projection_matrix.to_cols_array();
+        let from_host = viewport_from_camera(&host);
+        assert_eq!(from_host.projection_matrix, plain.projection_matrix);
+        assert!((from_host.fovy - plain.fovy).abs() < 1e-9);
     }
 }

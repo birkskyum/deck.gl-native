@@ -36,6 +36,20 @@ typedef struct DeckglCamera {
     uint32_t height;
     /** Physical pixels per logical pixel */
     float pixel_ratio;
+    /** Padding in logical pixels: the map centre sits in the middle of the unpadded area */
+    double padding_left;
+    double padding_right;
+    double padding_top;
+    double padding_bottom;
+    /** Rotation around the view axis in degrees */
+    double roll_degrees;
+    /** Elevation of the map centre in meters (terrain); the camera looks at this height */
+    double center_elevation_meters;
+    /** When nonzero, `projection_matrix` replaces the projection built from the field of view
+     *  and the planes. Zero initialise the struct to keep the old behaviour. */
+    int32_t has_projection_matrix;
+    /** Column major, OpenGL clip conventions, as maplibre's TransformState::getProjMatrix */
+    double projection_matrix[16];
 } DeckglCamera;
 
 /** Create a deck on an existing Metal device and command queue (id<MTLDevice>, id<MTLCommandQueue>).
