@@ -1476,6 +1476,53 @@ fn geohash_encode(lng: f64, lat: f64, length: usize) -> String {
 }
 
 #[test]
+fn mvt_layer_draws_decoded_vector_tiles() {
+    use deck_gl_layers::{
+        encode_tile, mvt_loader_with, GeoJsonLayerProps, MvtLayer, MvtLayerProps, TileLayerProps,
+    };
+    use std::collections::HashMap;
+    let Some(ctx) = context() else { return };
+    // Every tile holds one polygon covering its whole area, tagged with the tile's z
+    let loader = mvt_loader_with(|index| {
+        let mut props = HashMap::new();
+        props.insert("z".to_string(), serde_json::Value::from(index.z));
+        Ok(Some(encode_tile(&[(
+            "fill",
+            4096,
+            vec![(
+                3,
+                vec![vec![[0, 0], [4096, 0], [4096, 4096], [0, 4096], [0, 0]]],
+                props,
+            )],
+        )])))
+    });
+    let layer = MvtLayer::new(MvtLayerProps {
+        tiles: TileLayerProps {
+            base: LayerProps::new("vector"),
+            get_tile_data: Some(loader),
+            ..Default::default()
+        },
+        geojson: GeoJsonLayerProps {
+            get_fill_color: Accessor::Constant([0, 0, 255, 255]),
+            stroked: false,
+            ..Default::default()
+        },
+        layers: Some(vec!["fill".to_string()]),
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    let mut shot = deck.snapshot(None).unwrap();
+    for _ in 0..100 {
+        if shot.pixel(SIZE / 2, SIZE / 2)[3] > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        shot = deck.snapshot(None).unwrap();
+    }
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
+    assert_eq!(shot.pixel(1, 1), [0, 0, 255, 255], "tiles cover the whole view");
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

@@ -10,10 +10,10 @@ use deck_gl_layers::{
     ContourLayerProps, ContourThreshold, FontSettings, FontSource, GeoCellLayer, GeoCellLayerProps,
     GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HeatmapAggregation,
     HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps,
-    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
-    PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps,
-    ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer,
-    TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
+    LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
+    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer,
+    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -187,6 +187,82 @@ pub fn convert_layer(
                 z_offset: props.f32("zOffset", d.z_offset as f32)? as f64,
                 get_position: props.accessor("getPosition", "position", convert::position)?,
                 get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
+            }))
+        }
+        "MVTLayer" => {
+            let templates: Vec<String> = match props.get("data") {
+                Some(Value::String(url)) => vec![url.clone()],
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| props.error("data", "expected URL templates"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                _ => return Err(props.error("data", "expected a tile URL template")),
+            };
+            if !templates.iter().all(|t| deck_gl_layers::is_url_template(t)) {
+                return Err(props.error("data", "expected URL templates with {z}, {x} and {y} (or {-y})"));
+            }
+            props.get("binary");
+            props.get("uniqueIdProperty");
+            props.get("highlightedFeatureId");
+            props.get("loaders");
+            props.get("loadOptions");
+            let d = TileLayerProps::default();
+            let optional_zoom = |key: &str| -> Result<Option<u32>> {
+                match props.get(key) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(v) => convert::f32(v)
+                        .map(|z| Some(z as u32))
+                        .map_err(|m| props.error(key, m)),
+                }
+            };
+            let source_layers = match props.get("layers") {
+                None | Some(Value::Null) => None,
+                Some(Value::Array(items)) => Some(
+                    items
+                        .iter()
+                        .map(|v| {
+                            v.as_str()
+                                .map(str::to_string)
+                                .ok_or_else(|| props.error("layers", "expected layer names"))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+                Some(other) => {
+                    return Err(props.error(
+                        "layers",
+                        format!(
+                            "expected an array of names, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+            };
+            let geojson = geojson(&props, Arc::new(FeatureCollection::default()))?;
+            let base = props.base()?;
+            Box::new(MvtLayer::new(MvtLayerProps {
+                tiles: TileLayerProps {
+                    base,
+                    get_tile_data: Some(mvt_tile_loader(templates)),
+                    tile_size: props.f32("tileSize", d.tile_size as f32)? as f64,
+                    min_zoom: optional_zoom("minZoom")?.or(d.min_zoom),
+                    max_zoom: optional_zoom("maxZoom")?,
+                    zoom_offset: props.f32("zoomOffset", d.zoom_offset as f32)? as f64,
+                    extent: match props.get("extent") {
+                        None | Some(Value::Null) => None,
+                        Some(v) => {
+                            let n = convert::numbers(v, 4, 4).map_err(|m| props.error("extent", m))?;
+                            Some([n[0], n[1], n[2], n[3]])
+                        }
+                    },
+                    max_requests: props.f32("maxRequests", d.max_requests as f32)? as usize,
+                    ..Default::default()
+                },
+                geojson,
+                layers: source_layers,
             }))
         }
         "TileLayer" => {
@@ -972,5 +1048,15 @@ fn tile_loader(templates: Vec<String>) -> deck_gl_layers::TileLoader {
 
 #[cfg(not(feature = "fetch"))]
 fn tile_loader(_templates: Vec<String>) -> deck_gl_layers::TileLoader {
+    deck_gl_layers::TileLoader::new(|_, _| Err("built without the fetch feature".to_string()))
+}
+
+#[cfg(feature = "fetch")]
+fn mvt_tile_loader(templates: Vec<String>) -> deck_gl_layers::TileLoader {
+    deck_gl_layers::mvt_layer::mvt_loader(templates)
+}
+
+#[cfg(not(feature = "fetch"))]
+fn mvt_tile_loader(_templates: Vec<String>) -> deck_gl_layers::TileLoader {
     deck_gl_layers::TileLoader::new(|_, _| Err("built without the fetch feature".to_string()))
 }

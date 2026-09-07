@@ -28,3 +28,4 @@ image = { workspace = true, features = ["jpeg"] }
 ureq = { version = "3", optional = true }
 h3o = "0.8"
 s2 = "0.0.12"
+flate2 = "1"

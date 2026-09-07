@@ -752,3 +752,22 @@ fn geo_cell_layers() {
     let ids: Vec<&str> = deck.layers.iter().map(|l| l.id()).collect();
     assert_eq!(ids, ["h3", "s2", "geohash", "quadkey"]);
 }
+
+#[test]
+fn mvt_layer_from_a_url_template() {
+    let spec = json!([{
+        "@@type": "MVTLayer",
+        "id": "vector",
+        "data": "https://example.com/tiles/{z}/{x}/{y}.pbf",
+        "minZoom": 0,
+        "maxZoom": 14,
+        "layers": ["water", "roads"],
+        "getFillColor": [0, 80, 200],
+        "getLineColor": [255, 255, 255],
+        "lineWidthMinPixels": 1,
+        "binary": true
+    }]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 1);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+}
