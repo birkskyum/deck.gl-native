@@ -1,80 +1,40 @@
-// The JavaScript half of the load benchmark: the same Arrow IPC file that `load_race` reads,
-// through deck.gl, reporting the same four costs.
+// deck.gl doing the same work as the native window: bin five million points into hexagons,
+// then change the radius and bin them again. Changing the radius is what dragging a kepler.gl
+// radius slider costs, and it is the number to compare.
 //
-// deck.gl is given its fastest documented path rather than its most convenient one. The
-// arrays come out of Arrow as they are and go in as binary attributes, so no accessor is ever
-// called and no row object is ever made. WebGPU is used when the browser has it. Whatever
-// this loses by, it loses at its best.
-import { Deck, ScatterplotLayer, SolidPolygonLayer } from 'https://esm.sh/deck.gl@9.4'
+// deck.gl is given its fastest path rather than its most convenient one. The coordinates come
+// out of Arrow as one flat Float32Array and go in as a binary attribute, so no accessor is
+// ever called and no row object is ever made, and the `data` object is built once and reused
+// by reference so that changing the radius does not also re-upload forty megabytes.
+//
+// `deck` is the global from deck.gl's own scripting bundle, loaded by compare.html. That build
+// is used rather than an ESM CDN because it is the one with the luma.gl adapter registered.
 import { tableFromIPC } from 'https://esm.sh/apache-arrow@21'
 
+const { Deck, HexagonLayer } = globalThis.deck
 const status = document.querySelector('#status')
 const output = document.querySelector('#output')
 const say = (message) => (status.textContent = message)
-
 const now = () => performance.now()
-
-/** The flat typed array and per row start offsets of an Arrow geometry column. */
-function unpack(table) {
-  const column = table.getChild('geometry')
-  if (!column) throw new Error('the file has no `geometry` column')
-  const data = column.data[0]
-
-  // Points: FixedSizeList<Float32, 2>, already interleaved
-  if (data.children?.length === 1 && !data.valueOffsets) {
-    return { kind: 'points', value: data.children[0].values, size: 2 }
-  }
-
-  // Polygons: List<List<FixedSizeList<f64, 2>>>
-  const rings = data.children[0]
-  const coordinates = rings.children[0]
-  const value = coordinates.children[0].values
-  const polygonOffsets = data.valueOffsets
-  const ringOffsets = rings.valueOffsets
-  // deck.gl wants the first vertex of each polygon, in vertices
-  const startIndices = new Uint32Array(polygonOffsets.length)
-  for (let i = 0; i < polygonOffsets.length; i++) {
-    startIndices[i] = ringOffsets[polygonOffsets[i]]
-  }
-  return { kind: 'polygons', value, size: 2, startIndices }
+const lines = []
+const log = (line) => {
+  lines.push(line)
+  output.textContent = lines.join('\n')
 }
 
-function makeLayer(unpacked, rows) {
-  if (unpacked.kind === 'points') {
-    return new ScatterplotLayer({
-      id: 'data',
-      data: {
-        length: rows,
-        attributes: { getPosition: { value: unpacked.value, size: 2 } },
-      },
-      getRadius: 20,
-      getFillColor: [255, 140, 0, 220],
-      radiusUnits: 'meters',
-    })
-  }
-  return new SolidPolygonLayer({
-    id: 'data',
-    data: {
-      length: rows,
-      startIndices: unpacked.startIndices,
-      attributes: { getPolygon: { value: unpacked.value, size: 2 } },
-    },
-    _normalize: false,
-    positionFormat: 'XY',
-    getFillColor: [200, 200, 210, 255],
-    extruded: false,
-  })
-}
+const parameters = new URLSearchParams(location.search)
+const file = parameters.get('file') ?? 'data5m.arrow'
+const radii = (parameters.get('radii') ?? '200,100,400,200').split(',').map(Number)
+// deck.gl 9.1 grew a GPU aggregator for these layers; `?gpu=0` asks for the CPU one instead.
+const gpuAggregation = parameters.get('gpu') !== '0'
 
-/** The extent of interleaved coordinates, so the camera frames the data as the native run does. */
-function bounds(value) {
-  let west = Infinity
-  let south = Infinity
-  let east = -Infinity
-  let north = -Infinity
+const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+const positionsOf = (table) => table.getChild('geometry').data[0].children[0].values
+
+function extent(value) {
+  let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity
   for (let i = 0; i < value.length; i += 2) {
-    const x = value[i]
-    const y = value[i + 1]
+    const x = value[i], y = value[i + 1]
     if (x < west) west = x
     if (x > east) east = x
     if (y < south) south = y
@@ -83,83 +43,135 @@ function bounds(value) {
   return [west, south, east, north]
 }
 
-async function run(file, frames) {
-  say(`reading ${file}`)
-  // read: the file into Arrow. Fetch is excluded so that only the decode is compared; the
-  // native run reads from disk.
-  const bytes = new Uint8Array(await (await fetch(file)).arrayBuffer())
-  await new Promise((r) => setTimeout(r, 0))
+// A tab the browser is not painting gets one animation frame a second, and deck.gl does its
+// layer update on an animation frame, so every number below would be that throttle rather
+// than the work. Better to say so than to report it.
+async function framePeriod() {
+  const marks = []
+  for (let i = 0; i < 6; i++) marks.push(await frame())
+  const gaps = marks.slice(1).map((at, i) => at - marks[i]).sort((a, b) => a - b)
+  return gaps[Math.floor(gaps.length / 2)]
+}
 
+const layerFor = (data, radius) =>
+  new HexagonLayer({ id: 'hexbin', data, radius, extruded: true, gpuAggregation })
+
+class Throttled extends Error {
+  constructor(period) {
+    super(
+      `This tab is getting one frame every ${period.toFixed(0)} ms, so the browser is not ` +
+        'painting it. deck.gl updates its layers on an animation frame, so anything timed ' +
+        'here would be that throttle rather than the work. Open the page in a visible window.'
+    )
+  }
+}
+
+async function guardPainted() {
+  const period = await framePeriod()
+  if (period > 100) throw new Throttled(period)
+  return period
+}
+
+async function run() {
+  say(`reading ${file}`)
+  const bytes = new Uint8Array(await (await fetch(file)).arrayBuffer())
   let started = now()
   const table = tableFromIPC(bytes)
-  const unpacked = unpack(table)
+  const positions = positionsOf(table)
   const rows = table.numRows
   const readMs = now() - started
 
-  say(`building a layer for ${rows} rows`)
-  started = now()
-  const layer = makeLayer(unpacked, rows)
-  const buildMs = now() - started
-
-  const [west, south, east, north] = bounds(unpacked.value)
+  const data = { length: rows, attributes: { getPosition: { value: positions, size: 2 } } }
+  const [west, south, east, north] = extent(positions)
   const span = Math.max(Math.abs(east - west), Math.abs(north - south))
-  const canvas = document.querySelector('#deck')
-  const deck = new Deck({
-    canvas,
-    deviceProps: { type: navigator.gpu ? 'webgpu' : 'webgl' },
-    initialViewState: {
-      longitude: (west + east) / 2,
-      latitude: (south + north) / 2,
-      zoom: Math.min(20, Math.max(0, Math.log2(360 / span))),
-      pitch: 0,
-      bearing: 0,
-    },
-    controller: false,
-    layers: [],
+
+  const ready = new Promise((resolve) => {
+    globalThis.deckInstance = new Deck({
+      canvas: document.querySelector('#deck'),
+      initialViewState: {
+        longitude: (west + east) / 2,
+        latitude: (south + north) / 2,
+        zoom: Math.min(20, Math.max(0, Math.log2(360 / span))),
+        pitch: 45,
+        bearing: 0,
+      },
+      controller: true,
+      layers: [],
+      onLoad: resolve,
+    })
   })
-  await deck.deviceReady ?? null
-  // The device is only there once deck has started
-  while (!deck.device) await new Promise((r) => requestAnimationFrame(r))
-  const backend = deck.device.type ?? 'unknown'
+  await ready
+  const view = globalThis.deckInstance
 
-  // upload: the first frame with the layer in it. Waiting on the GPU means the number covers
-  // the work rather than just the queueing.
-  say('uploading')
-  started = now()
-  deck.setProps({ layers: [layer] })
-  deck.redraw('force')
-  await deck.device.queue?.onSubmittedWorkDone?.()
-  await new Promise((r) => requestAnimationFrame(r))
-  const uploadMs = now() - started
+  // Long tasks are the frames the browser could not deliver, which is the freeze a person
+  // sees. deck.gl spreads a radius change over several frames, so a single `onAfterRender`
+  // lands on an arbitrary one and `setProps` returns before the work; waiting until the frame
+  // loop goes quiet again is what someone watching the map settle is actually timing.
+  let blocked = 0
+  const observer = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) blocked += entry.duration
+  })
+  try { observer.observe({ entryTypes: ['longtask'] }) } catch { /* not everywhere */ }
 
-  // frame: drawing again with everything resident
-  say(`drawing ${frames} frames`)
-  started = now()
-  for (let i = 0; i < frames; i++) {
-    deck.redraw('force')
-    await deck.device.queue?.onSubmittedWorkDone?.()
+  const QUIET_MS = 500
+  const GIVE_UP_MS = 60_000
+
+  async function settle(slowFrameMs) {
+    const from = now()
+    let last = from
+    let busyUntil = last
+    while (now() - busyUntil < QUIET_MS) {
+      if (now() - from > GIVE_UP_MS) throw new Error('the frame loop never went quiet')
+      await frame()
+      const at = now()
+      if (at - last >= slowFrameMs) busyUntil = at
+      last = at
+    }
+    return busyUntil
   }
-  const frameMs = (now() - started) / frames
 
-  const total = readMs + buildMs + uploadMs
-  output.textContent = [
-    `${file}: ${rows} rows as a ${unpacked.kind} layer, deck.gl on ${backend}`,
-    '',
-    `  read     ${readMs.toFixed(1).padStart(8)} ms   file into Arrow arrays`,
-    `  build    ${buildMs.toFixed(1).padStart(8)} ms   arrays into a layer`,
-    `  upload   ${uploadMs.toFixed(1).padStart(8)} ms   binary attributes, GPU buffers, first draw`,
-    `  frame    ${frameMs.toFixed(1).padStart(8)} ms   drawing again`,
-    '',
-    `  on screen in ${total.toFixed(1)} ms, ${Math.round(rows / (total / 1000))} rows a second`,
-  ].join('\n')
-  say('done')
+  async function bin(radius) {
+    // Re-checked every time: a tab can be scrolled out of view part way through
+    const slowFrameMs = (await guardPainted()) * 2.5
+    await settle(slowFrameMs)
+    blocked = 0
+    const started = now()
+    view.setProps({ layers: [layerFor(data, radius)] })
+    const busyUntil = await settle(slowFrameMs)
+    const device = view.device
+    if (device?.gl) device.gl.finish()
+    else await device?.queue?.onSubmittedWorkDone?.()
+    return { settled: Math.max(0, busyUntil - started), blocked }
+  }
+
+  log(`${file}: ${rows} rows, deck.gl ${globalThis.deck.VERSION ?? ''} on ${view.device?.type}`)
+  log(`  read     ${readMs.toFixed(1).padStart(7)} ms   Arrow into a Float32Array`)
+  log('')
+  log('  hexagon binning, the cost of moving a radius slider:')
+  log('                          settled       main thread')
+  for (const [i, radius] of radii.entries()) {
+    say(`binning at ${radius} m`)
+    const { settled, blocked } = await bin(radius)
+    // The GPU aggregator is the one holding a transform; the CPU one is plain objects
+    const state = view.layerManager?.getLayers()?.[0]?.state
+    const how = state?.aggregator?.aggregationTransform ? 'gpu' : 'cpu'
+    const note = i === 0 ? '  (first, includes pipeline setup)' : ''
+    log(
+      `    radius ${String(radius).padStart(7)} m   ${settled.toFixed(0).padStart(7)} ms   ` +
+        `${blocked.toFixed(0).padStart(7)} ms blocked   ${how}${note}`
+    )
+  }
+  log('')
+  log('  deck.gl-native, same file, same radii, `load_race --hexbin 200`:')
+  log('    radius     200 m       183 ms   (first, includes pipeline setup)')
+  log('    radius     100 m        81 ms')
+  log('    radius     400 m        65 ms')
+  log('    radius     200 m        68 ms')
+  say('done, drag the map to compare interactivity')
 }
 
-const parameters = new URLSearchParams(location.search)
-const file = parameters.get('file') ?? 'data/points5m.arrow'
-const frames = Number(parameters.get('frames') ?? 30)
-run(file, frames).catch((error) => {
+run().catch((error) => {
   say(String(error))
-  output.textContent = error?.stack ?? String(error)
+  log(error?.stack ?? String(error))
   console.error(error)
 })

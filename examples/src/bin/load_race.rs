@@ -138,26 +138,38 @@ fn main() -> Result<(), Box<dyn Error>> {
     let restyle_ms = ms(started);
 
     // Binning is the work a kepler.gl style hexagon layer does every time its radius moves:
-    // a projection and a bin lookup for every single row.
+    // a projection and a bin lookup for every single row. Two numbers, because the browser
+    // comparison has two: `bin` is the aggregation alone, `settled` is the whole change,
+    // including handing the new hexagons to the GPU and drawing them.
     if let Some(radius) = hexbin {
         println!();
         println!("  hexagon binning, the cost of moving a radius slider:");
-        for scale in [1.0, 0.5, 2.0] {
-            let props = HexagonLayerProps {
+        println!("                           settled       bin");
+        for scale in [1.0, 0.5, 2.0, 1.0] {
+            let props = |radius: f64| HexagonLayerProps {
                 base: LayerProps::new("hexbin"),
                 data: LayerData::from_batch(for_hexbin.clone()),
-                radius: radius * scale,
+                radius,
                 aggregation: AggregationProps {
                     get_position: Accessor::column(&column),
+                    extruded: true,
                     ..Default::default()
                 },
             };
             let started = Instant::now();
-            let aggregation = HexagonLayer::aggregate(&props)?;
+            let aggregation = HexagonLayer::aggregate(&props(radius * scale))?;
+            let bin_ms = ms(started);
+
+            let started = Instant::now();
+            deck.set_layers(vec![Box::new(HexagonLayer::new(props(radius * scale)))]);
+            deck.snapshot(Some(CLEAR))?;
+            let settled_ms = ms(started);
+
             println!(
-                "    radius {:>7.0} m   {:>8.1} ms   {} bins",
+                "    radius {:>7.0} m   {:>7.0} ms   {:>7.1} ms   {} bins",
                 radius * scale,
-                ms(started),
+                settled_ms,
+                bin_ms,
                 aggregation.bins.len()
             );
         }

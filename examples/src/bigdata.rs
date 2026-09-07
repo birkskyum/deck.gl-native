@@ -9,7 +9,11 @@ use std::path::Path;
 
 use arrow_array::RecordBatch;
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Unit};
-use deck_gl_layers::{ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps};
+use deck_gl_layers::aggregation::AggregationProps;
+use deck_gl_layers::{
+    HexagonLayer, HexagonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps,
+};
 
 /// Whether [`open`] would read this path, rather than it being a JSON description.
 pub fn is_data_file(path: &str) -> bool {
@@ -71,6 +75,24 @@ pub fn layer_from_batch(
     column: &str,
     kind: &str,
 ) -> Result<Box<dyn Layer>, Box<dyn Error>> {
+    // `DECKGL_HEXBIN=<metres>` bins the points instead of drawing them, which is the
+    // operation a kepler.gl hexagon layer redoes every time its radius moves.
+    if let Some(radius) = std::env::var("DECKGL_HEXBIN")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|r| *r > 0.0)
+    {
+        return Ok(Box::new(HexagonLayer::new(HexagonLayerProps {
+            base: LayerProps::new("data"),
+            data: LayerData::from_batch(batch),
+            radius,
+            aggregation: AggregationProps {
+                get_position: Accessor::column(column),
+                extruded: true,
+                ..Default::default()
+            },
+        })));
+    }
     Ok(match kind {
         "scatterplot" => Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
             base: LayerProps::new("data"),

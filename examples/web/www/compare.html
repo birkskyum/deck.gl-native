@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deck.gl JS, five million points into hexagons</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      #panel { width: min(34rem, calc(100vw - 2rem)); }
+      #output {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        line-height: 1.5;
+        white-space: pre;
+        color: #cfd8e8;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="deck"></canvas>
+    <div id="panel">
+      <h1>deck.gl JS, the same work as the native window</h1>
+      <p>
+        Five million points binned into hexagons, then the radius changed and binned again.
+        Coordinates go in as a binary attribute straight out of Arrow, which is deck.gl's
+        fastest path, not its most convenient one.
+      </p>
+      <pre id="output"></pre>
+      <p id="status"></p>
+    </div>
+    <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
+    <script type="module" src="compare.js"></script>
+  </body>
+</html>

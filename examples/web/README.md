@@ -78,6 +78,40 @@ The example runs on MapLibre GL JS 6, which is ESM only, WebGL2 only, and no lon
 private `map.transform` that older integrations read. It loads MapLibre's own `.mjs` build
 rather than a rebundled one, because MapLibre's worker only starts from that file.
 
+## Racing deck.gl JS on the same file
+
+`www/compare.html` runs deck.gl JS over the same Arrow file the native window reads, doing the
+same thing: bin five million points into hexagons, then change the radius and bin them again.
+Changing the radius is what dragging a kepler.gl radius slider costs, and it is the number
+worth comparing, because it is per row CPU work that no amount of GPU speed removes.
+
+```sh
+cargo run --release --bin gen_bench_data -- points 5000000 /tmp/points5m.arrow
+cp /tmp/points5m.arrow examples/web/www/data5m.arrow
+python3 -m http.server 8787 --directory examples/web/www
+```
+
+Then open <http://localhost:8787/compare.html> beside the native window:
+
+```sh
+DECKGL_JSON=/tmp/points5m.arrow DECKGL_HEXBIN=200 cargo run --release --bin window
+cargo run --release --bin load_race -- /tmp/points5m.arrow --hexbin 200
+```
+
+`?radii=200,100,400,200` chooses the sweep, `?gpu=0` asks deck.gl for its CPU aggregator
+instead of the GPU one it picks by default, and `?file=` reads a different file.
+
+deck.gl is given its fastest path rather than its most convenient one. The coordinates go in
+as a binary attribute straight out of Arrow, so no accessor is ever called and no row object
+is ever made, and the `data` object is built once and passed by reference, because deck.gl
+diffs it by identity: a fresh object literal per radius makes it re-upload all forty megabytes
+of positions as well, which is not what moving a slider does. That one difference is worth
+more than everything else on the page.
+
+The page will refuse to report anything if the browser is not painting the tab. deck.gl
+updates its layers on an animation frame, and a tab that is not on screen gets one animation
+frame a second, so the timings would be that throttle rather than the work.
+
 ## The JavaScript API
 
 ```js
