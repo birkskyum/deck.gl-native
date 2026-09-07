@@ -402,7 +402,8 @@ impl Viewport {
     }
 
     /// Viewport center with longitude/latitude rounded to f32, as the shader will see it.
-    pub(crate) fn geospatial_origin_f32(&self) -> DVec3 {
+    /// The viewport centre rounded to f32, the origin of the shader\'s auto offset mode.
+    pub fn geospatial_origin_f32(&self) -> DVec3 {
         DVec3::new(fround(self.longitude), fround(self.latitude), 0.0)
     }
 

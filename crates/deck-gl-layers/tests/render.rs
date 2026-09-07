@@ -15,11 +15,11 @@ use deck_gl::{
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
     BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
-    GridLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
-    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
-    PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
-    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer,
-    TripsLayerProps,
+    GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
+    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
+    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
+    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -947,6 +947,46 @@ fn line_layer_wrap_longitude_takes_the_shortest_path() {
         .unwrap();
     assert_eq!(short_repeated.pixel(c - 4, c), [0, 255, 0, 255]);
     assert_eq!(short_repeated.pixel(c + 4, c), [0, 255, 0, 255]);
+}
+
+#[test]
+fn heatmap_layer_colours_dense_points_and_follows_the_view() {
+    let Some(ctx) = context() else { return };
+    let heatmap = |aggregation: HeatmapAggregation| {
+        Box::new(HeatmapLayer::new(HeatmapLayerProps {
+            base: LayerProps::new("heat"),
+            data: LayerData::with_length(3),
+            get_position: Accessor::Constant(CENTER),
+            get_weight: Accessor::Constant(1.0),
+            radius_pixels: 10.0,
+            color_range: vec![[0, 0, 255, 255], [255, 0, 0, 255]],
+            aggregation,
+            weights_texture_size: 256,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    for aggregation in [HeatmapAggregation::Sum, HeatmapAggregation::Mean] {
+        let mut deck = make_deck(&ctx, vec![heatmap(aggregation)]);
+        let shot = deck.snapshot(None).unwrap();
+        // The densest spot is the last colour of the range at full opacity
+        assert_eq!(shot.pixel(c, c), [255, 0, 0, 255], "{aggregation:?}");
+        // Beyond the radius nothing is drawn
+        assert_eq!(shot.pixel(c + 20, c), [0, 0, 0, 0], "{aggregation:?}");
+        // Off centre the weight fades through the range towards blue
+        let edge = shot.pixel(c + 6, c);
+        assert!(edge[3] > 0 && edge[2] > edge[0], "{aggregation:?}: {edge:?}");
+        // Moving the view far away re-aggregates: nothing left on screen
+        deck.set_view_state(ViewState {
+            longitude: CENTER[0] + 1.0,
+            latitude: CENTER[1],
+            zoom: 14.0,
+            pitch: 0.0,
+            bearing: 0.0,
+        });
+        let moved = deck.snapshot(None).unwrap();
+        assert_eq!(moved.pixel(c, c), [0, 0, 0, 0], "{aggregation:?}");
+    }
 }
 
 #[test]

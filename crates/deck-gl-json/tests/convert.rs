@@ -164,13 +164,13 @@ fn reports_row_conversion_errors() {
 #[test]
 fn warns_about_unknown_layers_and_props() {
     let spec = json!([
-        {"@@type": "HeatmapLayer", "id": "heat"},
+        {"@@type": "ContourLayer", "id": "contours"},
         {"@@type": "ScatterplotLayer", "id": "p", "data": [], "bogusProp": 1, "onHover": "ignored"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 1);
     assert_eq!(deck.warnings.len(), 2, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("HeatmapLayer"));
+    assert!(deck.warnings[0].contains("ContourLayer"));
     assert!(deck.warnings[1].contains("bogusProp"));
 }
 
@@ -328,10 +328,11 @@ fn aggregation_layers_props() {
         },
         {"@@type": "GridLayer", "id": "grid", "data": [], "cellSize": 200, "colorDomain": [0, 10]},
         {"@@type": "ScreenGridLayer", "id": "screen", "data": [{"position": [1, 2]}], "cellSizePixels": 40, "aggregation": "COUNT", "colorScaleType": "quantize"},
-        {"@@type": "GridCellLayer", "id": "cells", "data": [{"position": [0, 0], "h": 5}], "cellSize": 100, "getElevation": "@@=h * 10"}
+        {"@@type": "GridCellLayer", "id": "cells", "data": [{"position": [0, 0], "h": 5}], "cellSize": 100, "getElevation": "@@=h * 10"},
+        {"@@type": "HeatmapLayer", "id": "heat", "data": [{"position": [0, 0], "w": 2}], "getWeight": "@@=w", "radiusPixels": 20, "aggregation": "MEAN", "threshold": 0.1, "colorDomain": [0, 5], "debounceTimeout": 100}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
-    assert_eq!(deck.layers.len(), 4);
+    assert_eq!(deck.layers.len(), 5);
     assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
     let bad = json!([{"@@type": "HexagonLayer", "data": [], "colorAggregation": "MEDIAN"}]);
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();

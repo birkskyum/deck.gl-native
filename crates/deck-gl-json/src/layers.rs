@@ -7,11 +7,12 @@ use deck_gl::{FeatureCollection, Layer, LayerData};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
     BitmapLayerProps, CharacterSet, ColumnLayer, ColumnLayerProps, FontSettings, FontSource, GeoJsonLayer,
-    GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HexagonLayer, HexagonLayerProps,
-    IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
-    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType, ScatterplotLayer,
-    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextAnchor, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps, WordBreak,
+    GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer,
+    HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer,
+    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
+    PolygonLayerProps, ScaleType, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
+    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
+    TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -108,6 +109,53 @@ pub fn convert_layer(
                 data,
                 cell_size: props.f64("cellSize", d.cell_size)?,
                 aggregation: aggregation(&props)?,
+            }))
+        }
+        "HeatmapLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = HeatmapLayerProps::default();
+            props.get("debounceTimeout");
+            let color_range = match props.get("colorRange") {
+                None | Some(Value::Null) => d.color_range,
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(convert::color)
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|m| props.error("colorRange", m))?,
+                Some(other) => {
+                    return Err(props.error(
+                        "colorRange",
+                        format!(
+                            "expected an array of colors, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+            };
+            let aggregation = match props.get("aggregation") {
+                None | Some(Value::Null) => d.aggregation,
+                Some(Value::String(name)) => HeatmapAggregation::parse(name).ok_or_else(|| {
+                    props.error("aggregation", format!("expected SUM or MEAN, got `{name}`"))
+                })?,
+                Some(other) => {
+                    return Err(props.error(
+                        "aggregation",
+                        format!("expected a string, got {}", crate::props::describe(other)),
+                    ))
+                }
+            };
+            Box::new(HeatmapLayer::new(HeatmapLayerProps {
+                base: props.base()?,
+                data,
+                radius_pixels: props.f32("radiusPixels", d.radius_pixels)?,
+                intensity: props.f32("intensity", d.intensity)?,
+                threshold: props.f32("threshold", d.threshold)?,
+                color_domain: domain(&props, "colorDomain")?,
+                color_range,
+                aggregation,
+                weights_texture_size: props.f32("weightsTextureSize", d.weights_texture_size as f32)? as u32,
+                get_position: props.accessor("getPosition", "position", convert::position)?,
+                get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
             }))
         }
         "ScreenGridLayer" => {
