@@ -56,6 +56,28 @@ int32_t deckgl_set_layers_json(DeckglHandle* deck, const char* json, const char*
 /** Load a JSON description from a file. Relative paths inside resolve against its directory. */
 int32_t deckgl_load_json_file(DeckglHandle* deck, const char* path);
 
+/* Arrow C Data Interface structs, see https://arrow.apache.org/docs/format/CDataInterface.html */
+struct ArrowSchema;
+struct ArrowArray;
+
+/** Register an Arrow table under a name. `array` must be a struct array whose fields are the
+ *  columns. Ownership of `array` moves to the deck (its release callback runs when the table
+ *  is replaced or the deck destroyed) and the caller's struct is marked released; `schema` is
+ *  only read. Buffers are not copied. JSON layers use it as `"data": "@@table:<name>"` with
+ *  column accessors such as `"getPosition": "@@column:geometry"` (FixedSizeList<f64, 2 or 3>)
+ *  and `"getFillColor": "@@column:color"` (FixedSizeList<u8, 3 or 4>). Returns 0 on success. */
+int32_t deckgl_set_arrow_table(DeckglHandle* deck,
+                               const char* name,
+                               const struct ArrowSchema* schema,
+                               struct ArrowArray* array);
+
+/** Forget a registered table. Layers already built keep their data. */
+int32_t deckgl_remove_arrow_table(DeckglHandle* deck, const char* name);
+
+/** Create a deck on a headless GPU device, on any platform, for tooling and tests that only
+ *  convert layers and data. Returns NULL without a GPU adapter. */
+DeckglHandle* deckgl_headless_create(void);
+
 void deckgl_set_camera(DeckglHandle* deck, const DeckglCamera* camera);
 
 /** Draw all layers into the given id<MTLTexture> color and depth attachments. The color

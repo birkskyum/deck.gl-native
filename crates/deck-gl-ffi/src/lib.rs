@@ -4,11 +4,15 @@
 //! `MTLCommandQueue` through wgpu's hal layer, so deck's command buffers are committed on the
 //! host's queue and execute after whatever the host committed before them.
 
-// Only the Metal host exists so far, so the shared handle machinery is unused on other
-// platforms until Vulkan host interop lands.
+// Only the Metal host renders so far; the screenshot helpers are unused on other platforms
+// until Vulkan host interop lands.
 #![cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
 
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+
+use arrow_array::ffi::{from_ffi, FFI_ArrowArray, FFI_ArrowSchema};
+use arrow_array::{Array, RecordBatch, StructArray};
 
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{ClipDepthRange, Deck, DeckProps, Layer, Viewport, WebMercatorViewportOptions};
@@ -41,6 +45,8 @@ pub struct DeckglHandle {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) deck: Option<Deck>,
+    /// Arrow tables registered with `deckgl_set_arrow_table`, by name
+    pub(crate) tables: HashMap<String, RecordBatch>,
     pub(crate) target: Option<RenderTarget>,
     pub(crate) camera: Option<DeckglCamera>,
     pub(crate) pending_layers: Option<Vec<Box<dyn deck_gl::Layer>>>,
@@ -55,6 +61,7 @@ impl DeckglHandle {
             device,
             queue,
             deck: None,
+            tables: HashMap::new(),
             target: None,
             camera: None,
             pending_layers: None,
@@ -246,10 +253,11 @@ pub unsafe extern "C" fn deckgl_set_layers_json(
     let Some(json) = (unsafe { c_string(json) }) else {
         return handle.set_error("deckgl_set_layers_json: json is null");
     };
-    let converter = match unsafe { c_string(base_dir) } {
+    let mut converter = match unsafe { c_string(base_dir) } {
         Some(dir) if !dir.is_empty() => JsonConverter::with_base_dir(dir),
         _ => JsonConverter::new(),
     };
+    converter.options.tables = handle.tables.clone();
     apply_json(handle, converter.parse(&json))
 }
 
@@ -263,7 +271,93 @@ pub unsafe extern "C" fn deckgl_load_json_file(deck: *mut DeckglHandle, path: *c
     let Some(path) = (unsafe { c_string(path) }) else {
         return handle.set_error("deckgl_load_json_file: path is null");
     };
-    apply_json(handle, JsonConverter::parse_file(path))
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) => return handle.set_error(format!("could not read {path}: {e}")),
+    };
+    let mut converter = match std::path::Path::new(&path).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => JsonConverter::with_base_dir(dir),
+        _ => JsonConverter::new(),
+    };
+    converter.options.tables = handle.tables.clone();
+    apply_json(handle, converter.parse(&text))
+}
+
+/// Create a deck on a headless wgpu device (any platform). Rendering needs a host texture
+/// through a backend specific entry point; this is for tooling and tests that only convert
+/// layers and data.
+///
+/// # Safety
+/// Always safe to call; returns null when no GPU adapter is available.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_headless_create() -> *mut DeckglHandle {
+    match deck_gl::luma_gl::device::create_headless_context() {
+        Ok(ctx) => Box::into_raw(Box::new(DeckglHandle::new(ctx.device, ctx.queue))),
+        Err(e) => {
+            eprintln!("deck.gl-native: {e}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Register an Arrow table for JSON layers (`"data": "@@table:<name>"`). The array must be a
+/// struct array whose fields are the table's columns, given through the Arrow C Data
+/// Interface. Ownership of `array` moves to the deck: its release callback runs when the table
+/// is replaced or the deck is destroyed, and the caller's struct is marked released. The
+/// schema is only read. Buffers are not copied.
+///
+/// # Safety
+/// `deck` must be a valid handle, `name` a C string, and `schema` and `array` valid, non
+/// released Arrow C Data Interface structs.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_set_arrow_table(
+    deck: *mut DeckglHandle,
+    name: *const c_char,
+    schema: *const FFI_ArrowSchema,
+    array: *mut FFI_ArrowArray,
+) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    let Some(name) = (unsafe { c_string(name) }) else {
+        return handle.set_error("deckgl_set_arrow_table: name is null");
+    };
+    if schema.is_null() || array.is_null() {
+        return handle.set_error("deckgl_set_arrow_table: schema or array is null");
+    }
+    let array = unsafe { FFI_ArrowArray::from_raw(array) };
+    let data = match unsafe { from_ffi(array, &*schema) } {
+        Ok(data) => data,
+        Err(e) => return handle.set_error(format!("invalid Arrow array for table `{name}`: {e}")),
+    };
+    let array = arrow_array::make_array(data);
+    let Some(columns) = array.as_any().downcast_ref::<StructArray>() else {
+        return handle.set_error(format!(
+            "table `{name}` must be a struct array of columns, got {}",
+            array.data_type()
+        ));
+    };
+    handle.tables.insert(name, RecordBatch::from(columns.clone()));
+    0
+}
+
+/// Forget a table registered with `deckgl_set_arrow_table`. Layers already built keep their
+/// data.
+///
+/// # Safety
+/// `deck` must be a valid handle and `name` a C string.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_remove_arrow_table(deck: *mut DeckglHandle, name: *const c_char) -> i32 {
+    let Some(handle) = (unsafe { deck.as_mut() }) else {
+        return 1;
+    };
+    match unsafe { c_string(name) } {
+        Some(name) => {
+            handle.tables.remove(&name);
+            0
+        }
+        None => handle.set_error("deckgl_remove_arrow_table: name is null"),
+    }
 }
 
 /// # Safety

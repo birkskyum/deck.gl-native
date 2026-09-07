@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use deck_gl::{FeatureCollection, Layer, LayerData};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
@@ -15,7 +16,7 @@ use deck_gl_layers::{
 use serde_json::Value;
 
 use crate::data;
-use crate::props::{convert, Props, TYPE_KEY};
+use crate::props::{convert, Props, TABLE_IDENTIFIER, TYPE_KEY};
 use crate::{ConvertOptions, JsonConverter, JsonError, Result};
 
 /// Convert a layer object. Unknown layer types are skipped with a warning, like deck.gl does.
@@ -137,13 +138,37 @@ fn in_layer(props: &Props, error: JsonError) -> JsonError {
     }
 }
 
-fn load_rows(props: &mut Props, options: &ConvertOptions) -> Result<LayerData> {
-    let rows = match props.get("data") {
-        None | Some(Value::Null) => Arc::new(Vec::new()),
-        Some(value) => data::load_json(value, options)
-            .and_then(data::rows_from_value)
-            .map_err(|e| in_layer(props, e))?,
+/// The Arrow table a `data` string refers to, if it does.
+fn table_for<'a>(
+    props: &Props,
+    value: &Value,
+    options: &'a ConvertOptions,
+) -> Result<Option<&'a RecordBatch>> {
+    let Some(name) = value.as_str().and_then(|s| s.strip_prefix(TABLE_IDENTIFIER)) else {
+        return Ok(None);
     };
+    options
+        .tables
+        .get(name)
+        .map(Some)
+        .ok_or_else(|| props.error("data", format!("no Arrow table named `{name}` was registered")))
+}
+
+fn load_rows(props: &mut Props, options: &ConvertOptions) -> Result<LayerData> {
+    let value = match props.get("data") {
+        None | Some(Value::Null) => {
+            props.set_rows(Arc::new(Vec::new()));
+            return Ok(LayerData::with_length(0));
+        }
+        Some(value) => value,
+    };
+    if let Some(batch) = table_for(props, value, options)? {
+        props.set_table();
+        return Ok(LayerData::from_batch(batch.clone()));
+    }
+    let rows = data::load_json(value, options)
+        .and_then(data::rows_from_value)
+        .map_err(|e| in_layer(props, e))?;
     let length = rows.len();
     props.set_rows(rows);
     Ok(LayerData::with_length(length))
@@ -152,6 +177,9 @@ fn load_rows(props: &mut Props, options: &ConvertOptions) -> Result<LayerData> {
 fn load_geojson(props: &mut Props, options: &ConvertOptions) -> Result<Arc<FeatureCollection>> {
     let (collection, rows) = match props.get("data") {
         None | Some(Value::Null) => (Arc::new(FeatureCollection::default()), Arc::new(Vec::new())),
+        Some(value) if table_for(props, value, options)?.is_some() => {
+            return Err(props.error("data", "GeoJsonLayer takes GeoJSON, not an Arrow table"));
+        }
         Some(value) => data::load_json(value, options)
             .and_then(data::geojson_from_value)
             .map_err(|e| in_layer(props, e))?,

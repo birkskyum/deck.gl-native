@@ -338,3 +338,84 @@ fn aggregation_layers_props() {
         "{error}"
     );
 }
+
+fn points_table() -> arrow_array::RecordBatch {
+    use arrow_array::builder::{FixedSizeListBuilder, Float32Builder, Float64Builder, UInt8Builder};
+    use arrow_array::Array;
+    use arrow_schema::{DataType, Field, Schema};
+    let mut positions = FixedSizeListBuilder::new(Float64Builder::new(), 2);
+    let mut colors = FixedSizeListBuilder::new(UInt8Builder::new(), 4);
+    let mut radius = Float32Builder::new();
+    for (i, (lng, lat)) in [(-122.4, 37.8), (-122.41, 37.79), (-122.39, 37.81)]
+        .iter()
+        .enumerate()
+    {
+        positions.values().append_value(*lng);
+        positions.values().append_value(*lat);
+        positions.append(true);
+        for c in [255, 0, i as u8 * 100, 255] {
+            colors.values().append_value(c);
+        }
+        colors.append(true);
+        radius.append_value(10.0 * (i + 1) as f32);
+    }
+    let positions = positions.finish();
+    let colors = colors.finish();
+    let radius = radius.finish();
+    let schema = Schema::new(vec![
+        Field::new("position", positions.data_type().clone(), false),
+        Field::new("color", colors.data_type().clone(), false),
+        Field::new("radius", DataType::Float32, false),
+    ]);
+    arrow_array::RecordBatch::try_new(
+        Arc::new(schema),
+        vec![Arc::new(positions), Arc::new(colors), Arc::new(radius)],
+    )
+    .unwrap()
+}
+
+#[test]
+fn arrow_tables_feed_layers_through_column_accessors() {
+    let converter = JsonConverter::new().with_table("points", points_table());
+    let spec = json!([{
+        "@@type": "ScatterplotLayer",
+        "id": "points",
+        "data": "@@table:points",
+        "getPosition": "@@column:position",
+        "getFillColor": "@@=color",
+        "getRadius": "@@column:radius",
+        "getLineColor": [0, 0, 0]
+    }]);
+    let deck = converter.convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 1);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+
+    // The accessors resolve straight from the columns
+    let mut props = Props::new("ScatterplotLayer", spec[0].as_object().unwrap());
+    props.set_table();
+    let data = LayerData::from_batch(points_table());
+    let positions = props
+        .accessor("getPosition", "position", convert::position)
+        .unwrap();
+    assert_eq!(
+        resolve_positions(&data, &positions).unwrap()[2],
+        [-122.39, 37.81, 0.0]
+    );
+    let colors = props.accessor("getFillColor", "-", convert::color).unwrap();
+    assert_eq!(resolve_colors(&data, &colors).unwrap()[1], [255, 0, 100, 255]);
+    let radius = props.accessor("getRadius", "-", convert::f32).unwrap();
+    assert_eq!(resolve_f32(&data, &radius).unwrap(), [10.0, 20.0, 30.0]);
+
+    let unknown = json!([{"@@type": "ScatterplotLayer", "data": "@@table:missing"}]);
+    let error = converter.convert(&unknown).unwrap_err().to_string();
+    assert!(error.contains("missing"), "{error}");
+
+    let expression =
+        json!([{"@@type": "ScatterplotLayer", "data": "@@table:points", "getRadius": "@@=radius * 2"}]);
+    let error = converter.convert(&expression).unwrap_err().to_string();
+    assert!(error.contains("column name"), "{error}");
+
+    let geojson = json!([{"@@type": "GeoJsonLayer", "data": "@@table:points"}]);
+    let error = converter.convert(&geojson).unwrap_err().to_string();
+    assert!(error.contains("GeoJSON"), "{error}");
+}

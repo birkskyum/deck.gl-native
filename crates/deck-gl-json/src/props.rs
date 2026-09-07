@@ -16,6 +16,10 @@ pub type Rows = Arc<Vec<Value>>;
 
 /// Prefix of accessor expression strings.
 pub const FUNCTION_IDENTIFIER: &str = "@@=";
+/// Prefix of a column accessor on Arrow table data.
+pub const COLUMN_IDENTIFIER: &str = "@@column:";
+/// Prefix of a `data` string naming an Arrow table.
+pub const TABLE_IDENTIFIER: &str = "@@table:";
 /// Prefix of constant and enumeration references.
 pub const CONSTANT_IDENTIFIER: &str = "@@#";
 /// Key holding the layer class name.
@@ -70,6 +74,8 @@ pub struct Props<'a> {
     object: &'a Map<String, Value>,
     used: RefCell<HashSet<String>>,
     rows: Option<Rows>,
+    /// True when `data` is an Arrow table, so accessors are columns rather than expressions.
+    table: bool,
 }
 
 impl<'a> Props<'a> {
@@ -85,6 +91,7 @@ impl<'a> Props<'a> {
             object,
             used: RefCell::new(HashSet::new()),
             rows: None,
+            table: false,
         };
         props.mark("id");
         props.mark(TYPE_KEY);
@@ -98,6 +105,16 @@ impl<'a> Props<'a> {
 
     pub fn rows(&self) -> Option<&Rows> {
         self.rows.as_ref()
+    }
+
+    /// Mark the data as an Arrow table: accessors name columns.
+    pub fn set_table(&mut self) {
+        self.table = true;
+        self.rows = None;
+    }
+
+    pub fn is_table(&self) -> bool {
+        self.table
     }
 
     fn mark(&self, key: &str) {
@@ -215,6 +232,12 @@ impl<'a> Props<'a> {
                 AccessorDefault::Value(value) => Ok(Accessor::Constant(value)),
                 AccessorDefault::Expr(source) => self.accessor_from_expression(key, &source, convert),
             },
+            Some(Value::String(s)) if s.starts_with(COLUMN_IDENTIFIER) => {
+                if !self.table {
+                    return Err(self.error(key, "column accessors need `data` to be an Arrow table"));
+                }
+                Ok(Accessor::column(&s[COLUMN_IDENTIFIER.len()..]))
+            }
             Some(Value::String(s)) if s.starts_with(FUNCTION_IDENTIFIER) => {
                 self.accessor_from_expression(key, &s[FUNCTION_IDENTIFIER.len()..], convert)
             }
@@ -238,6 +261,18 @@ impl<'a> Props<'a> {
             return convert(&expr.eval(&Value::Null))
                 .map(Accessor::Constant)
                 .map_err(|m| self.error(key, format!("{m} (expression `{source}`)")));
+        }
+        if self.table {
+            // On a table only a plain column name can be evaluated; use @@column: for clarity.
+            return match expr {
+                Expr::Identifier(name) => Ok(Accessor::column(name)),
+                _ => Err(self.error(
+                    key,
+                    format!(
+                        "expressions are not evaluated over Arrow tables; use a column name (`{source}`)"
+                    ),
+                )),
+            };
         }
         let rows = self
             .rows

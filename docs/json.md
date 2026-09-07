@@ -64,6 +64,22 @@ string naming a local file or an `http(s)` URL of either. URLs need the crate's 
 feature. `image` (BitmapLayer) and `iconAtlas` (IconLayer) are PNG or JPEG files or URLs, and
 `iconMapping` is an inline object or a JSON file.
 
+## Arrow tables
+
+Large data should not go through JSON. A converter can carry named Arrow record batches, and
+a layer uses one with `"data": "@@table:<name>"`. Accessors on table data name columns:
+`"@@column:geometry"`, or just `"@@=geometry"`; expressions are not evaluated over tables.
+Column types follow `deck-gl`'s Arrow accessors: positions are `FixedSizeList<f64, 2 | 3>`,
+colours `FixedSizeList<u8, 3 | 4>`, numbers any numeric type, strings `Utf8`.
+
+```rust
+let converter = deck_gl_json::JsonConverter::new().with_table("points", record_batch);
+```
+
+Over the C API the table crosses the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html)
+without copying its buffers: `deckgl_set_arrow_table(deck, "points", &schema, &array)` takes a
+struct array whose fields are the columns, then `deckgl_set_layers_json` describes the layers.
+
 ## Accessors and expressions
 
 An accessor prop is either a constant (`"getRadius": 5`, `"getFillColor": [255, 0, 0]`) or a

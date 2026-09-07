@@ -15,6 +15,7 @@ fetch = ["dep:ureq"]
 [dependencies]
 deck-gl = { workspace = true }
 deck-gl-layers = { workspace = true }
+arrow-array = { workspace = true }
 glam = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde_json = { workspace = true }
@@ -22,5 +23,6 @@ thiserror = { workspace = true }
 ureq = { version = "3", optional = true }
 
 [dev-dependencies]
+arrow-schema = { workspace = true }
 luma-gl = { workspace = true }
 wgpu = { workspace = true }

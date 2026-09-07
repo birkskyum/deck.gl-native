@@ -21,8 +21,10 @@
 //! assert_eq!(deck.view_state.unwrap().zoom, 12.0);
 //! ```
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use arrow_array::RecordBatch;
 use deck_gl::{DeckError, Layer, ViewState};
 use serde_json::Value;
 
@@ -59,6 +61,10 @@ pub type Result<T> = std::result::Result<T, JsonError>;
 pub struct ConvertOptions {
     /// Directory that relative `data`, `image` and `iconAtlas` paths resolve against.
     pub base_dir: Option<PathBuf>,
+    /// Arrow tables a layer can use as `"data": "@@table:name"`, with `@@column:name`
+    /// accessors (or `@@=name` for a plain column name). Columns are read directly, so large
+    /// data never goes through JSON.
+    pub tables: HashMap<String, RecordBatch>,
 }
 
 /// A converted description.
@@ -99,8 +105,15 @@ impl JsonConverter {
         Self {
             options: ConvertOptions {
                 base_dir: Some(dir.into()),
+                ..Default::default()
             },
         }
+    }
+
+    /// Make an Arrow table available as `"data": "@@table:<name>"`.
+    pub fn with_table(mut self, name: impl Into<String>, batch: RecordBatch) -> Self {
+        self.options.tables.insert(name.into(), batch);
+        self
     }
 
     /// Parse and convert a description object or a layer array.
