@@ -109,6 +109,10 @@ pub struct ModelDescriptor<'a> {
     /// [`SHADOW_DEPTH_FORMAT`] depth buffer, no blending and depth writes on. Drawn instead of
     /// the main pipeline while [`Model::set_shadow_mode`] is on.
     pub shadow: bool,
+    /// Also build a terrain height map pipeline: same shader, a [`HEIGHT_MAP_FORMAT`] target
+    /// with no depth buffer and no blending. Drawn instead of the main pipeline while
+    /// [`Model::set_terrain_mode`] is on.
+    pub terrain: bool,
 }
 
 impl<'a> ModelDescriptor<'a> {
@@ -134,6 +138,7 @@ impl<'a> ModelDescriptor<'a> {
             pickable: false,
             cache: None,
             shadow: false,
+            terrain: false,
         }
     }
 }
@@ -145,6 +150,9 @@ pub const PICKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const SHADOW_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// Depth buffer of the shadow map pass.
 pub const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
+/// Format of the terrain height map: metres in the red channel.
+pub const HEIGHT_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// Blend state of deck.gl's picking pass: color written as is, alpha replaced by the blend
 /// constant, which the pass sets to the layer's id.
@@ -199,6 +207,9 @@ pub struct Model {
     shadow_pipeline: Option<wgpu::RenderPipeline>,
     /// Draw with the shadow pipeline, see [`Model::set_shadow_mode`]
     shadow_mode: bool,
+    terrain_pipeline: Option<wgpu::RenderPipeline>,
+    /// Draw with the terrain pipeline, see [`Model::set_terrain_mode`]
+    terrain_mode: bool,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     bind_group_dirty: bool,
@@ -415,6 +426,16 @@ impl Model {
                 Some((SHADOW_DEPTH_FORMAT, true, wgpu::CompareFunction::LessEqual)),
             )
         });
+        // The height map holds metres, with no depth buffer and nothing to blend against
+        let terrain_pipeline = desc.terrain.then(|| {
+            make_pipeline(
+                &format!("{}:terrain", desc.label),
+                HEIGHT_MAP_FORMAT,
+                None,
+                1,
+                None,
+            )
+        });
 
         Ok(Self {
             label: desc.label.to_string(),
@@ -423,6 +444,8 @@ impl Model {
             picking_pipeline,
             shadow_pipeline,
             shadow_mode: false,
+            terrain_pipeline,
+            terrain_mode: false,
             bind_group_layout,
             bind_group,
             bind_group_dirty: false,
@@ -628,10 +651,23 @@ impl Model {
 
     /// Encode this model's draw call into the pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        match (&self.shadow_pipeline, self.shadow_mode) {
-            (Some(pipeline), true) => self.draw_with(pipeline, pass),
-            _ => self.draw_with(&self.pipeline, pass),
-        }
+        // The height map and shadow passes draw with their own pipelines
+        let pipeline = match (&self.terrain_pipeline, &self.shadow_pipeline) {
+            (Some(terrain), _) if self.terrain_mode => terrain,
+            (_, Some(shadow)) if self.shadow_mode => shadow,
+            _ => &self.pipeline,
+        };
+        self.draw_with(pipeline, pass)
+    }
+
+    /// Draw with the terrain height map pipeline (see [`ModelDescriptor::terrain`]) until
+    /// turned off. A model without one keeps drawing with its main pipeline.
+    pub fn set_terrain_mode(&mut self, on: bool) {
+        self.terrain_mode = on;
+    }
+
+    pub fn has_terrain_pipeline(&self) -> bool {
+        self.terrain_pipeline.is_some()
     }
 
     /// Draw with the shadow pipeline (see [`ModelDescriptor::shadow`]) until turned off. A

@@ -6,6 +6,7 @@ use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
 use crate::collision::{CollisionMaps, CollisionTarget, COLLISION_DOWNSCALE, COLLISION_PADDING};
 use crate::constants::{ClipDepthRange, CoordinateSystem, ProjectionMode};
+use crate::extension::ExtensionShaders;
 use crate::layer::{
     decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
     MASK_TARGET,
@@ -19,6 +20,7 @@ use crate::post_process::{PostProcessEffect, PostProcessor};
 use crate::shadow::{
     light_matrices, shadow_map_size, shadow_shaders, shadows_enabled, ShadowState, ShadowTarget,
 };
+use crate::terrain::{create_height_map, height_map_bounds, TerrainMap, HEIGHT_MAP_TARGET};
 use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::Viewport;
 use std::collections::HashMap;
@@ -175,6 +177,10 @@ pub struct Deck {
     /// Post-processing effects applied after the layers, in order
     post_process: Vec<PostProcessEffect>,
     post_processor: PostProcessor,
+    /// The height map of the ground, kept across frames
+    height_map: Option<wgpu::Texture>,
+    /// The ground of the current frame, shared with the layer context
+    terrain: Arc<TerrainMap>,
     /// One shadow map per light that casts shadows, kept across frames
     shadow_targets: Vec<ShadowTarget>,
     /// Bound where a light has no map yet
@@ -208,6 +214,8 @@ impl Deck {
             shadow_enabled: false,
             shadow: None,
             shadow_pass: None,
+            terrain: None,
+            terrain_pass: false,
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -247,6 +255,8 @@ impl Deck {
             now: None,
             post_process: props.post_process,
             post_processor: PostProcessor::default(),
+            height_map: None,
+            terrain: crate::terrain::empty_map(device, queue),
             shadow_targets: Vec::new(),
             shadow_dummy: create_rgba8_texture(device, queue, "shadow fallback", 1, 1, &[255, 255, 255, 255])
                 .create_view(&Default::default()),
@@ -744,7 +754,7 @@ impl Deck {
             .enumerate()
             .filter(|(_, e)| {
                 let props = e.layer.props();
-                e.initialized && props.visible && props.pickable && !props.operation.mask
+                e.initialized && props.visible && props.pickable && props.operation.draw
             })
             .filter(|(_, e)| {
                 self.layer_filter
@@ -956,6 +966,7 @@ impl Deck {
             self.update_layers(true)?;
             self.update_masks()?;
             self.update_layers(false)?;
+            self.update_terrain()?;
             self.update_shadows()?;
             self.update_collisions()
         })();
@@ -968,15 +979,40 @@ impl Deck {
     /// of a frame with shadows has the module and a shadow pipeline.
     fn prepare_shadows(&mut self) {
         let enabled = shadows_enabled(&self.ctx.lighting) && self.viewport.is_geospatial;
-        if enabled != self.ctx.shadow_enabled {
-            // The module changes the shaders: every model has to be built again
+        // Layers that are ground, and layers that sit on it, both need the terrain module
+        let terrain = self.viewport.is_geospatial
+            && self
+                .layers
+                .iter()
+                .any(|e| e.layer.props().operation.terrain || e.layer.props().extensions.needs_terrain());
+        let changed = enabled != self.ctx.shadow_enabled || terrain != self.ctx.terrain.is_some();
+        if changed {
+            // The modules change the shaders: every model has to be built again
             for entry in &mut self.layers {
                 entry.initialized = false;
             }
             self.ctx.shadow_enabled = enabled;
             self.shadow_targets.clear();
+            if !terrain {
+                self.height_map = None;
+            }
         }
-        crate::extension::set_default_shaders(enabled.then(shadow_shaders));
+        // Both modules go to every layer, as deck.gl's default shader modules do
+        let mut defaults = ExtensionShaders::default();
+        if enabled {
+            let shadow = shadow_shaders();
+            defaults.modules.extend(shadow.modules);
+            defaults.injections.extend(shadow.injections);
+            defaults.varyings.extend(shadow.varyings);
+        }
+        if terrain {
+            let ground = crate::terrain::terrain_shaders();
+            defaults.modules.extend(ground.modules);
+            defaults.injections.extend(ground.injections);
+            defaults.varyings.extend(ground.varyings);
+        }
+        self.ctx.terrain = terrain.then(|| self.terrain.clone());
+        crate::extension::set_default_shaders((!defaults.modules.is_empty()).then_some(defaults));
         self.ctx.shadow = enabled.then(|| {
             Arc::new(ShadowState {
                 light_matrices: light_matrices(&self.ctx.lighting, &self.viewport),
@@ -986,6 +1022,85 @@ impl Deck {
                 color: self.ctx.lighting.shadow_color,
             })
         });
+    }
+
+    /// deck.gl's terrain height map pass: every layer whose operation is `terrain` draws its
+    /// ground elevation into a map covering the view, which the layers with the terrain
+    /// extension then sit on.
+    fn update_terrain(&mut self) -> Result<()> {
+        if self.ctx.terrain.is_none() {
+            return Ok(());
+        }
+        let ground: Vec<usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.initialized && e.layer.props().visible && e.layer.props().operation.terrain)
+            .map(|(i, _)| i)
+            .collect();
+        let bounds = height_map_bounds(&self.viewport);
+        if ground.is_empty() {
+            self.publish_terrain(None, bounds);
+            return Ok(());
+        }
+        let device = &self.ctx.device;
+        let map = self.height_map.get_or_insert_with(|| create_height_map(device));
+        let view = map.create_view(&Default::default());
+        let main_target = self.ctx.target;
+        self.ctx.target = HEIGHT_MAP_TARGET;
+        self.ctx.terrain_pass = true;
+        self.ctx.uniform_slot = 0;
+        // The bounds have to be in place before the layers write their uniforms
+        self.publish_terrain(None, bounds);
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("deck.gl terrain"),
+            });
+        for &i in &ground {
+            self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+            self.layers[i].layer.update(&self.ctx, &self.viewport)?;
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("deck.gl height map"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    // Zero metres where no ground was drawn
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            for &i in &ground {
+                self.ctx.layer_index = i as u32 * LAYER_INDEX_STRIDE;
+                self.layers[i].layer.draw(&self.ctx, &mut pass)?;
+            }
+        }
+        self.ctx.queue.submit([encoder.finish()]);
+        self.ctx.terrain_pass = false;
+        self.ctx.target = main_target;
+        self.publish_terrain(Some(view), bounds);
+        // The ground layers wrote height map uniforms; write the frame's again
+        self.update_layers(false)
+    }
+
+    fn publish_terrain(&mut self, view: Option<wgpu::TextureView>, bounds: [f32; 4]) {
+        self.terrain = Arc::new(TerrainMap {
+            view,
+            dummy: self.terrain.dummy.clone(),
+            sampler: self.terrain.sampler.clone(),
+            bounds,
+        });
+        self.ctx.terrain = Some(self.terrain.clone());
     }
 
     /// deck.gl's `ShadowPass`: draw every layer that casts shadows into one map per light,
@@ -1023,7 +1138,7 @@ impl Deck {
             let depth = self.shadow_targets[light].depth.create_view(&Default::default());
             for (index, entry) in self.layers.iter_mut().enumerate() {
                 let props = entry.layer.props();
-                if !entry.initialized || !props.visible || props.operation.mask || !props.shadow_enabled {
+                if !entry.initialized || !props.visible || !props.operation.draw || !props.shadow_enabled {
                     continue;
                 }
                 self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
@@ -1056,7 +1171,8 @@ impl Deck {
                 });
                 for (index, entry) in self.layers.iter_mut().enumerate() {
                     let props = entry.layer.props();
-                    if !entry.initialized || !props.visible || props.operation.mask || !props.shadow_enabled {
+                    if !entry.initialized || !props.visible || !props.operation.draw || !props.shadow_enabled
+                    {
                         continue;
                     }
                     self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
@@ -1450,7 +1566,7 @@ impl Deck {
                     self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
                     if !entry.initialized
                         || !entry.layer.props().visible
-                        || entry.layer.props().operation.mask
+                        || !entry.layer.props().operation.draw
                     {
                         continue;
                     }

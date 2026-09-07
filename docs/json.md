@@ -166,6 +166,11 @@ drawn into a shadow map seen from the light and the fragments behind something a
 the effect's `shadowColor` (RGBA in 0..255, black by default). A layer opts out of casting with
 `"shadowEnabled": false`. Shadows need the map view.
 
+A layer's `operation` may also be `terrain` or `terrain+draw`: its elevation goes into a height
+map covering the view, and any layer carrying the `TerrainExtension` sits on that ground rather
+than at its own z. `terrain` keeps the ground out of the picture, `terrain+draw` draws it as
+well. Draping a layer's pixels onto the terrain, deck.gl's other terrain mode, is not here yet.
+
 `PostProcessEffect` entries run shader passes over the rendered frame, in order. `module`
 names one of luma.gl's post-processing passes: `brightnessContrast`, `hueSaturation`, `sepia`,
 `vibrance`, `vignette`, `noise`, `denoise`, `triangleBlur`, `tiltShift`, `zoomBlur`,

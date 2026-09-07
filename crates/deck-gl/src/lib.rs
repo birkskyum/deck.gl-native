@@ -31,6 +31,7 @@ pub mod parameters;
 pub mod post_process;
 pub mod shaderlib;
 pub mod shadow;
+pub mod terrain;
 pub mod transition;
 pub mod viewport;
 pub mod views;
@@ -59,6 +60,7 @@ pub use post_process::{
     builtin_module, PassKind, PassSpec, PostProcessEffect, ShaderPassModule, UniformValue,
 };
 pub use shadow::{light_matrices, shadow_shaders, shadows_enabled, ShadowState, ShadowTarget};
+pub use terrain::{terrain_shaders, TerrainMap, TerrainMode};
 pub use transition::{
     EasingKind, PropTransition, PropTransitions, TransitionDuration, TransitionInterpolator,
     TransitionInterruption, TransitionProps, ViewStateTransition,

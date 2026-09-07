@@ -2542,6 +2542,103 @@ fn terrain_layer_drapes_a_texture_over_an_elevation_image() {
 }
 
 #[test]
+fn the_terrain_extension_lifts_a_layer_onto_the_ground() {
+    use deck_gl::Operation;
+    use deck_gl_layers::TerrainExtension;
+    let Some(ctx) = context() else { return };
+    // Ground: a flat polygon over the whole view at 80 m, drawn as terrain and on screen
+    let d = 0.01;
+    let ground = |elevation: f64| -> Box<dyn Layer> {
+        Box::new(SolidPolygonLayer::new(SolidPolygonLayerProps {
+            base: LayerProps {
+                id: "ground".to_string(),
+                // Ground the disk sits on, not drawn itself
+                operation: Operation::TERRAIN_ONLY,
+                material: Material::unlit(),
+                ..Default::default()
+            },
+            data: LayerData::with_length(1),
+            get_polygon: Accessor::Constant(vec![vec![
+                [CENTER[0] - d, CENTER[1] - d, elevation],
+                [CENTER[0] + d, CENTER[1] - d, elevation],
+                [CENTER[0] + d, CENTER[1] + d, elevation],
+                [CENTER[0] - d, CENTER[1] + d, elevation],
+            ]]),
+            get_fill_color: Accessor::Constant([40, 40, 40, 255]),
+            filled: true,
+            extruded: false,
+            ..Default::default()
+        }))
+    };
+    // A disk at the view centre, either lifted by the extension or placed by hand
+    let disk = |z: f64, on_terrain: bool| -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                id: "disk".to_string(),
+                extensions: if on_terrain {
+                    Extensions::from_one(TerrainExtension::new())
+                } else {
+                    Extensions::default()
+                },
+                ..LayerProps::new("disk")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant([CENTER[0], CENTER[1], z]),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            billboard: false,
+            ..Default::default()
+        }))
+    };
+    // Pitched, so a change in elevation moves the disk up the screen
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: ViewState {
+                longitude: CENTER[0],
+                latitude: CENTER[1],
+                zoom: 14.0,
+                pitch: 60.0,
+                bearing: 0.0,
+            },
+            layers: vec![ground(80.0), disk(0.0, false)],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    // Where the disk lands at ground level, and where it lands 80 m up
+    let row_of = |shot: &deck_gl::Snapshot| -> Option<u32> {
+        (0..SIZE).find(|y| (0..SIZE).any(|x| shot.pixel(x, *y) == [255, 0, 0, 255]))
+    };
+    let at_zero = row_of(&deck.snapshot(None).unwrap()).expect("the disk at ground level");
+    deck.set_layers(vec![ground(80.0), disk(80.0, false)]);
+    let at_80 = row_of(&deck.snapshot(None).unwrap()).expect("the disk 80 m up");
+    assert!(
+        at_80 + 4 < at_zero,
+        "80 m lifts the disk up the screen: {at_80} against {at_zero}"
+    );
+    // With the extension and no elevation of its own, the disk sits on the 80 m ground
+    deck.set_layers(vec![ground(80.0), disk(0.0, true)]);
+    let on_terrain = row_of(&deck.snapshot(None).unwrap()).expect("the disk on the terrain");
+    assert!(
+        on_terrain.abs_diff(at_80) <= 1,
+        "the extension put the disk on the ground: {on_terrain} against {at_80}"
+    );
+    // Ground at a different height moves it again
+    deck.set_layers(vec![ground(0.0), disk(0.0, true)]);
+    let on_flat = row_of(&deck.snapshot(None).unwrap()).expect("the disk on flat ground");
+    assert!(
+        on_flat.abs_diff(at_zero) <= 1,
+        "flat ground leaves it where it was: {on_flat} against {at_zero}"
+    );
+}
+
+#[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };
     let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {

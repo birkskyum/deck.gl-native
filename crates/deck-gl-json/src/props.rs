@@ -400,8 +400,13 @@ impl<'a> Props<'a> {
                 );
                 Operation::MASK
             }
+            Some("terrain") => Operation::TERRAIN_ONLY,
+            Some("terrain+draw") | Some("draw+terrain") => Operation::TERRAIN,
             Some(other) => {
-                return Err(self.error("operation", format!("expected draw or mask, got `{other}`")))
+                return Err(self.error(
+                    "operation",
+                    format!("expected draw, mask, terrain or terrain+draw, got `{other}`"),
+                ))
             }
         };
         Ok(base)
@@ -664,6 +669,7 @@ impl<'a> Props<'a> {
                 "CollisionFilterExtension" => extensions.push(Arc::new(self.collision_filter_extension()?)),
                 "FillStyleExtension" => extensions.push(Arc::new(self.fill_style_extension(&options)?)),
                 "PathStyleExtension" => extensions.push(Arc::new(self.path_style_extension(&options)?)),
+                "TerrainExtension" => extensions.push(Arc::new(deck_gl_layers::TerrainExtension::new())),
                 "" => return Err(self.error("extensions", format!("each extension needs a {TYPE_KEY}"))),
                 other => self.warn(format!(
                     "extension `{other}` is not supported yet and was ignored"

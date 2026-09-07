@@ -59,6 +59,12 @@ pub trait LayerExtension: Send + Sync + fmt::Debug {
     /// deck.gl's `extensionName`, for errors and logs.
     fn name(&self) -> &'static str;
 
+    /// Whether the layer sits on the terrain height map, so the deck knows to build one and
+    /// to give every layer the terrain module.
+    fn needs_terrain(&self) -> bool {
+        false
+    }
+
     /// Shader code the extension adds to the layer.
     fn shaders(&self) -> ExtensionShaders;
 
@@ -282,6 +288,11 @@ impl Extensions {
                 })
             })
             .collect()
+    }
+
+    /// Whether any extension puts its layer on the terrain height map.
+    pub fn needs_terrain(&self) -> bool {
+        self.0.iter().any(|e| e.needs_terrain())
     }
 
     /// The collision group of the layer, when one of its extensions takes part in the

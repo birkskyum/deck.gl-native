@@ -57,7 +57,7 @@ pub use contour_layer::{Contour, ContourGrid, ContourLayer, ContourLayerProps, D
 pub use extensions::{
     BrushingExtension, BrushingTarget, ClipExtension, CollisionFilterExtension, DataFilterExtension,
     FillPattern, FillPatternAtlas, FillStyleExtension, FilterCategories, FilterValues, MaskExtension,
-    PathStyleExtension, PathStyleTarget,
+    PathStyleExtension, PathStyleTarget, TerrainExtension,
 };
 pub use fetch::{CancelToken, FetchHandle, FetchResult, FetchStats, FetchStatus, Fetcher};
 pub use geo_cell_layer::{

@@ -84,16 +84,33 @@ impl std::fmt::Debug for ClickCallback {
 pub struct Operation {
     pub draw: bool,
     pub mask: bool,
+    /// The layer is ground: its elevation goes into the terrain height map, deck.gl's
+    /// `operation: 'terrain+draw'`.
+    pub terrain: bool,
 }
 
 impl Operation {
     pub const DRAW: Self = Self {
         draw: true,
         mask: false,
+        terrain: false,
     };
     pub const MASK: Self = Self {
         draw: false,
         mask: true,
+        terrain: false,
+    };
+    /// Ground that other layers sit on, drawn as usual as well: deck.gl's `terrain+draw`.
+    pub const TERRAIN: Self = Self {
+        draw: true,
+        mask: false,
+        terrain: true,
+    };
+    /// Ground that other layers sit on, not drawn itself: deck.gl's `terrain`.
+    pub const TERRAIN_ONLY: Self = Self {
+        draw: false,
+        mask: false,
+        terrain: true,
     };
 }
 
@@ -222,6 +239,10 @@ pub struct LayerContext {
     pub shadow: Option<Arc<crate::shadow::ShadowState>>,
     /// While the deck draws a shadow map: the index of the light it is for.
     pub shadow_pass: Option<usize>,
+    /// The ground of this frame, when a layer draws terrain.
+    pub terrain: Option<Arc<crate::terrain::TerrainMap>>,
+    /// While the deck draws the terrain height map.
+    pub terrain_pass: bool,
 }
 
 /// Attachments of the mask pass: one red channel texture and no depth buffer.
@@ -261,6 +282,8 @@ impl LayerContext {
     pub fn configure(&self, desc: &mut ModelDescriptor<'_>, props: &LayerProps) {
         desc.cache = Some(self.pipelines.clone());
         desc.shadow = self.shadow_enabled && props.shadow_enabled && !props.operation.mask;
+        // Ground layers also draw into the terrain height map, which has its own format
+        desc.terrain = self.terrain.is_some() && props.operation.terrain;
         // the depth bias is a uniform, see `depth_bias`
         desc.depth_bias = wgpu::DepthBiasState::default();
         // the collision pass draws layers with their picking pipeline
@@ -500,6 +523,11 @@ pub fn update_standard_uniforms(
     let project = get_uniforms_from_viewport(&project_props(ctx, viewport, props));
     project.write(model.uniforms("project")?)?;
     crate::shadow::write_shadow_uniforms(model, ctx, viewport, &project)?;
+    crate::terrain::write_terrain_uniforms(
+        model,
+        ctx,
+        crate::terrain::layer_terrain_mode(ctx, props.operation.terrain),
+    )?;
 
     // apply gamma to opacity to make it visually "linear"
     let opacity = props.opacity.clamp(0.0, 1.0).powf(1.0 / 2.2) as f32;

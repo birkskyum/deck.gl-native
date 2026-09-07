@@ -8,6 +8,7 @@ pub mod data_filter;
 pub mod fill_style;
 pub mod mask;
 pub mod path_style;
+pub mod terrain;
 
 pub use brushing::{BrushingExtension, BrushingTarget};
 pub use clip::ClipExtension;
@@ -16,6 +17,7 @@ pub use data_filter::{DataFilterExtension, FilterCategories, FilterValues};
 pub use fill_style::{FillPattern, FillPatternAtlas, FillStyleExtension};
 pub use mask::MaskExtension;
 pub use path_style::{PathStyleExtension, PathStyleTarget};
+pub use terrain::TerrainExtension;
 
 use deck_gl::Extensions;
 

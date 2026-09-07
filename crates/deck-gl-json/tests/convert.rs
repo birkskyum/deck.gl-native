@@ -850,11 +850,12 @@ fn extensions_parse_the_data_filter_with_named_categories() {
     // the range keeps the middle row only and the categories drop that one
     assert_eq!(filter.count_filtered(&data).unwrap(), 0);
 
-    // an extension that does not exist yet warns and is skipped
+    // An extension we do not implement warns and is skipped. Fp64Extension has nothing to do
+    // here: positions are already double precision, split into high and low halves.
     let mut warnings = Vec::new();
     let layers = JsonConverter::new()
         .convert_layers(
-            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "TerrainExtension"}]}]),
+            &json!([{"@@type": "ScatterplotLayer", "data": [], "extensions": [{"@@type": "Fp64Extension"}]}]),
             &mut warnings,
         )
         .unwrap();
@@ -1351,4 +1352,33 @@ fn a5_layer_reads_pentagon_indexes() {
     let cells = deck_gl::data::resolve_strings(&layer.props().polygon.data, &layer.props().get_cell).unwrap();
     assert_eq!(cells, vec![cell.clone()]);
     assert!(a5_polygon(&cell).is_some(), "the index resolves to a ring");
+}
+
+#[test]
+fn terrain_operations_and_the_terrain_extension() {
+    use deck_gl::layer::Operation;
+    let deck = JsonConverter::new()
+        .convert(&json!([
+            {"@@type": "SolidPolygonLayer", "id": "ground", "data": [], "operation": "terrain"},
+            {"@@type": "SolidPolygonLayer", "id": "hills", "data": [], "operation": "terrain+draw"},
+            {
+                "@@type": "ScatterplotLayer",
+                "id": "points",
+                "data": [],
+                "extensions": [{"@@type": "TerrainExtension"}]
+            }
+        ]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    assert_eq!(deck.layers[0].props().operation, Operation::TERRAIN_ONLY);
+    assert_eq!(deck.layers[1].props().operation, Operation::TERRAIN);
+    assert!(
+        deck.layers[1].props().operation.draw,
+        "terrain+draw is drawn as well"
+    );
+    assert!(deck.layers[2].props().extensions.needs_terrain());
+    // An operation that is not one of deck.gl's is an error
+    let bad = json!([{"@@type": "ScatterplotLayer", "data": [], "operation": "levitate"}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(error.contains("terrain"), "{error}");
 }

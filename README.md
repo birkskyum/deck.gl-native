@@ -65,7 +65,8 @@ deduplication and cancellation.
 **Rendering.** deck.gl's own `project` and `project32` WGSL, lighting with a per layer
 material, shadows from directional lights, eighteen post-processing passes, per layer blend and
 depth state, and multisampling. Shader hooks and eight layer extensions: data filter, brushing,
-clip, mask, collision filter, fill style and path style
+clip, mask, collision filter, fill style, path style and terrain (layers sitting on ground
+that other layers draw)
 ([docs/extensions.md](docs/extensions.md)).
 
 **Embedding.** Render into a wgpu pass you own or into textures you provide. A C API

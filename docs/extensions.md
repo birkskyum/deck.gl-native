@@ -142,3 +142,32 @@ for extensions that declare attributes.
   `dash_justified`, `dash_gap_pickable`) and paths shifted sideways (`offset`, `get_offset` in
   widths); with `target: PathStyleTarget::Scatterplot`, dashed circle strokes. Composite layers
   hand it to their stroke sub layers only. `high_precision_dash` is not ported.
+
+## TerrainExtension
+
+A layer with `TerrainExtension` sits on the ground rather than at its own z. The ground comes
+from the layers whose `operation` is `Operation::TERRAIN` (drawn as well) or
+`Operation::TERRAIN_ONLY` (ground only): before the frame is drawn, the deck renders their
+elevation into a height map covering the view, in metres, and every layer with the extension
+looks its anchor up in that map and moves up by what it finds. Objects outside the map keep
+their own elevation.
+
+```rust
+let ground = TerrainLayer::new(TerrainLayerProps {
+    base: LayerProps {
+        operation: Operation::TERRAIN,
+        ..LayerProps::new("terrain")
+    },
+    ..Default::default()
+});
+let points = ScatterplotLayer::new(ScatterplotLayerProps {
+    base: LayerProps {
+        extensions: Extensions::from_one(TerrainExtension::new()),
+        ..LayerProps::new("points")
+    },
+    ..Default::default()
+});
+```
+
+deck.gl's other terrain mode, draping a layer's pixels onto the terrain through a cover
+texture, is not here yet.
