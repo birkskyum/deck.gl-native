@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_strings, resolve_vec2};
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field};
+use deck_gl::data::resolve_strings;
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
@@ -100,26 +101,6 @@ impl IconAtlas {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstancePositions {
-    position: [f32; 3],
-    position_low: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceData {
-    size: f32,
-    angle: f32,
-    color: [u8; 4],
-    frame: [f32; 4],
-    color_mode: f32,
-    offset: [f32; 2],
-    pixel_offset: [f32; 2],
-    row_index: u32,
-}
-
 /// Properties of an [`IconLayer`]. Defaults match deck.gl.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IconLayerProps {
@@ -169,11 +150,49 @@ impl Default for IconLayerProps {
 }
 
 /// Renders icons from a texture atlas at given coordinates.
+/// The icon's instance buffers: position with its low part, then size, angle, colour, the
+/// atlas frame, colour mode, anchor offset, pixel offset and row index interleaved.
+fn icon_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::interleaved(
+            "instancePositions",
+            24,
+            vec![
+                Field::new("position", 1, VertexFormat::Float32x3, 0),
+                Field::low("position", 2, 12),
+            ],
+        ),
+        BufferSpec::interleaved(
+            "instanceData",
+            52,
+            vec![
+                Field::new("size", 3, VertexFormat::Float32, 0),
+                Field::new("angle", 4, VertexFormat::Float32, 4),
+                Field::new("color", 5, VertexFormat::Unorm8x4, 8),
+                Field::new("frame", 6, VertexFormat::Float32x4, 12),
+                Field::new("colorMode", 7, VertexFormat::Float32, 28),
+                Field::new("offset", 8, VertexFormat::Float32x2, 32),
+                Field::new("pixelOffset", 9, VertexFormat::Float32x2, 40),
+                Field::new("rowIndex", 10, VertexFormat::Uint32, 48),
+            ],
+        ),
+    ])
+}
+
+/// What the atlas mapping says about one object's icon.
+#[derive(Clone, Copy, Debug, Default)]
+struct IconLookup {
+    frame: [f32; 4],
+    color_mode: f32,
+    offset: [f32; 2],
+}
+
 pub struct IconLayer {
     props: IconLayerProps,
     model: Option<Model>,
     data_dirty: bool,
     texture_size: Vec2,
+    attributes: AttributeManager,
 }
 
 impl IconLayer {
@@ -182,6 +201,7 @@ impl IconLayer {
             props,
             model: None,
             data_dirty: true,
+            attributes: icon_attributes(),
             texture_size: Vec2::ONE,
         }
     }
@@ -235,63 +255,55 @@ impl IconLayer {
         model.set_texture("iconsTexture", texture.create_view(&Default::default()))?;
         self.texture_size = Vec2::new(atlas.image.width as f32, atlas.image.height as f32);
 
-        let positions = resolve_positions(data, &props.get_position)?;
+        // Frames, colour modes and anchor offsets come from the atlas mapping of each icon
         let icons = resolve_strings(data, &props.get_icon)?;
-        let colors = resolve_colors(data, &props.get_color)?;
-        let sizes = resolve_f32(data, &props.get_size)?;
-        let angles = resolve_f32(data, &props.get_angle)?;
-        let pixel_offsets = resolve_vec2(data, &props.get_pixel_offset)?;
-
-        let instance_positions: Vec<InstancePositions> = positions
-            .iter()
-            .map(|p| {
-                let hi = [p[0] as f32, p[1] as f32, p[2] as f32];
-                InstancePositions {
-                    position: hi,
-                    position_low: [
-                        (p[0] - hi[0] as f64) as f32,
-                        (p[1] - hi[1] as f64) as f32,
-                        (p[2] - hi[2] as f64) as f32,
-                    ],
-                }
-            })
-            .collect();
-        let instance_data: Vec<InstanceData> = (0..data.len())
-            .map(|i| {
-                let mapping = atlas.mapping.get(&icons[i]);
-                let (frame, color_mode, offset) = match mapping {
+        let lookups: Arc<Vec<IconLookup>> = Arc::new(
+            icons
+                .iter()
+                .map(|icon| match atlas.mapping.get(icon) {
                     Some(m) => {
                         let (w, h) = (m.width as f32, m.height as f32);
                         let anchor_x = m.anchor_x.unwrap_or(w / 2.0);
                         let anchor_y = m.anchor_y.unwrap_or(h / 2.0);
-                        (
-                            [m.x as f32, m.y as f32, w, h],
-                            if m.mask { 1.0 } else { 0.0 },
-                            [w / 2.0 - anchor_x, h / 2.0 - anchor_y],
-                        )
+                        IconLookup {
+                            frame: [m.x as f32, m.y as f32, w, h],
+                            color_mode: if m.mask { 1.0 } else { 0.0 },
+                            offset: [w / 2.0 - anchor_x, h / 2.0 - anchor_y],
+                        }
                     }
                     // Unknown icons get an empty frame and are not drawn
-                    None => ([0.0; 4], 0.0, [0.0; 2]),
-                };
-                InstanceData {
-                    size: sizes[i],
-                    angle: angles[i],
-                    color: colors[i],
-                    frame,
-                    color_mode,
-                    offset,
-                    pixel_offset: pixel_offsets[i],
-                    row_index: data.source_row(i),
-                }
-            })
-            .collect();
-        model.set_vertex_buffer(
-            "instancePositions",
-            create_vertex_buffer_from(&ctx.device, "instancePositions", &instance_positions),
-        )?;
-        model.set_vertex_buffer(
-            "instanceData",
-            create_vertex_buffer_from(&ctx.device, "instanceData", &instance_data),
+                    None => IconLookup::default(),
+                })
+                .collect(),
+        );
+        let (frames, modes, offsets) = (lookups.clone(), lookups.clone(), lookups);
+        self.attributes.update(
+            &ctx.device,
+            model,
+            data,
+            &[
+                ("position", AttributeSource::Positions(props.get_position.clone())),
+                ("size", AttributeSource::Floats(props.get_size.clone())),
+                ("angle", AttributeSource::Floats(props.get_angle.clone())),
+                ("color", AttributeSource::Colors(props.get_color.clone())),
+                (
+                    "frame",
+                    AttributeSource::Vec4(Accessor::Func(Arc::new(move |i| frames[i].frame))),
+                ),
+                (
+                    "colorMode",
+                    AttributeSource::Floats(Accessor::Func(Arc::new(move |i| modes[i].color_mode))),
+                ),
+                (
+                    "offset",
+                    AttributeSource::Vec2(Accessor::Func(Arc::new(move |i| offsets[i].offset))),
+                ),
+                (
+                    "pixelOffset",
+                    AttributeSource::Vec2(props.get_pixel_offset.clone()),
+                ),
+                ("rowIndex", AttributeSource::RowIndex),
+            ],
         )?;
         model.set_instance_count(data.len() as u32);
         Ok(())
@@ -305,30 +317,12 @@ impl Layer for IconLayer {
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
-            VertexBufferLayout::interleaved(
-                "instancePositions",
-                std::mem::size_of::<InstancePositions>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[(1, VertexFormat::Float32x3, 0), (2, VertexFormat::Float32x3, 12)],
-            ),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (3, VertexFormat::Float32, 0),
-                    (4, VertexFormat::Float32, 4),
-                    (5, VertexFormat::Unorm8x4, 8),
-                    (6, VertexFormat::Float32x4, 12),
-                    (7, VertexFormat::Float32, 28),
-                    (8, VertexFormat::Float32x2, 32),
-                    (9, VertexFormat::Float32x2, 40),
-                    (10, VertexFormat::Uint32, 48),
-                ],
-            ),
-        ];
+        let mut layouts = vec![VertexBufferLayout::vertex(
+            "positions",
+            0,
+            VertexFormat::Float32x2,
+        )];
+        layouts.extend(self.attributes.layouts());
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
             &shader,
@@ -348,6 +342,7 @@ impl Layer for IconLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
+        self.attributes.invalidate_all();
         Ok(())
     }
 

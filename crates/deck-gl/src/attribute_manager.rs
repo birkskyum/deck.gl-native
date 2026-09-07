@@ -27,6 +27,7 @@ pub enum AttributeSource {
     Floats(Accessor<f32>),
     Vec2(Accessor<[f32; 2]>),
     Vec3(Accessor<[f32; 3]>),
+    Vec4(Accessor<[f32; 4]>),
     /// The row of the layer's data each object comes from (picking)
     RowIndex,
 }
@@ -146,6 +147,7 @@ enum Resolved {
     Floats(Vec<f32>),
     Vec2(Vec<[f32; 2]>),
     Vec3(Vec<[f32; 3]>),
+    Vec4(Vec<[f32; 4]>),
     RowIndex,
 }
 
@@ -186,6 +188,18 @@ impl AttributeManager {
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
     ) -> Result<usize> {
+        self.update_many(device, &mut [model], data, sources)
+    }
+
+    /// Like [`AttributeManager::update`] for several models sharing the buffers (a layer with
+    /// a filled and a wireframe model, for instance).
+    pub fn update_many(
+        &mut self,
+        device: &wgpu::Device,
+        models: &mut [&mut Model],
+        data: &LayerData,
+        sources: &[(&'static str, AttributeSource)],
+    ) -> Result<usize> {
         let data_changed = self.force || self.previous_data.as_ref() != Some(data);
         let changed = |attribute: &str| -> bool {
             let now = sources
@@ -201,7 +215,9 @@ impl AttributeManager {
                 continue;
             }
             let gpu_buffer = build_buffer(device, buffer, data, sources, &mut resolved)?;
-            model.set_vertex_buffer(buffer.name, gpu_buffer)?;
+            for model in models.iter_mut() {
+                model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
+            }
             uploaded += 1;
         }
         self.previous = sources
@@ -304,6 +320,9 @@ fn build_buffer(
                 AttributeSource::Vec3(a) => Resolved::Vec3(resolve_with(data, a, |_| {
                     Err(DeckError::Data("vec3 columns are not supported yet".into()))
                 })?),
+                AttributeSource::Vec4(a) => Resolved::Vec4(resolve_with(data, a, |_| {
+                    Err(DeckError::Data("vec4 columns are not supported yet".into()))
+                })?),
                 AttributeSource::RowIndex => Resolved::RowIndex,
             };
             resolved.insert(field.attribute, values);
@@ -321,6 +340,7 @@ fn build_buffer(
                 (Resolved::Floats(f), _) => buffer(bytemuck::cast_slice(f)),
                 (Resolved::Vec2(v), _) => buffer(bytemuck::cast_slice(v)),
                 (Resolved::Vec3(v), _) => buffer(bytemuck::cast_slice(v)),
+                (Resolved::Vec4(v), _) => buffer(bytemuck::cast_slice(v)),
                 (Resolved::RowIndex, _) => {
                     let indices: Vec<u32> = (0..rows).map(|i| data.source_row(i)).collect();
                     buffer(bytemuck::cast_slice(&indices))
@@ -350,6 +370,7 @@ fn build_buffer(
                 (Resolved::Floats(f), _) => out.copy_from_slice(&f[row].to_ne_bytes()),
                 (Resolved::Vec2(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
                 (Resolved::Vec3(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
+                (Resolved::Vec4(v), _) => out.copy_from_slice(bytemuck::bytes_of(&v[row])),
                 (Resolved::RowIndex, _) => out.copy_from_slice(&data.source_row(row).to_ne_bytes()),
             }
         }

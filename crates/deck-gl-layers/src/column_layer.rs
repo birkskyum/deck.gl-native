@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/column-layer/column-layer.ts`: extruded cylinders
 //! (tesselated regular polygons) at given coordinates.
 
-use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions};
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field};
 use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
@@ -19,22 +19,6 @@ const SHADER: &str = include_str!("wgsl/column_layer.wgsl");
 struct GeometryVertex {
     position: [f32; 3],
     normal: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstancePositions {
-    position: [f32; 3],
-    position_low: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceData {
-    elevation: f32,
-    fill_color: [u8; 4],
-    line_color: [u8; 4],
-    stroke_width: f32,
 }
 
 /// Port of deck.gl's `tesselateColumn` for a regular disk: a triangle strip of the sides
@@ -160,12 +144,38 @@ impl Default for ColumnLayerProps {
 }
 
 /// Renders extruded columns or flat disks at given coordinates.
+/// The column's instance buffers: position with its low part, then elevation, colours and
+/// stroke width.
+fn column_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::interleaved(
+            "instancePositions",
+            24,
+            vec![
+                Field::new("position", 2, VertexFormat::Float32x3, 0),
+                Field::low("position", 3, 12),
+            ],
+        ),
+        BufferSpec::interleaved(
+            "instanceData",
+            16,
+            vec![
+                Field::new("elevation", 4, VertexFormat::Float32, 0),
+                Field::new("fillColor", 5, VertexFormat::Unorm8x4, 4),
+                Field::new("lineColor", 6, VertexFormat::Unorm8x4, 8),
+                Field::new("lineWidth", 7, VertexFormat::Float32, 12),
+            ],
+        ),
+    ])
+}
+
 pub struct ColumnLayer {
     props: ColumnLayerProps,
     fill: Option<Model>,
     stroke: Option<Model>,
     wireframe: Option<Model>,
     data_dirty: bool,
+    attributes: AttributeManager,
 }
 
 impl ColumnLayer {
@@ -176,6 +186,7 @@ impl ColumnLayer {
             stroke: None,
             wireframe: None,
             data_dirty: true,
+            attributes: column_attributes(),
         }
     }
 
@@ -221,43 +232,24 @@ impl ColumnLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
-        let device = &ctx.device;
-
-        let positions = resolve_positions(data, &props.get_position)?;
-        let elevations = resolve_f32(data, &props.get_elevation)?;
-        let fill_colors = resolve_colors(data, &props.get_fill_color)?;
-        let line_colors = resolve_colors(data, &props.get_line_color)?;
-        let widths = resolve_f32(data, &props.get_line_width)?;
-
-        let instance_positions: Vec<InstancePositions> = positions
-            .iter()
-            .map(|p| {
-                let hi = [p[0] as f32, p[1] as f32, p[2] as f32];
-                InstancePositions {
-                    position: hi,
-                    position_low: [
-                        (p[0] - hi[0] as f64) as f32,
-                        (p[1] - hi[1] as f64) as f32,
-                        (p[2] - hi[2] as f64) as f32,
-                    ],
-                }
-            })
+        let mut models: Vec<&mut Model> = [&mut self.fill, &mut self.stroke, &mut self.wireframe]
+            .into_iter()
+            .flatten()
             .collect();
-        let instance_data: Vec<InstanceData> = (0..data.len())
-            .map(|i| InstanceData {
-                elevation: elevations[i],
-                fill_color: fill_colors[i],
-                line_color: line_colors[i],
-                stroke_width: widths[i],
-            })
-            .collect();
-        let positions_buffer = create_vertex_buffer_from(device, "instancePositions", &instance_positions);
-        let data_buffer = create_vertex_buffer_from(device, "instanceData", &instance_data);
-        let count = data.len() as u32;
-        for model in self.models() {
-            model.set_vertex_buffer("instancePositions", positions_buffer.clone())?;
-            model.set_vertex_buffer("instanceData", data_buffer.clone())?;
-            model.set_instance_count(count);
+        self.attributes.update_many(
+            &ctx.device,
+            &mut models,
+            data,
+            &[
+                ("position", AttributeSource::Positions(props.get_position.clone())),
+                ("elevation", AttributeSource::Floats(props.get_elevation.clone())),
+                ("fillColor", AttributeSource::Colors(props.get_fill_color.clone())),
+                ("lineColor", AttributeSource::Colors(props.get_line_color.clone())),
+                ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
+            ],
+        )?;
+        for model in models {
+            model.set_instance_count(data.len() as u32);
         }
         Ok(())
     }
@@ -276,31 +268,14 @@ impl Layer for ColumnLayer {
             .copied()
             .collect();
         let shader = assemble_shader(&props.base.id, &modules, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::interleaved(
-                "geometry",
-                std::mem::size_of::<GeometryVertex>() as u64,
-                wgpu::VertexStepMode::Vertex,
-                &[(0, VertexFormat::Float32x3, 0), (1, VertexFormat::Float32x3, 12)],
-            ),
-            VertexBufferLayout::interleaved(
-                "instancePositions",
-                std::mem::size_of::<InstancePositions>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[(2, VertexFormat::Float32x3, 0), (3, VertexFormat::Float32x3, 12)],
-            ),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (4, VertexFormat::Float32, 0),
-                    (5, VertexFormat::Unorm8x4, 4),
-                    (6, VertexFormat::Unorm8x4, 8),
-                    (7, VertexFormat::Float32, 12),
-                ],
-            ),
-        ];
+        let layouts = [VertexBufferLayout::interleaved(
+            "geometry",
+            std::mem::size_of::<GeometryVertex>() as u64,
+            wgpu::VertexStepMode::Vertex,
+            &[(0, VertexFormat::Float32x3, 0), (1, VertexFormat::Float32x3, 12)],
+        )];
+        let mut layouts = layouts.to_vec();
+        layouts.extend(self.attributes.layouts());
         let geometry = tesselate_column(props.disk_resolution, props.extruded || props.stroked);
         let geometry_buffer = create_vertex_buffer_from(&ctx.device, "geometry", &geometry.vertices);
         let make = |label: String, topology: wgpu::PrimitiveTopology| -> Result<Model> {
@@ -344,6 +319,7 @@ impl Layer for ColumnLayer {
             self.wireframe = Some(wireframe);
         }
         self.data_dirty = true;
+        self.attributes.invalidate_all();
         Ok(())
     }
 
