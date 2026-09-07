@@ -98,25 +98,79 @@ impl TesselatedPolygons {
     }
 }
 
-/// Tesselate polygons for the solid polygon layer.
-pub fn tesselate(polygons: &[Polygon], preproject: impl Fn(&Position) -> [f64; 2]) -> TesselatedPolygons {
-    let mut out = TesselatedPolygons::default();
-    for (row, polygon) in polygons.iter().enumerate() {
-        let normalized = normalize(polygon);
-        let base = out.positions.len();
-        let size = normalized.positions.len();
-        if size == 0 {
+/// Polygons above which tessellation runs on all cores.
+const PARALLEL_POLYGONS: usize = 64;
+
+/// The tessellation of one polygon, before the parts are joined.
+struct TesselatedPolygon {
+    positions: Vec<Position>,
+    vertex_valid: Vec<f32>,
+    /// Indices relative to this polygon's first vertex
+    indices: Vec<u32>,
+}
+
+fn tesselate_one(
+    polygon: &Polygon,
+    preproject: &(impl Fn(&Position) -> [f64; 2] + Sync),
+) -> TesselatedPolygon {
+    let normalized = normalize(polygon);
+    let size = normalized.positions.len();
+    if size == 0 {
+        return TesselatedPolygon {
+            positions: Vec::new(),
+            vertex_valid: Vec::new(),
+            indices: Vec::new(),
+        };
+    }
+    let indices = surface_indices(&normalized, preproject);
+    // The last vertex of every ring has no side wall to the next one
+    let mut vertex_valid = vec![1.0f32; size];
+    for &hole in &normalized.hole_indices {
+        vertex_valid[hole - 1] = 0.0;
+    }
+    vertex_valid[size - 1] = 0.0;
+    TesselatedPolygon {
+        positions: normalized.positions,
+        vertex_valid,
+        indices,
+    }
+}
+
+/// Tesselate polygons for the solid polygon layer. Large batches are tessellated on all
+/// cores and joined afterwards, since earcut is the bulk of a polygon layer's upload.
+pub fn tesselate(
+    polygons: &[Polygon],
+    preproject: impl Fn(&Position) -> [f64; 2] + Sync,
+) -> TesselatedPolygons {
+    let parts: Vec<TesselatedPolygon> = if polygons.len() >= PARALLEL_POLYGONS {
+        use rayon::prelude::*;
+        polygons
+            .par_iter()
+            .map(|polygon| tesselate_one(polygon, &preproject))
+            .collect()
+    } else {
+        polygons
+            .iter()
+            .map(|polygon| tesselate_one(polygon, &preproject))
+            .collect()
+    };
+    let vertices: usize = parts.iter().map(|p| p.positions.len()).sum();
+    let mut out = TesselatedPolygons {
+        positions: Vec::with_capacity(vertices),
+        vertex_valid: Vec::with_capacity(vertices),
+        indices: Vec::with_capacity(parts.iter().map(|p| p.indices.len()).sum()),
+        row_index: Vec::with_capacity(vertices),
+    };
+    for (row, part) in parts.into_iter().enumerate() {
+        let base = out.positions.len() as u32;
+        if part.positions.is_empty() {
             continue;
         }
-        let indices = surface_indices(&normalized, &preproject);
-        out.indices.extend(indices.into_iter().map(|i| i + base as u32));
-        out.positions.extend_from_slice(&normalized.positions);
-        out.vertex_valid.extend(std::iter::repeat_n(1.0, size));
-        for &hole in &normalized.hole_indices {
-            out.vertex_valid[base + hole - 1] = 0.0;
-        }
-        out.vertex_valid[base + size - 1] = 0.0;
-        out.row_index.extend(std::iter::repeat_n(row as u32, size));
+        out.indices.extend(part.indices.into_iter().map(|i| i + base));
+        out.row_index
+            .extend(std::iter::repeat_n(row as u32, part.positions.len()));
+        out.positions.extend(part.positions);
+        out.vertex_valid.extend(part.vertex_valid);
     }
     out
 }

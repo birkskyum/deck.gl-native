@@ -77,15 +77,24 @@ impl Request {
     }
 
     /// Settle the request, unless it already was; `true` when this call settled it.
-    fn finish(&self, status: FetchStatus, result: FetchResult) -> bool {
+    ///
+    /// `on_first` runs while the state is still locked, before the waiters are woken, so a
+    /// thread that wakes on the result sees everything that goes with it (the counters, the
+    /// generation) already updated.
+    fn finish_with(&self, status: FetchStatus, result: FetchResult, on_first: impl FnOnce()) -> bool {
         let mut state = self.lock();
         let first = !state.0.is_finished();
         if first {
             *state = (status, Some(result));
+            on_first();
         }
         drop(state);
         self.finished.notify_all();
         first
+    }
+
+    fn finish(&self, status: FetchStatus, result: FetchResult) -> bool {
+        self.finish_with(status, result, || {})
     }
 }
 
@@ -298,8 +307,9 @@ impl Inner {
         self.inflight().remove(&request.url);
         let bytes = result.as_ref().map(|b| b.len() as u64).unwrap_or(0);
         // A request settled twice (cancelled by its last handle, then met by a worker) is
-        // counted once
-        if request.finish(status, result) {
+        // counted once. The counters move before the waiters wake, so whoever gets the result
+        // sees the stats that go with it.
+        request.finish_with(status, result, || {
             let mut counters = self.counters();
             match status {
                 FetchStatus::Done => counters.completed += 1,
@@ -307,8 +317,8 @@ impl Inner {
                 _ => counters.cancelled += 1,
             }
             counters.bytes += bytes;
-        }
-        self.generation.fetch_add(1, Ordering::SeqCst);
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        });
     }
 
     fn work(inner: Arc<Inner>) {
