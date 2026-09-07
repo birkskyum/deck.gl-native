@@ -101,9 +101,9 @@ re-uploads the attributes and uniforms.
 Layers built on the `AttributeManager` (scatterplot, line, arc, point cloud, icon, column)
 support extension attributes, and so do the path, polygon, trips, GeoJSON and cell layers,
 which expand one value per object over their tessellated segments or vertices
-(`AttributeManager::update_expanded`). The text, bitmap and screen grid layers support
-modules, uniforms and injections, and return an error for extensions that declare
-attributes.
+(`AttributeManager::update_expanded`), and the text layer, which expands them per glyph. The
+bitmap and screen grid layers support modules, uniforms and injections, and return an error
+for extensions that declare attributes.
 
 ## Built in extensions
 

@@ -169,8 +169,8 @@ sit on the layer, as in pydeck:
 | `FillStyleExtension` | option `pattern`; `fillPatternAtlas` (image path or URL), `fillPatternMapping` (`{name: {x, y, width, height}}`, inline or a JSON file), `fillPatternMask`, `fillPatternEnabled`, `getFillPattern`, `getFillPatternScale`, `getFillPatternOffset` |
 | `PathStyleExtension` | options `dash` and `offset` (`highPrecisionDash` is accepted and ignored); `getDashArray`, `getOffset`, `dashJustified`, `dashGapPickable`; dashes circle strokes on a `ScatterplotLayer` |
 
-Extension attributes work on every layer but the text, bitmap and screen grid layers, which
-report an error for them. See [docs/extensions.md](extensions.md) for the shader hook
+Extension attributes work on every layer but the bitmap and screen grid layers, which report
+an error for them. See [docs/extensions.md](extensions.md) for the shader hook
 convention behind this.
 
 ## Supported layers and props

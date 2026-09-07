@@ -2852,3 +2852,63 @@ fn path_style_extension_dashes_scatterplot_strokes() {
     let pixels = render(&ctx, vec![circle([0.1, 1000.0])]);
     assert_pixel(&pixels, c + 12, c, [0, 0, 0, 0], 0);
 }
+
+#[test]
+fn text_layer_takes_extension_attributes_per_glyph() {
+    let Some(ctx) = context() else { return };
+    // two labels on the same spot, a red and a blue one
+    let labels = |extensions: Extensions| -> Box<dyn Layer> {
+        Box::new(TextLayer::new(TextLayerProps {
+            base: LayerProps {
+                extensions,
+                ..LayerProps::new("labels")
+            },
+            data: LayerData::with_length(2),
+            get_text: Accessor::Constant("H".to_string()),
+            get_position: Accessor::Constant(CENTER),
+            get_size: Accessor::Constant(40.0),
+            get_color: Accessor::func(|i| {
+                if i == 0 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 0, 255, 255]
+                }
+            }),
+            ..Default::default()
+        }))
+    };
+    // glyph pixels of a colour; the collision filter fades thin glyphs where its five pixel
+    // window reaches past the ink, so any visible alpha counts
+    let count = |pixels: &[u8], red: bool| {
+        (0..SIZE)
+            .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                let p = pixel(pixels, *x, *y);
+                p[3] > 30 && if red { p[0] > p[2] } else { p[2] > p[0] }
+            })
+            .count()
+    };
+    // the collision filter keeps the label with the higher priority
+    let priorities = Accessor::func(|i| if i == 0 { 10.0 } else { 0.0 });
+    let pixels = render(
+        &ctx,
+        vec![labels(Extensions::from_one(CollisionFilterExtension::new(
+            priorities,
+        )))],
+    );
+    assert!(
+        count(&pixels, true) > 40,
+        "red glyph pixels {}",
+        count(&pixels, true)
+    );
+    assert_eq!(count(&pixels, false), 0, "the blue label is hidden");
+    // the data filter drops the first label and leaves the blue one
+    let filter = DataFilterExtension::new(Accessor::func(|i| i as f32), [0.5, 1.5]);
+    let pixels = render(&ctx, vec![labels(Extensions::from_one(filter))]);
+    assert_eq!(count(&pixels, true), 0, "the red label is filtered out");
+    assert!(
+        count(&pixels, false) > 40,
+        "blue glyph pixels {}",
+        count(&pixels, false)
+    );
+}

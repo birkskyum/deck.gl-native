@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use deck_gl::attribute_manager::AttributeManager;
 use deck_gl::data::{
     resolve_colors, resolve_f32, resolve_positions, resolve_strings, resolve_vec2, resolve_with,
 };
@@ -216,8 +217,12 @@ pub struct TextLayer {
     atlas_key: Option<(FontSettings, String)>,
     texture_size: Vec2,
     data_dirty: bool,
+    models_dirty: bool,
     stroked: bool,
     has_background: bool,
+    /// Extension attributes expanded per glyph and per background
+    character_extensions: AttributeManager,
+    background_extensions: AttributeManager,
 }
 
 fn resolve_enum<T: Clone + Send + Sync + 'static>(
@@ -249,8 +254,11 @@ impl TextLayer {
             atlas_key: None,
             texture_size: Vec2::ONE,
             data_dirty: true,
+            models_dirty: false,
             stroked: false,
             has_background: false,
+            character_extensions: AttributeManager::new(Vec::new()),
+            background_extensions: AttributeManager::new(Vec::new()),
         }
     }
 
@@ -263,7 +271,12 @@ impl TextLayer {
         if self.props == props {
             return;
         }
-        if Self::attributes_changed(&self.props, &props) {
+        if self.props.base.needs_new_model(&props.base) {
+            self.models_dirty = true;
+        }
+        if self.props.base.extensions != props.base.extensions
+            || Self::attributes_changed(&self.props, &props)
+        {
             self.data_dirty = true;
         }
         self.props = props;
@@ -365,6 +378,9 @@ impl TextLayer {
         let font_size = props.font.font_size;
         let mut char_positions = Vec::new();
         let mut char_instances = Vec::new();
+        // the data row of every glyph and background, for the extension attributes
+        let mut char_rows: Vec<u32> = Vec::new();
+        let mut bg_rows: Vec<u32> = Vec::with_capacity(data.len());
         let mut bg_positions = Vec::with_capacity(data.len());
         let mut bg_instances = Vec::with_capacity(data.len());
         for (i, text) in texts.iter().enumerate() {
@@ -388,6 +404,7 @@ impl TextLayer {
                 let offset_x = (anchor_x - 1.0) * paragraph.row_width[j] / 2.0 + paragraph.x[j];
                 let offset_y = (anchor_y - 1.0) * height / 2.0 + paragraph.y[j];
                 char_positions.push(position);
+                char_rows.push(i as u32);
                 char_instances.push(CharacterInstance {
                     size: sizes[i],
                     angle: angles[i],
@@ -407,6 +424,7 @@ impl TextLayer {
             }
             if props.background {
                 bg_positions.push(position);
+                bg_rows.push(i as u32);
                 bg_instances.push(BackgroundInstance {
                     rect: [
                         (anchor_x - 1.0) * width / 2.0,
@@ -446,16 +464,42 @@ impl TextLayer {
             )?;
             model.set_instance_count(bg_instances.len() as u32);
         }
+
+        // Extension attributes: one value per text, expanded to its glyphs
+        let sources = props.base.extensions.sources(data)?;
+        let mut characters: Vec<&mut Model> = [&mut self.characters, &mut self.fill_pass]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !characters.is_empty() {
+            self.character_extensions
+                .update_expanded(device, &mut characters, data, &sources, &char_rows)?;
+        }
+        if let Some(background) = &mut self.background {
+            self.background_extensions.update_expanded(
+                device,
+                &mut [background],
+                data,
+                &sources,
+                &bg_rows,
+            )?;
+        }
         Ok(())
     }
 
-    fn create_character_model(&self, ctx: &LayerContext, id: &str, extra_bias: i32) -> Result<Model> {
-        let shader = self.props.base.extensions.assemble_without_attributes(
-            id,
-            &STANDARD_MODULES,
-            CHARACTERS_SHADER,
-        )?;
-        let layouts = [
+    fn create_character_model(
+        &self,
+        ctx: &LayerContext,
+        id: &str,
+        extra_bias: i32,
+    ) -> Result<(Model, AttributeManager)> {
+        let shader = self
+            .props
+            .base
+            .extensions
+            .assemble(id, &STANDARD_MODULES, CHARACTERS_SHADER)?;
+        let extensions = AttributeManager::new(self.props.base.extensions.buffer_specs(&shader)?);
+        let mut layouts = vec![
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
             VertexBufferLayout::interleaved(
                 "instancePositions",
@@ -480,6 +524,7 @@ impl TextLayer {
                 ],
             ),
         ];
+        layouts.extend(extensions.layouts());
         let mut desc = ModelDescriptor::new(
             id,
             &shader,
@@ -496,17 +541,18 @@ impl TextLayer {
             create_vertex_buffer_from(&ctx.device, "positions", &positions),
         )?;
         model.set_vertex_count(4);
-        Ok(model)
+        Ok((model, extensions))
     }
 
-    fn create_background_model(&self, ctx: &LayerContext) -> Result<Model> {
+    fn create_background_model(&self, ctx: &LayerContext) -> Result<(Model, AttributeManager)> {
         let id = format!("{}-background", self.props.base.id);
-        let shader = self.props.base.extensions.assemble_without_attributes(
-            &id,
-            &STANDARD_MODULES,
-            BACKGROUND_SHADER,
-        )?;
-        let layouts = [
+        let shader = self
+            .props
+            .base
+            .extensions
+            .assemble(&id, &STANDARD_MODULES, BACKGROUND_SHADER)?;
+        let extensions = AttributeManager::new(self.props.base.extensions.buffer_specs(&shader)?);
+        let mut layouts = vec![
             VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x2),
             VertexBufferLayout::interleaved(
                 "instancePositions",
@@ -531,6 +577,7 @@ impl TextLayer {
                 ],
             ),
         ];
+        layouts.extend(extensions.layouts());
         let mut desc = ModelDescriptor::new(
             &id,
             &shader,
@@ -546,7 +593,7 @@ impl TextLayer {
             create_vertex_buffer_from(&ctx.device, "positions", &positions),
         )?;
         model.set_vertex_count(4);
-        Ok(model)
+        Ok((model, extensions))
     }
 
     fn write_text_uniforms(model: &mut Model, font_size: f32) -> Result<()> {
@@ -597,15 +644,28 @@ impl Layer for TextLayer {
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let id = self.props.base.id.clone();
         // The background is a sub layer below the characters, like deck.gl's two sub layers.
-        self.background = Some(self.create_background_model(ctx)?);
-        self.characters = Some(self.create_character_model(ctx, &format!("{id}-characters"), -100)?);
-        self.fill_pass = Some(self.create_character_model(ctx, &format!("{id}-characters-fill"), -100)?);
+        let (background, background_extensions) = self.create_background_model(ctx)?;
+        self.background = Some(background);
+        self.background_extensions = background_extensions;
+        let (characters, character_extensions) =
+            self.create_character_model(ctx, &format!("{id}-characters"), -100)?;
+        self.characters = Some(characters);
+        self.character_extensions = character_extensions;
+        // the fill pass shares the characters' shader, layouts and buffers
+        self.fill_pass = Some(
+            self.create_character_model(ctx, &format!("{id}-characters-fill"), -100)?
+                .0,
+        );
         self.atlas_key = None;
         self.data_dirty = true;
+        self.models_dirty = false;
         Ok(())
     }
 
     fn update(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
+        if self.models_dirty {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

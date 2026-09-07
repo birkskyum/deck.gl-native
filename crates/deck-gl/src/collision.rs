@@ -71,7 +71,9 @@ impl CollisionTarget {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: luma_gl::PICKING_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let depth = depth_format.map(|format| {

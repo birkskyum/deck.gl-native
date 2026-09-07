@@ -1052,6 +1052,13 @@ impl Deck {
         Ok(())
     }
 
+    /// The collision map of a group as RGBA pixels, for debugging. Waits for the GPU.
+    #[doc(hidden)]
+    pub fn collision_map(&self, group: &str) -> Option<Vec<u8>> {
+        let target = self.collision_targets.get(group)?;
+        read_texture_rgba8(&self.ctx.device, &self.ctx.queue, &target.color).ok()
+    }
+
     fn publish_collisions(&mut self, groups: HashMap<String, wgpu::TextureView>, drawing_to_map: bool) {
         self.collisions = Arc::new(CollisionMaps {
             sampler: self.collisions.sampler.clone(),
