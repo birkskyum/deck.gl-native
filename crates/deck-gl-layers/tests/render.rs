@@ -7,7 +7,9 @@ use deck_gl::luma_gl::device::{
     create_headless_context, create_render_texture, read_texture_rgba8, HeadlessContext,
 };
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Path, PickingInfo, Unit, ViewState};
+use deck_gl::{
+    Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, Material, Path, PickingInfo, Unit, ViewState,
+};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
     BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
@@ -558,6 +560,49 @@ fn column_layer_draws_flat_disks_and_extruded_columns() {
     assert_pixel(&pixels, c, c, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, c + 6, c, [255, 0, 0, 255], 1);
     assert_pixel(&pixels, c + 14, c, [0, 0, 0, 0], 0);
+}
+
+#[test]
+fn material_controls_shading_of_extruded_columns() {
+    let Some(ctx) = context() else { return };
+    let column = |material: Material| {
+        Box::new(ColumnLayer::new(ColumnLayerProps {
+            base: LayerProps {
+                material,
+                ..LayerProps::new("column")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([20, 40, 60, 255]),
+            get_elevation: Accessor::Constant(200.0),
+            radius: 12.0,
+            radius_units: Unit::Pixels,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let c = SIZE / 2;
+    // Unlit columns keep the fill colour exactly, like deck.gl's `material: false`
+    let unlit = render(&ctx, vec![column(Material::unlit())]);
+    assert_pixel(&unlit, c, c, [20, 40, 60, 255], 1);
+    // The default material shades the lit top face
+    let lit = render(&ctx, vec![column(Material::default())]);
+    let shaded = pixel(&lit, c, c);
+    assert_eq!(shaded[3], 255);
+    assert_ne!(&shaded[..3], &[20, 40, 60], "lighting should change the colour");
+    // A brighter ambient term brightens the face
+    let bright = render(
+        &ctx,
+        vec![column(Material {
+            ambient: 1.0,
+            ..Material::default()
+        })],
+    );
+    let brighter = pixel(&bright, c, c);
+    let sum = |p: [u8; 4]| p[..3].iter().map(|&v| v as u32).sum::<u32>();
+    assert!(
+        sum(brighter) > sum(shaded),
+        "ambient 1.0 {brighter:?} should be brighter than the default {shaded:?}"
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use luma_gl::{Model, RenderTarget};
 
 use crate::constants::{ClipDepthRange, CoordinateSystem};
 use crate::data::Color;
-use crate::lighting::LightingEffect;
+use crate::lighting::{LightingEffect, Material};
 use crate::shaderlib::project::{get_uniforms_from_viewport, ProjectProps};
 use crate::viewport::Viewport;
 use crate::Result;
@@ -26,6 +26,8 @@ pub struct LayerProps {
     pub highlighted_object_index: Option<u32>,
     /// RGBA in 0..255, blended over the highlighted object.
     pub highlight_color: Color,
+    /// Reflectance of lit layers (extruded polygons, columns, point clouds)
+    pub material: Material,
 }
 
 impl Default for LayerProps {
@@ -41,6 +43,7 @@ impl Default for LayerProps {
             wrap_longitude: false,
             highlighted_object_index: None,
             highlight_color: [0, 0, 128, 128],
+            material: Material::default(),
         }
     }
 }
@@ -287,7 +290,7 @@ pub fn update_standard_uniforms(
         ctx.lighting.write(model.uniforms("lighting")?)?;
     }
     if model.has_uniforms("gouraudMaterial") {
-        LightingEffect::write_default_material(model.uniforms("gouraudMaterial")?)?;
+        props.material.write(model.uniforms("gouraudMaterial")?)?;
     }
     if model.has_uniforms("floatColors") {
         model.uniforms("floatColors")?.set_f32("useByteColors", 1.0)?;

@@ -103,11 +103,32 @@ polygon a ring or an array of rings). Errors name the layer, the prop and the ro
 Enumerations use `@@#`: `"coordinateSystem": "@@#COORDINATE_SYSTEM.METER_OFFSETS"` (the plain
 number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 
+## Effects
+
+A top level `effects` array may hold a `LightingEffect`, whose other fields are the lights, each
+with its own `@@type` (`AmbientLight`, `DirectionalLight` or `PointLight`) and deck.gl's props
+(`color`, `intensity`, `direction`, `position`, `attenuation`). It replaces the default lighting
+for the whole description; a description without an `AmbientLight` has no ambient term.
+Other effect types produce a warning and are skipped.
+
+```json
+{
+  "effects": [
+    {
+      "@@type": "LightingEffect",
+      "ambient": {"@@type": "AmbientLight", "color": [255, 255, 255], "intensity": 1.0},
+      "sun": {"@@type": "DirectionalLight", "color": [255, 255, 255], "intensity": 2.0, "direction": [-3, -9, -1]}
+    }
+  ],
+  "layers": [{"@@type": "SolidPolygonLayer", "extruded": true, "material": {"ambient": 0.64, "diffuse": 0.6, "shininess": 32, "specularColor": [51, 51, 51]}, "...": "..."}]
+}
+```
+
 ## Supported layers and props
 
 | Layer | Props |
 | --- | --- |
-| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex` |
+| all layers | `id`, `visible`, `opacity`, `pickable`, `coordinateSystem`, `coordinateOrigin`, `modelMatrix`, `wrapLongitude`, `highlightColor`, `highlightedObjectIndex`, `material` (`true`, `false` for unlit, or `{ambient, diffuse, shininess, specularColor}`) |
 | `ScatterplotLayer` | `radiusUnits`, `radiusScale`, `radiusMinPixels`, `radiusMaxPixels`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `stroked`, `filled`, `billboard`, `antialiasing`, `getPosition`, `getRadius`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPixelOffset` |
 | `LineLayer` | `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getColor`, `getWidth` |
 | `ArcLayer` | `greatCircle`, `numSegments`, `widthUnits`, `widthScale`, `widthMinPixels`, `widthMaxPixels`, `getSourcePosition`, `getTargetPosition`, `getSourceColor`, `getTargetColor`, `getWidth`, `getHeight`, `getTilt` |
@@ -118,7 +139,7 @@ number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 | `PolygonLayer` | `stroked`, `filled`, `extruded`, `wireframe`, `elevationScale`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `lineJointRounded`, `lineMiterLimit`, `getPolygon`, `getFillColor`, `getLineColor`, `getLineWidth`, `getElevation` |
 | `GeoJsonLayer` | `filled`, `stroked`, `extruded`, `wireframe`, `elevationScale`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `lineJointRounded`, `lineCapRounded`, `lineMiterLimit`, `pointRadiusUnits`, `pointRadiusScale`, `pointRadiusMinPixels`, `pointRadiusMaxPixels`, `getFillColor`, `getLineColor`, `getLineWidth`, `getPointRadius`, `getElevation` |
 | `ColumnLayer` | `diskResolution`, `radius`, `angle`, `offset`, `coverage`, `elevationScale`, `radiusUnits`, `lineWidthUnits`, `lineWidthScale`, `lineWidthMinPixels`, `lineWidthMaxPixels`, `extruded`, `wireframe`, `filled`, `stroked`, `getPosition`, `getFillColor`, `getLineColor`, `getLineWidth`, `getElevation` |
-| `HexagonLayer`, `GridLayer` | `radius` / `cellSize`, `getPosition`, `getColorWeight`, `getElevationWeight`, `colorAggregation`, `elevationAggregation` (`SUM`, `MEAN`, `MIN`, `MAX`, `COUNT`), `colorRange`, `colorDomain`, `colorScaleType`, `elevationDomain`, `elevationRange`, `elevationScale`, `elevationScaleType`, `lowerPercentile`, `upperPercentile`, `elevationLowerPercentile`, `elevationUpperPercentile`, `extruded`, `coverage` (CPU aggregation; `gpuAggregation` and `material` are accepted and ignored) |
+| `HexagonLayer`, `GridLayer` | `radius` / `cellSize`, `getPosition`, `getColorWeight`, `getElevationWeight`, `colorAggregation`, `elevationAggregation` (`SUM`, `MEAN`, `MIN`, `MAX`, `COUNT`), `colorRange`, `colorDomain`, `colorScaleType`, `elevationDomain`, `elevationRange`, `elevationScale`, `elevationScaleType`, `lowerPercentile`, `upperPercentile`, `elevationLowerPercentile`, `elevationUpperPercentile`, `extruded`, `coverage` (CPU aggregation; `gpuAggregation` is accepted and ignored) |
 | `ScreenGridLayer` | `cellSizePixels`, `cellMarginPixels`, `getPosition`, `getWeight`, `aggregation`, `colorRange`, `colorDomain`, `colorScaleType` (`linear` or `quantize`); re-aggregated in screen space whenever the view changes |
 | `GridCellLayer` | `cellSize`, `coverage`, `elevationScale`, `extruded`, `getPosition`, `getFillColor`, `getElevation` |
 | `PointCloudLayer` | `sizeUnits`, `pointSize`, `getPosition`, `getNormal`, `getColor` |
@@ -127,6 +148,6 @@ number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 | `BitmapLayer` | `image`, `bounds` (`[left, bottom, right, top]` or four corners), `desaturate`, `transparentColor`, `tintColor` |
 
 Props deck.gl accepts but this port does not have yet (`extensions`, `parameters`, `transitions`,
-`material`, `pointType`, ...) produce a warning and are skipped, as are layer types that do not
-exist here yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
+`pointType`, ...) produce a warning and are skipped, as are layer types that do not exist here
+yet. Callbacks such as `onHover` and `updateTriggers` are ignored silently since they
 have no meaning in a static description.

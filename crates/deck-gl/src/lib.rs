@@ -25,7 +25,7 @@ pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, PickingInfo, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use layer::{Layer, LayerContext, LayerProps, SubLayers};
-pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, PointLight};
+pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
 pub use viewport::{Viewport, WebMercatorViewportOptions};
 
 pub use glam;

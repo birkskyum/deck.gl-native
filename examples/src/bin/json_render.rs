@@ -54,6 +54,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             ..Default::default()
         },
     )?;
+    if let Some(lighting) = json.lighting {
+        deck.set_lighting(lighting);
+    }
 
     let mut encoder = ctx
         .device

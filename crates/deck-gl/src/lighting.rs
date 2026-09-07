@@ -120,11 +120,50 @@ impl LightingEffect {
 
     /// Write luma.gl's `gouraudMaterial` defaults.
     pub fn write_default_material(block: &mut UniformBlock) -> Result<()> {
-        block.set_u32("unlit", 0)?;
-        block.set_f32("ambient", 0.35)?;
-        block.set_f32("diffuse", 0.6)?;
-        block.set_f32("shininess", 32.0)?;
-        block.set_vec3("specularColor", Vec3::splat(38.25))?;
+        Material::default().write(block)
+    }
+}
+
+/// Surface reflectance of a lit layer, deck.gl's `material` prop (luma.gl's Gouraud
+/// material). Defaults match deck.gl.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Material {
+    /// Draw the raw colours without lighting
+    pub unlit: bool,
+    pub ambient: f32,
+    pub diffuse: f32,
+    pub shininess: f32,
+    /// 0 to 255 per channel
+    pub specular_color: [f32; 3],
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            unlit: false,
+            ambient: 0.35,
+            diffuse: 0.6,
+            shininess: 32.0,
+            specular_color: [38.25, 38.25, 38.25],
+        }
+    }
+}
+
+impl Material {
+    /// deck.gl's `material: false`: colours as given.
+    pub fn unlit() -> Self {
+        Self {
+            unlit: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn write(&self, block: &mut UniformBlock) -> Result<()> {
+        block.set_u32("unlit", self.unlit as u32)?;
+        block.set_f32("ambient", self.ambient)?;
+        block.set_f32("diffuse", self.diffuse)?;
+        block.set_f32("shininess", self.shininess)?;
+        block.set_vec3("specularColor", Vec3::from(self.specular_color))?;
         Ok(())
     }
 }

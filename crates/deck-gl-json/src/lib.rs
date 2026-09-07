@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use arrow_array::RecordBatch;
-use deck_gl::{DeckError, Layer, ViewState};
+use deck_gl::{DeckError, Layer, LightingEffect, ViewState};
 use serde_json::Value;
 
 pub mod data;
@@ -72,6 +72,8 @@ pub struct JsonDeck {
     /// `initialViewState` (or `viewState`), when present.
     pub view_state: Option<ViewState>,
     pub layers: Vec<Box<dyn Layer>>,
+    /// The `LightingEffect` among `effects`, when present.
+    pub lighting: Option<LightingEffect>,
     /// Layer types and props that were ignored, mirroring deck.gl's console warnings.
     pub warnings: Vec<String>,
 }
@@ -139,6 +141,7 @@ impl JsonConverter {
     /// Convert a parsed description object or layer array.
     pub fn convert(&self, value: &Value) -> Result<JsonDeck> {
         let mut warnings = Vec::new();
+        let mut lighting = None;
         let (view_state, layers) = match value {
             Value::Array(_) => (None, self.convert_layers(value, &mut warnings)?),
             Value::Object(map) => {
@@ -152,6 +155,16 @@ impl JsonConverter {
                     Some(layers) => self.convert_layers(layers, &mut warnings)?,
                     None => Vec::new(),
                 };
+                if let Some(Value::Array(effects)) = map.get("effects") {
+                    for effect in effects {
+                        match effect.get(props::TYPE_KEY).and_then(Value::as_str) {
+                            Some("LightingEffect") => lighting = Some(lighting_from_value(effect)?),
+                            Some(other) => warnings
+                                .push(format!("effect `{other}` is not available yet and was skipped")),
+                            None => warnings.push("effect without @@type was skipped".to_string()),
+                        }
+                    }
+                }
                 (view_state, layers)
             }
             other => {
@@ -164,6 +177,7 @@ impl JsonConverter {
         Ok(JsonDeck {
             view_state,
             layers,
+            lighting,
             warnings,
         })
     }
@@ -201,6 +215,73 @@ impl JsonConverter {
             ))),
         }
     }
+}
+
+/// A `LightingEffect` object: every other field is a light with its own `@@type`
+/// (`AmbientLight`, `DirectionalLight` or `PointLight`), as in deck.gl JSON.
+pub fn lighting_from_value(value: &Value) -> Result<LightingEffect> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| JsonError::Parse("LightingEffect must be an object".into()))?;
+    let mut effect = LightingEffect::default();
+    let mut has_ambient = false;
+    let mut directional = Vec::new();
+    let mut point = Vec::new();
+    for (name, light) in map {
+        if name == props::TYPE_KEY || name == "id" {
+            continue;
+        }
+        let object = light
+            .as_object()
+            .ok_or_else(|| JsonError::Parse(format!("light `{name}` must be an object")))?;
+        let number = |key: &str, default: f32| -> Result<f32> {
+            match object.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(v) => {
+                    props::convert::f32(v).map_err(|m| JsonError::Parse(format!("light `{name}` {key}: {m}")))
+                }
+            }
+        };
+        let vec3 = |key: &str, default: [f32; 3]| -> Result<[f32; 3]> {
+            match object.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(v) => props::convert::vec3(v)
+                    .map_err(|m| JsonError::Parse(format!("light `{name}` {key}: {m}"))),
+            }
+        };
+        match object.get(props::TYPE_KEY).and_then(Value::as_str) {
+            Some("AmbientLight") => {
+                effect.ambient = deck_gl::AmbientLight {
+                    color: vec3("color", [255.0, 255.0, 255.0])?,
+                    intensity: number("intensity", 1.0)?,
+                };
+                has_ambient = true;
+            }
+            Some("DirectionalLight") => directional.push(deck_gl::DirectionalLight {
+                color: vec3("color", [255.0, 255.0, 255.0])?,
+                intensity: number("intensity", 1.0)?,
+                direction: vec3("direction", [0.0, 0.0, -1.0])?,
+            }),
+            Some("PointLight") => point.push(deck_gl::PointLight {
+                color: vec3("color", [255.0, 255.0, 255.0])?,
+                intensity: number("intensity", 1.0)?,
+                position: vec3("position", [0.0, 0.0, 0.0])?,
+                attenuation: vec3("attenuation", [1.0, 0.0, 0.0])?,
+            }),
+            Some(other) => {
+                return Err(JsonError::Parse(format!(
+                    "light `{name}`: unknown type `{other}`"
+                )))
+            }
+            None => return Err(JsonError::Parse(format!("light `{name}` is missing `@@type`"))),
+        }
+    }
+    if !has_ambient {
+        effect.ambient.intensity = 0.0;
+    }
+    effect.directional = directional;
+    effect.point = point;
+    Ok(effect)
 }
 
 /// Read `longitude`, `latitude`, `zoom`, `pitch` and `bearing`; missing fields are zero.

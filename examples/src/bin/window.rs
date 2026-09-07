@@ -89,7 +89,7 @@ impl State {
             config.width as f64 / scale as f64,
             config.height as f64 / scale as f64,
         );
-        let deck = Deck::new(
+        let mut deck = Deck::new(
             &device,
             &queue,
             target,
@@ -103,6 +103,9 @@ impl State {
             },
         )
         .expect("deck");
+        if let Some(lighting) = loaded.lighting {
+            deck.set_lighting(lighting);
+        }
 
         State {
             window,

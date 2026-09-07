@@ -501,7 +501,6 @@ fn aggregation(p: &Props) -> Result<AggregationProps> {
     let d = AggregationProps::default();
     // accepted but not implemented: aggregation always runs on the CPU here
     p.get("gpuAggregation");
-    p.get("material");
     let color_range = match p.get("colorRange") {
         None | Some(Value::Null) => d.color_range,
         Some(Value::Array(items)) => items

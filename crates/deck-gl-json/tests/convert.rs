@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons, resolve_positions};
-use deck_gl::{Accessor, CoordinateSystem, LayerData};
+use deck_gl::{Accessor, CoordinateSystem, LayerData, Material};
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
 use serde_json::{json, Value};
@@ -445,4 +445,57 @@ fn trips_and_great_circle_layers() {
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 2);
     assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+}
+
+#[test]
+fn lighting_effects_and_materials() {
+    let spec = json!({
+        "effects": [
+            {
+                "@@type": "LightingEffect",
+                "ambient": {"@@type": "AmbientLight", "color": [255, 200, 200], "intensity": 0.5},
+                "sun": {"@@type": "DirectionalLight", "intensity": 2.0, "direction": [-3, -9, -1]},
+                "lamp": {"@@type": "PointLight", "position": [1, 2, 3], "attenuation": [1, 0.1, 0]}
+            },
+            {"@@type": "PostProcessEffect"}
+        ],
+        "layers": [
+            {"@@type": "SolidPolygonLayer", "id": "lit", "data": []},
+            {"@@type": "SolidPolygonLayer", "id": "flat", "data": [], "material": false},
+            {
+                "@@type": "ColumnLayer",
+                "id": "shiny",
+                "data": [],
+                "material": {"ambient": 0.64, "shininess": 64, "specularColor": [51, 51, 51]}
+            }
+        ]
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    let lighting = deck.lighting.expect("lighting effect");
+    assert_eq!(lighting.ambient.color, [255.0, 200.0, 200.0]);
+    assert_eq!(lighting.ambient.intensity, 0.5);
+    assert_eq!(lighting.directional.len(), 1);
+    assert_eq!(lighting.directional[0].direction, [-3.0, -9.0, -1.0]);
+    assert_eq!(lighting.directional[0].intensity, 2.0);
+    assert_eq!(lighting.point.len(), 1);
+    assert_eq!(lighting.point[0].attenuation, [1.0, 0.1, 0.0]);
+    assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
+    assert!(deck.warnings[0].contains("PostProcessEffect"));
+
+    let material = |index: usize| deck.layers[index].props().material;
+    assert_eq!(material(0), Material::default());
+    assert_eq!(material(1), Material::unlit());
+    let shiny = material(2);
+    assert!(!shiny.unlit);
+    assert_eq!((shiny.ambient, shiny.diffuse, shiny.shininess), (0.64, 0.6, 64.0));
+    assert_eq!(shiny.specular_color, [51.0, 51.0, 51.0]);
+
+    let no_ambient =
+        json!({"effects": [{"@@type": "LightingEffect", "sun": {"@@type": "DirectionalLight"}}]});
+    let deck = JsonConverter::new().convert(&no_ambient).unwrap();
+    assert_eq!(deck.lighting.unwrap().ambient.intensity, 0.0);
+
+    let bad = json!([{"@@type": "ColumnLayer", "data": [], "material": "shiny"}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(error.contains("material"), "{error}");
 }

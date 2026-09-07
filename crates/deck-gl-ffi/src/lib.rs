@@ -50,6 +50,8 @@ pub struct DeckglHandle {
     pub(crate) target: Option<RenderTarget>,
     pub(crate) camera: Option<DeckglCamera>,
     pub(crate) pending_layers: Option<Vec<Box<dyn deck_gl::Layer>>>,
+    /// Lighting from the last JSON description, applied to every deck
+    pub(crate) lighting: Option<deck_gl::LightingEffect>,
     pub(crate) last_error: CString,
     /// Number of frames rendered so far
     pub(crate) frame: u64,
@@ -65,6 +67,7 @@ impl DeckglHandle {
             target: None,
             camera: None,
             pending_layers: None,
+            lighting: None,
             last_error: CString::default(),
             frame: 0,
         }
@@ -119,6 +122,9 @@ impl DeckglHandle {
             )
             .map_err(|e| e.to_string())?;
             deck.set_viewport(viewport_from_camera(&camera));
+            if let Some(lighting) = self.lighting.clone() {
+                deck.set_lighting(lighting);
+            }
             self.deck = Some(deck);
             self.target = Some(target);
         }
@@ -233,6 +239,12 @@ fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_js
                 eprintln!("deck.gl-native: {warning}");
             }
             handle.set_layers(json.layers);
+            if let Some(lighting) = json.lighting {
+                if let Some(deck) = handle.deck.as_mut() {
+                    deck.set_lighting(lighting.clone());
+                }
+                handle.lighting = Some(lighting);
+            }
             0
         }
         Err(e) => handle.set_error(e.to_string()),

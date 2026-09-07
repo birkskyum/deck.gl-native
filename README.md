@@ -22,7 +22,7 @@ Working today, headless and verified pixel by pixel in tests:
 
 - `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, the composite `PolygonLayer` and `GeoJsonLayer`, the aggregation layers `HexagonLayer`, `GridLayer` and `ScreenGridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs), and `TripsLayer` and `GreatCircleLayer` from `@deck.gl/geo-layers`
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it
-- deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
+- deck.gl's `project` and `project32` shader modules, picking uniforms, `LightingEffect` with ambient, directional and point lights, and a per-layer `material`
 - Arrow record batches as layer data, with column, constant and function accessors
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)

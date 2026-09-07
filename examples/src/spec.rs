@@ -5,7 +5,7 @@
 
 use std::error::Error;
 
-use deck_gl::{Layer, ViewState};
+use deck_gl::{Layer, LightingEffect, ViewState};
 use deck_gl_json::JsonConverter;
 
 use crate::scene;
@@ -34,6 +34,8 @@ fn keep_only(mut layers: Vec<Box<dyn Layer>>) -> Vec<Box<dyn Layer>> {
 pub struct Scene {
     pub view_state: ViewState,
     pub layers: Vec<Box<dyn Layer>>,
+    /// The description's `LightingEffect`, when it has one
+    pub lighting: Option<LightingEffect>,
 }
 
 /// The built-in scene, or the description named by `DECKGL_JSON`.
@@ -48,11 +50,13 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
             Ok(Scene {
                 view_state: json.view_state.unwrap_or_else(|| scene::view_state(bearing)),
                 layers: keep_only(json.layers),
+                lighting: json.lighting,
             })
         }
         _ => Ok(Scene {
             view_state: scene::view_state(bearing),
             layers: keep_only(scene::layers()),
+            lighting: None,
         }),
     }
 }

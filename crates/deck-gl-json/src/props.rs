@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use deck_gl::glam::DMat4;
-use deck_gl::{Accessor, Color, CoordinateSystem, LayerProps, Unit};
+use deck_gl::{Accessor, Color, CoordinateSystem, LayerProps, Material, Unit};
 use serde_json::{Map, Value};
 
 use crate::expression::Expr;
@@ -313,6 +313,38 @@ impl<'a> Props<'a> {
         };
         base.wrap_longitude = self.bool("wrapLongitude", defaults.wrap_longitude)?;
         base.highlight_color = self.color("highlightColor", defaults.highlight_color)?;
+        base.material = match self.get("material") {
+            None | Some(Value::Null) | Some(Value::Bool(true)) => Material::default(),
+            Some(Value::Bool(false)) => Material::unlit(),
+            Some(Value::Object(map)) => {
+                let d = Material::default();
+                let number = |key: &str, default: f32| -> Result<f32> {
+                    match map.get(key) {
+                        None | Some(Value::Null) => Ok(default),
+                        Some(v) => convert::f32(v).map_err(|m| self.error("material", format!("{key}: {m}"))),
+                    }
+                };
+                Material {
+                    unlit: false,
+                    ambient: number("ambient", d.ambient)?,
+                    diffuse: number("diffuse", d.diffuse)?,
+                    shininess: number("shininess", d.shininess)?,
+                    specular_color: match map.get("specularColor") {
+                        None | Some(Value::Null) => d.specular_color,
+                        Some(v) => {
+                            let c = convert::numbers(v, 3, 3).map_err(|m| self.error("material", m))?;
+                            [c[0] as f32, c[1] as f32, c[2] as f32]
+                        }
+                    },
+                }
+            }
+            Some(other) => {
+                return Err(self.error(
+                    "material",
+                    format!("expected true, false or an object, got {}", describe(other)),
+                ))
+            }
+        };
         base.highlighted_object_index = match self.get("highlightedObjectIndex") {
             None | Some(Value::Null) => None,
             Some(value) => {

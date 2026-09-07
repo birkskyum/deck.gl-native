@@ -37,6 +37,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             ..Default::default()
         },
     )?;
+    if let Some(lighting) = loaded.lighting {
+        deck.set_lighting(lighting);
+    }
 
     let color_view = color.create_view(&Default::default());
     let depth_view = depth.create_view(&Default::default());
