@@ -47,6 +47,7 @@ arrow-array = "59"
 arrow-schema = "59"
 arrow-buffer = "59"
 arrow-select = "59"
+arrow-ipc = "59"
 parquet = { version = "59", default-features = false, features = ["arrow", "snap", "zstd", "lz4", "brotli", "flate2-zlib-rs"] }
 flatgeobuf = { version = "6", default-features = false }
 geozero = { version = "0.15", default-features = false, features = ["with-geojson"] }

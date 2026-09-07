@@ -28,6 +28,9 @@ pub async fn create_headless_context_async() -> Result<HeadlessContext> {
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("deck.gl-native"),
+            // What the adapter offers rather than wgpu's defaults, whose 256 MB buffer limit
+            // a layer of a few million rows reaches on hardware that has no such limit.
+            required_limits: adapter.limits(),
             ..Default::default()
         })
         .await

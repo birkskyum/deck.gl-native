@@ -741,7 +741,9 @@ name = "deck-gl-examples"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-ipc",
  "arrow-schema",
+ "arrow-select",
  "deck-gl",
  "deck-gl-json",
  "deck-gl-layers",
