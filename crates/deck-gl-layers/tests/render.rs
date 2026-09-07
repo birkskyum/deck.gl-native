@@ -9,11 +9,12 @@ use deck_gl::luma_gl::device::{
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Accessor, Deck, DeckProps, Layer, LayerData, LayerProps, PickingInfo, Unit, ViewState};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
-    GeoJsonLayer, GeoJsonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer,
-    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
-    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextLayer, TextLayerProps,
+    AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
+    BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
+    GridLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping,
+    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
+    PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps, TextLayer, TextLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -735,4 +736,115 @@ fn text_layer_background_and_sdf_outline() {
     assert!(blue > 100, "background box {blue}");
     assert!(white > 10, "white fill {white}");
     assert!(red > 10, "red outline {red}");
+}
+
+/// Points clustered in two spots near the view centre: a dense cluster on the left, a sparse
+/// one on the right.
+fn clustered_points() -> (LayerData, Accessor<[f64; 3]>) {
+    let mut points = Vec::new();
+    for i in 0..40 {
+        let t = i as f64 / 40.0;
+        points.push([
+            CENTER[0] - 0.0012 + t * 0.0002,
+            CENTER[1] + (t * 7.0).sin() * 0.0001,
+            0.0,
+        ]);
+    }
+    for i in 0..4 {
+        points.push([CENTER[0] + 0.0012, CENTER[1] + i as f64 * 0.00005, 0.0]);
+    }
+    let positions = std::sync::Arc::new(points);
+    let n = positions.len();
+    (LayerData::with_length(n), Accessor::func(move |i| positions[i]))
+}
+
+#[test]
+fn hexagon_layer_aggregates_and_colors_bins() {
+    let Some(ctx) = context() else { return };
+    let (data, get_position) = clustered_points();
+    let props = HexagonLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("hexagons")
+        },
+        data,
+        radius: 60.0,
+        aggregation: AggregationProps {
+            get_position,
+            color_aggregation: AggregationOperation::Count,
+            ..Default::default()
+        },
+    };
+    let aggregation = HexagonLayer::aggregate(&props).unwrap();
+    assert!(
+        aggregation.bins.len() >= 2 && aggregation.bins.len() <= 6,
+        "{} bins",
+        aggregation.bins.len()
+    );
+    let total: usize = aggregation.bins.iter().map(|b| b.count).sum();
+    assert_eq!(total, 44);
+    let densest = aggregation.bins.iter().max_by_key(|b| b.count).unwrap();
+    assert!(
+        densest.position[0] < CENTER[0],
+        "the dense cluster is on the left"
+    );
+    assert_eq!(aggregation.color_domain[1], densest.count as f32);
+
+    let layer = HexagonLayer::new(props.clone());
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let mut deck = make_deck(&ctx, vec![Box::new(HexagonLayer::new(props))]);
+    let at = |position: [f64; 2]| {
+        let p = deck
+            .viewport()
+            .project(deck_gl::glam::DVec3::new(position[0], position[1], 0.0), true);
+        (p.x.round() as u32, p.y.round() as u32)
+    };
+    // the densest bin gets the last colour of the range, the sparsest the first
+    let sparsest = aggregation.bins.iter().min_by_key(|b| b.count).unwrap();
+    let (dx, dy) = at(densest.position);
+    let (sx, sy) = at(sparsest.position);
+    assert_pixel(&pixels, dx, dy, [189, 0, 38, 255], 2);
+    assert_pixel(&pixels, sx, sy, [255, 255, 178, 255], 2);
+
+    // picking returns a bin index
+    let hit = deck
+        .pick(dx as f64, dy as f64)
+        .unwrap()
+        .expect("a bin under the cursor");
+    assert_eq!(hit.layer_id, "hexagons");
+    assert_eq!(aggregation.bins[hit.index as usize].count, densest.count);
+}
+
+#[test]
+fn grid_layer_extrudes_cells_by_weight() {
+    let Some(ctx) = context() else { return };
+    let (data, get_position) = clustered_points();
+    let props = GridLayerProps {
+        base: LayerProps::new("grid"),
+        data,
+        cell_size: 80.0,
+        aggregation: AggregationProps {
+            get_position,
+            extruded: true,
+            elevation_range: [0.0, 500.0],
+            color_range: vec![[0, 0, 255, 255], [255, 0, 0, 255]],
+            ..Default::default()
+        },
+    };
+    let aggregation = GridLayer::aggregate(&props).unwrap();
+    assert!(aggregation.bins.len() >= 2, "{} bins", aggregation.bins.len());
+    let tallest = aggregation
+        .cells
+        .iter()
+        .map(|c| c.elevation)
+        .fold(0.0f32, f32::max);
+    assert!(
+        (tallest - 500.0).abs() < 1e-3,
+        "densest cell reaches the top of the range: {tallest}"
+    );
+    let pixels = render(&ctx, vec![Box::new(GridLayer::new(props))]);
+    let colored = (0..SIZE * SIZE)
+        .filter(|i| pixel(&pixels, i % SIZE, i / SIZE)[3] > 200)
+        .count();
+    assert!(colored > 50, "cells cover pixels: {colored}");
 }

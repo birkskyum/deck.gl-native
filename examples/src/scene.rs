@@ -7,6 +7,7 @@ use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, UInt8Builder};
 use arrow_array::{Array, Float32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use deck_gl::{Accessor, Layer, LayerData, LayerProps, Path, Polygon, Unit, ViewState};
+use deck_gl_layers::{AggregationOperation, AggregationProps, HexagonLayer, HexagonLayerProps};
 use deck_gl_layers::{
     ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
     IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
@@ -338,11 +339,56 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         Box::new(lines),
         Box::new(arcs),
         Box::new(icons),
+        Box::new(hexagons()),
         Box::new(labels()),
     ]
 }
 
 /// A 64x32 atlas with a map pin on the left and a ring on the right, as alpha masks.
+/// Pseudo random points south west of the centre, aggregated into extruded hexagons.
+pub fn hexagons() -> HexagonLayer {
+    // a small deterministic generator so the scene is stable across runs
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let origin = [CENTER[0] - 0.03, CENTER[1] - 0.036];
+    let mut points = Vec::with_capacity(2500);
+    for _ in 0..2500 {
+        // two gaussian-ish blobs by summing uniforms
+        let blob = if next() < 0.6 { [0.0, 0.0] } else { [0.011, 0.006] };
+        let gx: f64 = (0..4).map(|_| next()).sum::<f64>() / 4.0 - 0.5;
+        let gy: f64 = (0..4).map(|_| next()).sum::<f64>() / 4.0 - 0.5;
+        points.push([
+            origin[0] + blob[0] + gx * 0.024,
+            origin[1] + blob[1] + gy * 0.016,
+            0.0,
+        ]);
+    }
+    let positions = Arc::new(points);
+    let n = positions.len();
+    HexagonLayer::new(HexagonLayerProps {
+        base: LayerProps {
+            pickable: true,
+            opacity: 0.9,
+            ..LayerProps::new("hexagons")
+        },
+        data: LayerData::with_length(n),
+        radius: 120.0,
+        aggregation: AggregationProps {
+            get_position: Accessor::func(move |i| positions[i]),
+            color_aggregation: AggregationOperation::Count,
+            extruded: true,
+            elevation_range: [0.0, 600.0],
+            coverage: 0.9,
+            ..Default::default()
+        },
+    })
+}
+
 /// District labels: SDF text with an outline, plus one boxed label.
 pub fn labels() -> TextLayer {
     let places: Vec<(&str, [f64; 3])> = vec![

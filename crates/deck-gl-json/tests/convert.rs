@@ -163,13 +163,13 @@ fn reports_row_conversion_errors() {
 #[test]
 fn warns_about_unknown_layers_and_props() {
     let spec = json!([
-        {"@@type": "HexagonLayer", "id": "bins"},
+        {"@@type": "HeatmapLayer", "id": "heat"},
         {"@@type": "ScatterplotLayer", "id": "p", "data": [], "bogusProp": 1, "onHover": "ignored"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 1);
     assert_eq!(deck.warnings.len(), 2, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("HexagonLayer"));
+    assert!(deck.warnings[0].contains("HeatmapLayer"));
     assert!(deck.warnings[1].contains("bogusProp"));
 }
 
@@ -303,6 +303,38 @@ fn text_layer_props_and_font_settings() {
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
     assert!(
         error.contains("getTextAnchor") && error.contains("left"),
+        "{error}"
+    );
+}
+
+#[test]
+fn aggregation_layers_props() {
+    let spec = json!([
+        {
+            "@@type": "HexagonLayer",
+            "id": "hex",
+            "data": [{"coordinates": [-122.4, 37.8], "w": 3}, {"coordinates": [-122.41, 37.81], "w": 1}],
+            "getPosition": "@@=coordinates",
+            "getColorWeight": "@@=w",
+            "colorAggregation": "MEAN",
+            "colorScaleType": "quantile",
+            "radius": 500,
+            "extruded": true,
+            "elevationRange": [0, 2000],
+            "colorRange": [[0, 0, 0], [255, 255, 255]],
+            "upperPercentile": 90,
+            "gpuAggregation": true
+        },
+        {"@@type": "GridLayer", "id": "grid", "data": [], "cellSize": 200, "colorDomain": [0, 10]},
+        {"@@type": "GridCellLayer", "id": "cells", "data": [{"position": [0, 0], "h": 5}], "cellSize": 100, "getElevation": "@@=h * 10"}
+    ]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 3);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let bad = json!([{"@@type": "HexagonLayer", "data": [], "colorAggregation": "MEDIAN"}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(
+        error.contains("colorAggregation") && error.contains("MEDIAN"),
         "{error}"
     );
 }

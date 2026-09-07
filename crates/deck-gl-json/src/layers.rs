@@ -4,11 +4,13 @@ use std::sync::Arc;
 
 use deck_gl::{FeatureCollection, Layer, LayerData};
 use deck_gl_layers::{
-    AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer, BitmapLayerProps, CharacterSet, ColumnLayer,
-    ColumnLayerProps, FontSettings, FontSource, GeoJsonLayer, GeoJsonLayerProps, IconAtlas, IconLayer,
-    IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
-    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
-    SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, WordBreak,
+    AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
+    BitmapLayerProps, CharacterSet, ColumnLayer, ColumnLayerProps, FontSettings, FontSource, GeoJsonLayer,
+    GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HexagonLayer, HexagonLayerProps,
+    IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
+    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType, ScatterplotLayer,
+    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
+    WordBreak,
 };
 use serde_json::Value;
 
@@ -71,6 +73,41 @@ pub fn convert_layer(
         "GeoJsonLayer" => {
             let collection = load_geojson(&mut props, options)?;
             Box::new(GeoJsonLayer::new(geojson(&props, collection)?))
+        }
+        "HexagonLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = HexagonLayerProps::default();
+            Box::new(HexagonLayer::new(HexagonLayerProps {
+                base: props.base()?,
+                data,
+                radius: props.f64("radius", d.radius)?,
+                aggregation: aggregation(&props)?,
+            }))
+        }
+        "GridLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = GridLayerProps::default();
+            Box::new(GridLayer::new(GridLayerProps {
+                base: props.base()?,
+                data,
+                cell_size: props.f64("cellSize", d.cell_size)?,
+                aggregation: aggregation(&props)?,
+            }))
+        }
+        "GridCellLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = GridCellLayerProps::default();
+            Box::new(ColumnLayer::grid_cells(GridCellLayerProps {
+                base: props.base()?,
+                data,
+                cell_size: props.f32("cellSize", d.cell_size)?,
+                coverage: props.f32("coverage", d.coverage)?,
+                elevation_scale: props.f32("elevationScale", d.elevation_scale)?,
+                extruded: props.bool("extruded", d.extruded)?,
+                get_position: props.accessor("getPosition", "position", convert::position)?,
+                get_fill_color: props.accessor("getFillColor", &d.get_fill_color, convert::color)?,
+                get_elevation: props.accessor("getElevation", &d.get_elevation, convert::f32)?,
+            }))
         }
         "TextLayer" => {
             let data = load_rows(&mut props, options)?;
@@ -345,6 +382,92 @@ fn geojson(p: &Props, collection: Arc<FeatureCollection>) -> Result<GeoJsonLayer
         get_line_width: p.accessor("getLineWidth", &d.get_line_width, convert::f32)?,
         get_point_radius: p.accessor("getPointRadius", &d.get_point_radius, convert::f32)?,
         get_elevation: p.accessor("getElevation", &d.get_elevation, convert::f32)?,
+    })
+}
+
+fn scale_type(p: &Props, key: &str, default: ScaleType) -> Result<ScaleType> {
+    match p.string(key)? {
+        None => Ok(default),
+        Some(name) => ScaleType::parse(&name).ok_or_else(|| {
+            p.error(
+                key,
+                format!("expected quantize, linear, quantile or ordinal, got `{name}`"),
+            )
+        }),
+    }
+}
+
+fn operation(p: &Props, key: &str, default: AggregationOperation) -> Result<AggregationOperation> {
+    match p.string(key)? {
+        None => Ok(default),
+        Some(name) => AggregationOperation::parse(&name).ok_or_else(|| {
+            p.error(
+                key,
+                format!("expected SUM, MEAN, MIN, MAX or COUNT, got `{name}`"),
+            )
+        }),
+    }
+}
+
+fn domain(p: &Props, key: &str) -> Result<Option<[f32; 2]>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let d = convert::numbers(v, 2, 2).map_err(|m| p.error(key, m))?;
+            Ok(Some([d[0] as f32, d[1] as f32]))
+        }
+    }
+}
+
+/// Props shared by HexagonLayer and GridLayer.
+fn aggregation(p: &Props) -> Result<AggregationProps> {
+    let d = AggregationProps::default();
+    // accepted but not implemented: aggregation always runs on the CPU here
+    p.get("gpuAggregation");
+    p.get("material");
+    let color_range = match p.get("colorRange") {
+        None | Some(Value::Null) => d.color_range,
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(convert::color)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|m| p.error("colorRange", m))?,
+        Some(other) => {
+            return Err(p.error(
+                "colorRange",
+                format!(
+                    "expected an array of colors, got {}",
+                    crate::props::describe(other)
+                ),
+            ))
+        }
+    };
+    let elevation_range = match p.get("elevationRange") {
+        None | Some(Value::Null) => d.elevation_range,
+        Some(v) => {
+            let r = convert::numbers(v, 2, 2).map_err(|m| p.error("elevationRange", m))?;
+            [r[0] as f32, r[1] as f32]
+        }
+    };
+    Ok(AggregationProps {
+        color_domain: domain(p, "colorDomain")?,
+        color_range,
+        color_scale_type: scale_type(p, "colorScaleType", d.color_scale_type)?,
+        color_aggregation: operation(p, "colorAggregation", d.color_aggregation)?,
+        lower_percentile: p.f32("lowerPercentile", d.lower_percentile)?,
+        upper_percentile: p.f32("upperPercentile", d.upper_percentile)?,
+        elevation_domain: domain(p, "elevationDomain")?,
+        elevation_range,
+        elevation_scale: p.f32("elevationScale", d.elevation_scale)?,
+        elevation_scale_type: scale_type(p, "elevationScaleType", d.elevation_scale_type)?,
+        elevation_aggregation: operation(p, "elevationAggregation", d.elevation_aggregation)?,
+        elevation_lower_percentile: p.f32("elevationLowerPercentile", d.elevation_lower_percentile)?,
+        elevation_upper_percentile: p.f32("elevationUpperPercentile", d.elevation_upper_percentile)?,
+        extruded: p.bool("extruded", d.extruded)?,
+        coverage: p.f32("coverage", d.coverage)?,
+        get_position: p.accessor("getPosition", "position", convert::position)?,
+        get_color_weight: p.accessor("getColorWeight", &d.get_color_weight, convert::f32)?,
+        get_elevation_weight: p.accessor("getElevationWeight", &d.get_elevation_weight, convert::f32)?,
     })
 }
 
