@@ -1041,6 +1041,69 @@ fn cartesian_positions_with_a_model_matrix_land_where_expected() {
 }
 
 #[test]
+fn offset_coordinate_systems_place_points_relative_to_the_origin() {
+    use deck_gl::CoordinateSystem;
+    let Some(ctx) = context() else { return };
+    // At zoom 14 near the view centre one pixel is about 3.75 m
+    let meters_per_pixel = 40_075_016.686 * CENTER[1].to_radians().cos() / (512.0 * 2f64.powi(14));
+    let cases: [(&str, CoordinateSystem, [f64; 3], (i64, i64)); 3] = [
+        (
+            "meter offsets",
+            CoordinateSystem::MeterOffsets,
+            [12.0 * meters_per_pixel, 0.0, 0.0],
+            (12, 0),
+        ),
+        (
+            "meter offsets north",
+            CoordinateSystem::MeterOffsets,
+            [0.0, 8.0 * meters_per_pixel, 0.0],
+            (0, -8),
+        ),
+        (
+            "lnglat offsets",
+            CoordinateSystem::LngLatOffsets,
+            [-0.0005, 0.0, 0.0],
+            (-12, 0),
+        ),
+    ];
+    for (label, coordinate_system, position, (dx, dy)) in cases {
+        let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                coordinate_system,
+                coordinate_origin: CENTER,
+                ..LayerProps::new("offsets")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(2.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        });
+        let shot = make_deck(&ctx, vec![Box::new(layer)]).snapshot(None).unwrap();
+        let hits: Vec<(u32, u32)> = (0..SIZE)
+            .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+            .filter(|&(x, y)| shot.pixel(x, y)[3] > 0)
+            .collect();
+        assert!(!hits.is_empty(), "{label}: nothing drawn");
+        let n = hits.len() as f64;
+        let (sx, sy) = hits
+            .iter()
+            .fold((0.0, 0.0), |a, h| (a.0 + h.0 as f64, a.1 + h.1 as f64));
+        let centre = (sx / n, sy / n);
+        let expected = (
+            SIZE as f64 / 2.0 - 0.5 + dx as f64,
+            SIZE as f64 / 2.0 - 0.5 + dy as f64,
+        );
+        assert!(
+            (centre.0 - expected.0).abs() < 1.0 && (centre.1 - expected.1).abs() < 1.0,
+            "{label}: drawn at {centre:?}, expected {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };
