@@ -19,6 +19,8 @@ pub enum CellKind {
     H3 { coverage: f64 },
     /// S2 cell tokens such as `"80858004"`
     S2,
+    /// A5 pentagon indexes, hexadecimal as in `"7b1400000000000"` or decimal
+    A5,
     /// Geohashes such as `"9q8yy"`
     Geohash,
     /// Bing quadkeys such as `"0231"`; `coverage` scales each tile from its top left corner
@@ -31,6 +33,7 @@ impl CellKind {
         match *self {
             CellKind::H3 { coverage } => h3_polygon(cell, coverage),
             CellKind::S2 => s2_polygon(cell),
+            CellKind::A5 => a5_polygon(cell),
             CellKind::Geohash => geohash_polygon(cell),
             CellKind::Quadkey { coverage } => quadkey_polygon(cell, coverage),
         }
@@ -87,6 +90,41 @@ pub fn s2_polygon(token: &str) -> Option<Vec<Position>> {
 #[cfg(not(feature = "s2-cells"))]
 pub fn s2_polygon(_token: &str) -> Option<Vec<Position>> {
     None
+}
+
+/// The boundary of an A5 pentagon given by its index, hexadecimal or decimal.
+pub fn a5_polygon(index: &str) -> Option<Vec<Position>> {
+    let index = index.trim();
+    let cell = match a5::hex_to_u64(index) {
+        Ok(cell) => cell,
+        Err(_) => index.parse::<u64>().ok()?,
+    };
+    let boundary = a5::cell_to_boundary(cell, None).ok()?;
+    if boundary.is_empty() {
+        return None;
+    }
+    // The ring comes back closed; unwrap it across the antimeridian relative to the first
+    // vertex so a pentagon there stays in one piece
+    let mut reference = f64::NAN;
+    Some(
+        boundary
+            .into_iter()
+            .map(|ll| {
+                let mut lng = ll.longitude();
+                if reference.is_nan() {
+                    reference = lng;
+                }
+                while lng - reference > 180.0 {
+                    lng -= 360.0;
+                }
+                while reference - lng > 180.0 {
+                    lng += 360.0;
+                }
+                reference = lng;
+                [lng, ll.latitude(), 0.0]
+            })
+            .collect(),
+    )
 }
 
 const GEOHASH_BASE32: &[u8; 32] = b"0123456789bcdefghjkmnpqrstuvwxyz";
@@ -203,6 +241,18 @@ impl GeoCellLayerProps {
             },
             get_cell: Accessor::column("hexagon"),
             kind: CellKind::H3 { coverage: 1.0 },
+        }
+    }
+
+    /// deck.gl's `A5Layer` defaults: pentagons from the `pentagon` field.
+    pub fn a5() -> Self {
+        Self {
+            polygon: PolygonLayerProps {
+                base: LayerProps::new("a5-cells"),
+                ..Default::default()
+            },
+            get_cell: Accessor::column("pentagon"),
+            kind: CellKind::A5,
         }
     }
 
@@ -381,6 +431,23 @@ mod tests {
             (half[3][0] + 180.0).abs() < 1e-9 && (half[1][0] + 90.0).abs() < 1e-9,
             "{half:?}"
         );
+    }
+
+    #[test]
+    fn a5_pentagons_come_back_as_closed_rings() {
+        // The A5 cell of the view centre at a middling resolution
+        let cell = a5::lonlat_to_cell(a5::LonLat::new(-122.4, 37.8), 8).unwrap();
+        let index = a5::u64_to_hex(cell);
+        let ring = a5_polygon(&index).expect("a boundary");
+        assert!(ring.len() >= 6, "a pentagon with split edges: {}", ring.len());
+        assert_eq!(ring[0], ring[ring.len() - 1], "the ring is closed");
+        // Every vertex is within a few degrees of the cell it came from
+        for p in &ring {
+            assert!((p[0] - -122.4).abs() < 5.0 && (p[1] - 37.8).abs() < 5.0, "{p:?}");
+        }
+        // Decimal indexes work too, and nonsense is skipped
+        assert_eq!(a5_polygon(&cell.to_string()), Some(ring));
+        assert!(a5_polygon("not a cell").is_none());
     }
 
     #[test]

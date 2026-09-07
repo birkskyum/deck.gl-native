@@ -117,13 +117,14 @@ pub fn convert_layer(
                 aggregation: aggregation(&props)?,
             }))
         }
-        "H3HexagonLayer" | "S2Layer" | "GeohashLayer" | "QuadkeyLayer" => {
+        "H3HexagonLayer" | "S2Layer" | "A5Layer" | "GeohashLayer" | "QuadkeyLayer" => {
             let data = load_rows(&mut props, options)?;
             props.get("highPrecision");
             props.get("centerHexagon");
             let (mut defaults, accessor, field) = match props.layer_type.as_str() {
                 "H3HexagonLayer" => (GeoCellLayerProps::h3(), "getHexagon", "hexagon"),
                 "S2Layer" => (GeoCellLayerProps::s2(), "getS2Token", "token"),
+                "A5Layer" => (GeoCellLayerProps::a5(), "getPentagon", "pentagon"),
                 "GeohashLayer" => (GeoCellLayerProps::geohash(), "getGeohash", "geohash"),
                 _ => (GeoCellLayerProps::quadkey(), "getQuadkey", "quadkey"),
             };

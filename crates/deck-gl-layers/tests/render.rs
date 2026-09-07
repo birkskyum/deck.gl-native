@@ -1544,6 +1544,29 @@ fn h3_cluster_layer_draws_the_outline_of_a_set_of_cells() {
 }
 
 #[test]
+fn a5_cells_fill_the_view_centre() {
+    use deck_gl_layers::{GeoCellLayer, GeoCellLayerProps};
+    let Some(ctx) = context() else { return };
+    // Resolution 14 is a pentagon of roughly a hundred metres, so it covers the view centre
+    let cell = a5::u64_to_hex(a5::lonlat_to_cell(a5::LonLat::new(CENTER[0], CENTER[1]), 14).unwrap());
+    let mut props = GeoCellLayerProps::a5();
+    props.polygon.data = LayerData::with_length(1);
+    props.polygon.get_fill_color = Accessor::Constant([255, 0, 200, 255]);
+    props.polygon.filled = true;
+    props.get_cell = Accessor::Constant(cell);
+    let shot = make_deck(&ctx, vec![Box::new(GeoCellLayer::new(props))])
+        .snapshot(None)
+        .unwrap();
+    let c = SIZE / 2;
+    assert_eq!(
+        shot.pixel(c, c),
+        [255, 0, 200, 255],
+        "the pentagon covers the centre"
+    );
+    assert_eq!(shot.pixel(1, 1)[3], 0, "and not the whole view");
+}
+
+#[test]
 fn geo_cell_layers_fill_their_cells() {
     use deck_gl_layers::{geohash_bounds, GeoCellLayer, GeoCellLayerProps};
     let Some(ctx) = context() else { return };

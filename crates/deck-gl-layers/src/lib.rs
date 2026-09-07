@@ -61,8 +61,8 @@ pub use extensions::{
 };
 pub use fetch::{CancelToken, FetchHandle, FetchResult, FetchStats, FetchStatus, Fetcher};
 pub use geo_cell_layer::{
-    geohash_bounds, geohash_polygon, h3_polygon, quadkey_polygon, s2_polygon, CellKind, GeoCellLayer,
-    GeoCellLayerProps,
+    a5_polygon, geohash_bounds, geohash_polygon, h3_polygon, quadkey_polygon, s2_polygon, CellKind,
+    GeoCellLayer, GeoCellLayerProps,
 };
 pub use geojson_layer::{GeoJsonLayer, GeoJsonLayerProps};
 pub use grid_cell_layer::{GridCellLayer, GridCellLayerProps};

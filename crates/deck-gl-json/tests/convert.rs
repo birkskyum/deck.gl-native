@@ -170,14 +170,15 @@ fn reports_row_conversion_errors() {
 
 #[test]
 fn warns_about_unknown_layers_and_props() {
+    // A layer type that does not exist in deck.gl either, so this stays a warning
     let spec = json!([
-        {"@@type": "A5Layer", "id": "pentagons"},
+        {"@@type": "TesseractLayer", "id": "hypercubes"},
         {"@@type": "ScatterplotLayer", "id": "p", "data": [], "bogusProp": 1, "onHover": "ignored"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 1);
     assert_eq!(deck.warnings.len(), 2, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("A5Layer"));
+    assert!(deck.warnings[0].contains("TesseractLayer"));
     assert!(deck.warnings[1].contains("bogusProp"));
 }
 
@@ -1325,4 +1326,29 @@ fn h3_cluster_layer_reads_hexagon_lists() {
     assert_eq!(cells[1], vec!["8928308280bffff".to_string()]);
     // Cells that are not indexes are skipped rather than failing the layer
     assert!(deck_gl_layers::cluster_polygons(&["nope".to_string()]).is_empty());
+}
+
+#[test]
+fn a5_layer_reads_pentagon_indexes() {
+    use deck_gl_layers::{a5_polygon, CellKind, GeoCellLayer};
+    let cell = a5::u64_to_hex(a5::lonlat_to_cell(a5::LonLat::new(-122.4, 37.8), 8).unwrap());
+    let mut deck = JsonConverter::new()
+        .convert(&json!([{
+            "@@type": "A5Layer",
+            "id": "pentagons",
+            "data": [{"pentagon": cell}],
+            "getPentagon": "@@=pentagon",
+            "getFillColor": [10, 20, 30],
+            "filled": true
+        }]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let layer = deck.layers[0]
+        .as_any_mut()
+        .downcast_mut::<GeoCellLayer>()
+        .expect("a geo cell layer");
+    assert_eq!(layer.props().kind, CellKind::A5);
+    let cells = deck_gl::data::resolve_strings(&layer.props().polygon.data, &layer.props().get_cell).unwrap();
+    assert_eq!(cells, vec![cell.clone()]);
+    assert!(a5_polygon(&cell).is_some(), "the index resolves to a ring");
 }

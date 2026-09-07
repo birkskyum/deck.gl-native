@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "a5"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dd75278e3f6b2e97146ed91daaa7235112770c361077d7da1c5efb928cdda41"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -770,6 +779,7 @@ dependencies = [
 name = "deck-gl-json"
 version = "0.1.0"
 dependencies = [
+ "a5",
  "arrow-array",
  "arrow-schema",
  "arrow-select",
@@ -794,6 +804,7 @@ dependencies = [
 name = "deck-gl-layers"
 version = "0.1.0"
 dependencies = [
+ "a5",
  "arrow-array",
  "arrow-schema",
  "base64 0.22.1",

@@ -37,6 +37,7 @@ flate2 = "1"
 rayon = { workspace = true }
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }
 base64 = "0.22"
+a5 = "0.10"
 
 [dev-dependencies]
 arrow-schema = { workspace = true }
