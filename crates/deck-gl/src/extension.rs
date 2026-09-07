@@ -37,6 +37,22 @@ pub struct ExtensionShaders {
     pub varyings: Vec<ShaderField>,
 }
 
+thread_local! {
+    static DEFAULT_SHADERS: std::cell::RefCell<Option<ExtensionShaders>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Shader code every layer assembled on this thread gets in addition to its extensions,
+/// deck.gl's default shader modules. The deck sets the shadow module here while a light casts
+/// shadows and clears it afterwards.
+pub fn set_default_shaders(shaders: Option<ExtensionShaders>) {
+    DEFAULT_SHADERS.with(|slot| *slot.borrow_mut() = shaders);
+}
+
+/// The default shaders set with [`set_default_shaders`].
+pub fn default_shaders() -> Option<ExtensionShaders> {
+    DEFAULT_SHADERS.with(|slot| slot.borrow().clone())
+}
+
 /// A layer extension. Implementations are immutable value objects: changing an option means
 /// giving the layer a new instance, which rebuilds its model.
 pub trait LayerExtension: Send + Sync + fmt::Debug {
@@ -197,6 +213,16 @@ impl Extensions {
         main: &str,
         shaders: ExtensionShaders,
     ) -> Result<AssembledShader> {
+        let mut shaders = shaders;
+        if let Some(defaults) = default_shaders() {
+            for module in defaults.modules {
+                if !shaders.modules.iter().any(|m| m.name == module.name) {
+                    shaders.modules.push(module);
+                }
+            }
+            shaders.injections.extend(defaults.injections);
+            shaders.varyings.extend(defaults.varyings);
+        }
         let mut all_modules: Vec<ShaderModuleSource> = modules.to_vec();
         for module in shaders.modules {
             if !all_modules.iter().any(|m| m.name == module.name) {

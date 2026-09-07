@@ -130,6 +130,8 @@ pub struct LayerProps {
     /// Extensions that add shader code and attributes to the layer, see
     /// [`LayerExtension`](crate::LayerExtension).
     pub extensions: Extensions,
+    /// Draw the layer into the shadow maps, deck.gl's `shadowEnabled`.
+    pub shadow_enabled: bool,
     /// Whether the layer draws on screen or into a mask, see [`Operation`].
     pub operation: Operation,
     /// How prop changes animate, see [`PropTransitions`].
@@ -155,6 +157,7 @@ impl Default for LayerProps {
             on_hover: None,
             on_click: None,
             extensions: Extensions::default(),
+            shadow_enabled: true,
             operation: Operation::DRAW,
             transitions: PropTransitions::default(),
         }
@@ -213,6 +216,12 @@ pub struct LayerContext {
     /// The time of the frame in seconds, from `Deck::tick` or the deck's own clock; what
     /// transitions are evaluated at.
     pub time: f64,
+    /// Whether a light casts shadows: models get a shadow pipeline and the shadow module.
+    pub shadow_enabled: bool,
+    /// The shadow maps and light matrices of this frame, `None` without shadows.
+    pub shadow: Option<Arc<crate::shadow::ShadowState>>,
+    /// While the deck draws a shadow map: the index of the light it is for.
+    pub shadow_pass: Option<usize>,
 }
 
 /// Attachments of the mask pass: one red channel texture and no depth buffer.
@@ -251,6 +260,7 @@ impl LayerContext {
     /// `mask`.
     pub fn configure(&self, desc: &mut ModelDescriptor<'_>, props: &LayerProps) {
         desc.cache = Some(self.pipelines.clone());
+        desc.shadow = self.shadow_enabled && props.shadow_enabled && !props.operation.mask;
         // the depth bias is a uniform, see `depth_bias`
         desc.depth_bias = wgpu::DepthBiasState::default();
         // the collision pass draws layers with their picking pipeline
@@ -489,6 +499,7 @@ pub fn update_standard_uniforms(
     model.set_uniform_transitions(&props.transitions.uniforms());
     let project = get_uniforms_from_viewport(&project_props(ctx, viewport, props));
     project.write(model.uniforms("project")?)?;
+    crate::shadow::write_shadow_uniforms(model, ctx, viewport, &project)?;
 
     // apply gamma to opacity to make it visually "linear"
     let opacity = props.opacity.clamp(0.0, 1.0).powf(1.0 / 2.2) as f32;
@@ -501,7 +512,10 @@ pub fn update_standard_uniforms(
     picking.set_f32("isAttribute", 0.0)?;
     picking.set_f32("useByteColors", 1.0)?;
     picking.set_f32("disabledPickingIndexCount", 0.0)?;
-    match props.highlighted_object_index {
+    match props
+        .highlighted_object_index
+        .filter(|_| ctx.shadow_pass.is_none())
+    {
         Some(index) => {
             let color = encode_picking_color(index);
             picking.set_f32("isHighlightActive", 1.0)?;

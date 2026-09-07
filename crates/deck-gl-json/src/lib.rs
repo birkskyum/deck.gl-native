@@ -433,6 +433,12 @@ pub fn lighting_from_value(value: &Value) -> Result<LightingEffect> {
         if name == props::TYPE_KEY || name == "id" {
             continue;
         }
+        // `shadowColor` is a prop of the effect, not a light
+        if name == "shadowColor" {
+            let rgba = props::convert::color(light).map_err(JsonError::Parse)?;
+            effect.shadow_color = rgba.map(|c| c as f32 / 255.0);
+            continue;
+        }
         let object = light
             .as_object()
             .ok_or_else(|| JsonError::Parse(format!("light `{name}` must be an object")))?;
@@ -463,6 +469,11 @@ pub fn lighting_from_value(value: &Value) -> Result<LightingEffect> {
                 color: vec3("color", [255.0, 255.0, 255.0])?,
                 intensity: number("intensity", 1.0)?,
                 direction: vec3("direction", [0.0, 0.0, -1.0])?,
+                shadow: object
+                    .get("_shadow")
+                    .or_else(|| object.get("shadow"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             }),
             Some("PointLight") => point.push(deck_gl::PointLight {
                 color: vec3("color", [255.0, 255.0, 255.0])?,

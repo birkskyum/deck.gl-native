@@ -1,0 +1,31 @@
+{
+  "initialViewState": {"longitude": -123.13, "latitude": 49.254, "zoom": 12.5, "pitch": 45, "bearing": 20},
+  "effects": [
+    {
+      "@@type": "LightingEffect",
+      "shadowColor": [15, 20, 50, 130],
+      "ambient": {"@@type": "AmbientLight", "color": [255, 255, 255], "intensity": 0.7},
+      "sun": {
+        "@@type": "DirectionalLight",
+        "color": [255, 245, 225],
+        "intensity": 1.6,
+        "direction": [-2, -4, -3],
+        "_shadow": true
+      }
+    }
+  ],
+  "layers": [
+    {
+      "@@type": "GeoJsonLayer",
+      "id": "blocks",
+      "data": "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/geojson/vancouver-blocks.json",
+      "extruded": true,
+      "filled": true,
+      "wireframe": false,
+      "getElevation": "@@=properties.valuePerSqm / 10",
+      "getFillColor": "@@=[255, 255 - properties.growth * 200, 60]",
+      "material": {"ambient": 0.55, "diffuse": 0.7, "shininess": 24, "specularColor": [40, 40, 40]},
+      "pickable": true
+    }
+  ]
+}

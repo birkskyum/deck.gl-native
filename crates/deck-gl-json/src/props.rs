@@ -335,6 +335,7 @@ impl<'a> Props<'a> {
             }
         };
         base.wrap_longitude = self.bool("wrapLongitude", defaults.wrap_longitude)?;
+        base.shadow_enabled = self.bool("shadowEnabled", defaults.shadow_enabled)?;
         base.highlight_color = self.color("highlightColor", defaults.highlight_color)?;
         base.material = match self.get("material") {
             None | Some(Value::Null) | Some(Value::Bool(true)) => Material::default(),

@@ -19,6 +19,9 @@ pub struct DirectionalLight {
     pub color: [f32; 3],
     pub intensity: f32,
     pub direction: [f32; 3],
+    /// Cast shadows: every layer is drawn into a shadow map from this light, deck.gl's
+    /// `_shadow`. At most two lights can.
+    pub shadow: bool,
 }
 
 /// Omnidirectional point light.
@@ -38,6 +41,8 @@ pub struct LightingEffect {
     pub ambient: AmbientLight,
     pub directional: Vec<DirectionalLight>,
     pub point: Vec<PointLight>,
+    /// RGBA in 0..1 mixed into fragments in shadow, deck.gl's `shadowColor`
+    pub shadow_color: [f32; 4],
 }
 
 impl Default for LightingEffect {
@@ -52,14 +57,17 @@ impl Default for LightingEffect {
                     color: [255.0, 255.0, 255.0],
                     intensity: 1.0,
                     direction: [-1.0, 3.0, -1.0],
+                    shadow: false,
                 },
                 DirectionalLight {
                     color: [255.0, 255.0, 255.0],
                     intensity: 0.9,
                     direction: [1.0, -8.0, -2.5],
+                    shadow: false,
                 },
             ],
             point: Vec::new(),
+            shadow_color: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }

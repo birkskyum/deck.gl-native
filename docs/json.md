@@ -161,6 +161,11 @@ Other effect types produce a warning and are skipped.
 }
 ```
 
+A `DirectionalLight` with `"_shadow": true` (up to two of them) casts shadows: every layer is
+drawn into a shadow map seen from the light and the fragments behind something are mixed with
+the effect's `shadowColor` (RGBA in 0..255, black by default). A layer opts out of casting with
+`"shadowEnabled": false`. Shadows need the map view.
+
 `PostProcessEffect` entries run shader passes over the rendered frame, in order. `module`
 names one of luma.gl's post-processing passes: `brightnessContrast`, `hueSaturation`, `sepia`,
 `vibrance`, `vignette`, `noise`, `denoise`, `triangleBlur`, `tiltShift`, `zoomBlur`,

@@ -21,7 +21,7 @@ pub mod uniform;
 
 pub use model::{
     create_rgba8_texture, default_sampler, Model, ModelDescriptor, RenderTarget, VertexBufferLayout,
-    PICKING_FORMAT,
+    PICKING_FORMAT, SHADOW_DEPTH_FORMAT, SHADOW_MAP_FORMAT,
 };
 pub use pipeline_cache::{PipelineCache, PipelineKey};
 pub use shader::{

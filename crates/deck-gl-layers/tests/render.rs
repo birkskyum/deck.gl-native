@@ -2237,6 +2237,113 @@ fn post_process_composites_onto_a_loaded_target_and_multisampled_decks() {
 }
 
 #[test]
+fn directional_lights_cast_shadows_onto_the_layers_below() {
+    use deck_gl::{AmbientLight, DirectionalLight, LightingEffect};
+    let Some(ctx) = context() else { return };
+    // A flat ground plane with a tall column standing on it, seen from straight above
+    let d = 0.002;
+    let ground = |id: &str| -> Box<dyn Layer> {
+        Box::new(SolidPolygonLayer::new(SolidPolygonLayerProps {
+            // Unlit, so the shadow is the only thing that darkens it
+            base: LayerProps {
+                material: Material::unlit(),
+                ..LayerProps::new(id)
+            },
+            data: LayerData::with_length(1),
+            get_polygon: Accessor::Constant(vec![vec![
+                [CENTER[0] - d, CENTER[1] - d, 0.0],
+                [CENTER[0] + d, CENTER[1] - d, 0.0],
+                [CENTER[0] + d, CENTER[1] + d, 0.0],
+                [CENTER[0] - d, CENTER[1] + d, 0.0],
+            ]]),
+            get_fill_color: Accessor::Constant([255, 255, 255, 255]),
+            filled: true,
+            extruded: false,
+            ..Default::default()
+        }))
+    };
+    let column = || -> Box<dyn Layer> {
+        Box::new(ColumnLayer::new(ColumnLayerProps {
+            base: LayerProps::new("column"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_fill_color: Accessor::Constant([200, 200, 200, 255]),
+            get_elevation: Accessor::Constant(60.0),
+            radius: 8.0,
+            disk_resolution: 12,
+            extruded: true,
+            ..Default::default()
+        }))
+    };
+    let lighting = |shadow: bool| LightingEffect {
+        ambient: AmbientLight {
+            color: [255.0, 255.0, 255.0],
+            intensity: 1.0,
+        },
+        // The light comes from the west, so the column's shadow falls to the east (+x)
+        directional: vec![DirectionalLight {
+            color: [255.0, 255.0, 255.0],
+            intensity: 0.0,
+            direction: [1.0, 0.0, -1.0],
+            shadow,
+        }],
+        point: Vec::new(),
+        shadow_color: [0.0, 0.0, 0.0, 1.0],
+    };
+    let mut deck = make_deck(&ctx, vec![ground("ground"), column()]);
+    deck.set_lighting(lighting(false));
+    let lit = deck.snapshot(None).unwrap();
+    let c = SIZE / 2;
+    // Without shadows the ground east of the column is the plain lit ground
+    let plain = lit.pixel(c + 10, c);
+    assert!(plain[0] > 200, "unshadowed ground: {plain:?}");
+    deck.set_lighting(lighting(true));
+    let shot = deck.snapshot(None).unwrap();
+    let shadowed = shot.pixel(c + 10, c);
+    assert!(
+        shadowed[0] < plain[0] - 30,
+        "the ground east of the column is darker: {shadowed:?} against {plain:?}"
+    );
+    // The far corner, out of the column's way, keeps its brightness
+    let far = shot.pixel(c - 16, c - 16);
+    assert!(far[0] > 200, "ground away from the column stays lit: {far:?}");
+    // The column itself is still drawn
+    assert!(shot.pixel(c, c)[3] == 255);
+    // Turning shadows off again restores the plain ground
+    deck.set_lighting(lighting(false));
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c + 10, c), plain);
+    // A layer with shadowEnabled false casts nothing
+    let mut deck = make_deck(
+        &ctx,
+        vec![
+            ground("ground"),
+            Box::new(ColumnLayer::new(ColumnLayerProps {
+                base: LayerProps {
+                    shadow_enabled: false,
+                    ..LayerProps::new("column")
+                },
+                data: LayerData::with_length(1),
+                get_position: Accessor::Constant(CENTER),
+                get_fill_color: Accessor::Constant([200, 200, 200, 255]),
+                get_elevation: Accessor::Constant(60.0),
+                radius: 8.0,
+                disk_resolution: 12,
+                extruded: true,
+                ..Default::default()
+            })),
+        ],
+    );
+    deck.set_lighting(lighting(true));
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(
+        shot.pixel(c + 10, c),
+        plain,
+        "a layer that casts no shadow leaves the ground alone"
+    );
+}
+
+#[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };
     let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {

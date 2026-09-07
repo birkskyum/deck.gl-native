@@ -1195,3 +1195,42 @@ fn post_process_effects_are_read_from_effects() {
         .to_string();
     assert!(bad_prop.contains("no prop `hue`"), "{bad_prop}");
 }
+
+#[test]
+fn directional_lights_read_shadow_flags() {
+    let deck = JsonConverter::new()
+        .convert(&json!({
+            "layers": [{"@@type": "SolidPolygonLayer", "id": "a", "data": [], "shadowEnabled": false}],
+            "effects": [{
+                "@@type": "LightingEffect",
+                "shadowColor": [0, 0, 60, 128],
+                "ambient": {"@@type": "AmbientLight", "intensity": 0.4},
+                "sun": {"@@type": "DirectionalLight", "direction": [-1, -3, -1], "_shadow": true},
+                "fill": {"@@type": "DirectionalLight", "direction": [1, 3, 1]}
+            }]
+        }))
+        .unwrap();
+    let lighting = deck.lighting.expect("lighting");
+    assert_eq!(lighting.directional.len(), 2);
+    // Lights come out in the JSON object's key order, so find them by their flag
+    let casting: Vec<[f32; 3]> = lighting
+        .directional
+        .iter()
+        .filter(|l| l.shadow)
+        .map(|l| l.direction)
+        .collect();
+    assert_eq!(casting, vec![[-1.0, -3.0, -1.0]], "only the sun casts shadows");
+    assert_eq!(lighting.shadow_color, [0.0, 0.0, 60.0 / 255.0, 128.0 / 255.0]);
+    assert!(!deck.layers[0].props().shadow_enabled, "shadowEnabled false");
+    // Without the flag nothing casts shadows and the colour keeps deck.gl's default
+    let plain = JsonConverter::new()
+        .convert(&json!({
+            "layers": [],
+            "effects": [{"@@type": "LightingEffect", "sun": {"@@type": "DirectionalLight"}}]
+        }))
+        .unwrap()
+        .lighting
+        .unwrap();
+    assert!(!plain.directional[0].shadow);
+    assert_eq!(plain.shadow_color, [0.0, 0.0, 0.0, 1.0]);
+}

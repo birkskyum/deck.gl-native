@@ -30,6 +30,7 @@ pub mod orbit_controller;
 pub mod parameters;
 pub mod post_process;
 pub mod shaderlib;
+pub mod shadow;
 pub mod transition;
 pub mod viewport;
 pub mod views;
@@ -41,7 +42,10 @@ pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, FrameStats, PickingInfo, Snapshot, ViewState};
-pub use extension::{same_extension, ExtensionAttribute, ExtensionShaders, Extensions, LayerExtension};
+pub use extension::{
+    default_shaders, same_extension, set_default_shaders, ExtensionAttribute, ExtensionShaders, Extensions,
+    LayerExtension,
+};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use globe_controller::{GlobeConstraints, GlobeController};
 pub use layer::{
@@ -54,6 +58,7 @@ pub use parameters::{CullMode, RenderParameters};
 pub use post_process::{
     builtin_module, PassKind, PassSpec, PostProcessEffect, ShaderPassModule, UniformValue,
 };
+pub use shadow::{light_matrices, shadow_shaders, shadows_enabled, ShadowState, ShadowTarget};
 pub use transition::{
     EasingKind, PropTransition, PropTransitions, TransitionDuration, TransitionInterpolator,
     TransitionInterruption, TransitionProps, ViewStateTransition,

@@ -1,6 +1,6 @@
 //! Port of `@deck.gl/core/src/lib/deck.ts`, reduced to what a native host needs.
 
-use luma_gl::{PipelineCache, RenderTarget, PICKING_FORMAT};
+use luma_gl::{create_rgba8_texture, PipelineCache, RenderTarget, PICKING_FORMAT};
 
 use luma_gl::device::{create_render_texture, read_texture_rgba8};
 
@@ -16,6 +16,9 @@ use crate::mask::{
     MAX_MASKS,
 };
 use crate::post_process::{PostProcessEffect, PostProcessor};
+use crate::shadow::{
+    light_matrices, shadow_map_size, shadow_shaders, shadows_enabled, ShadowState, ShadowTarget,
+};
 use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::Viewport;
 use std::collections::HashMap;
@@ -172,6 +175,10 @@ pub struct Deck {
     /// Post-processing effects applied after the layers, in order
     post_process: Vec<PostProcessEffect>,
     post_processor: PostProcessor,
+    /// One shadow map per light that casts shadows, kept across frames
+    shadow_targets: Vec<ShadowTarget>,
+    /// Bound where a light has no map yet
+    shadow_dummy: wgpu::TextureView,
 }
 
 impl Deck {
@@ -198,6 +205,9 @@ impl Deck {
             collisions: Some(collisions.clone()),
             pipelines: PipelineCache::new(),
             time: 0.0,
+            shadow_enabled: false,
+            shadow: None,
+            shadow_pass: None,
         };
         let camera = match props.view {
             View::Globe(_) => AnyViewState::Globe(props.view_state),
@@ -237,6 +247,9 @@ impl Deck {
             now: None,
             post_process: props.post_process,
             post_processor: PostProcessor::default(),
+            shadow_targets: Vec::new(),
+            shadow_dummy: create_rgba8_texture(device, queue, "shadow fallback", 1, 1, &[255, 255, 255, 255])
+                .create_view(&Default::default()),
         };
         deck.set_layers(props.layers);
         Ok(deck)
@@ -938,10 +951,131 @@ impl Deck {
     /// layers sampling them see this frame's masks.
     pub fn update(&mut self) -> Result<()> {
         self.ctx.time = self.time();
-        self.update_layers(true)?;
-        self.update_masks()?;
-        self.update_layers(false)?;
-        self.update_collisions()
+        self.prepare_shadows();
+        let result = (|| {
+            self.update_layers(true)?;
+            self.update_masks()?;
+            self.update_layers(false)?;
+            self.update_shadows()?;
+            self.update_collisions()
+        })();
+        // The default shaders are per thread: another deck on this thread must not get them
+        crate::extension::set_default_shaders(None);
+        result
+    }
+
+    /// Turn the shadow module on or off before the layers build their models, so every model
+    /// of a frame with shadows has the module and a shadow pipeline.
+    fn prepare_shadows(&mut self) {
+        let enabled = shadows_enabled(&self.ctx.lighting) && self.viewport.is_geospatial;
+        if enabled != self.ctx.shadow_enabled {
+            // The module changes the shaders: every model has to be built again
+            for entry in &mut self.layers {
+                entry.initialized = false;
+            }
+            self.ctx.shadow_enabled = enabled;
+            self.shadow_targets.clear();
+        }
+        crate::extension::set_default_shaders(enabled.then(shadow_shaders));
+        self.ctx.shadow = enabled.then(|| {
+            Arc::new(ShadowState {
+                light_matrices: light_matrices(&self.ctx.lighting, &self.viewport),
+                viewport_center: self.viewport.center,
+                maps: Vec::new(),
+                dummy: self.shadow_dummy.clone(),
+                color: self.ctx.lighting.shadow_color,
+            })
+        });
+    }
+
+    /// deck.gl's `ShadowPass`: draw every layer that casts shadows into one map per light,
+    /// seen from the light, then publish the maps so the layers sample them.
+    fn update_shadows(&mut self) -> Result<()> {
+        let Some(state) = self.ctx.shadow.clone() else {
+            return Ok(());
+        };
+        let lights = state.light_matrices.len();
+        if lights == 0 {
+            return Ok(());
+        }
+        let (width, height) = shadow_map_size(self.width, self.height, self.ctx.device_pixel_ratio);
+        if self.shadow_targets.len() != lights
+            || self
+                .shadow_targets
+                .first()
+                .is_some_and(|t| t.size() != (width, height))
+        {
+            self.shadow_targets = (0..lights)
+                .map(|i| ShadowTarget::new(&self.ctx.device, i, width, height))
+                .collect();
+        }
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("deck.gl shadows"),
+            });
+        let mut maps = Vec::with_capacity(lights);
+        for light in 0..lights {
+            self.ctx.shadow_pass = Some(light);
+            self.ctx.uniform_slot = 0;
+            let view = self.shadow_targets[light].color.create_view(&Default::default());
+            let depth = self.shadow_targets[light].depth.create_view(&Default::default());
+            for (index, entry) in self.layers.iter_mut().enumerate() {
+                let props = entry.layer.props();
+                if !entry.initialized || !props.visible || props.operation.mask || !props.shadow_enabled {
+                    continue;
+                }
+                self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
+                entry.layer.update(&self.ctx, &self.viewport)?;
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("deck.gl shadow map"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        // White is the farthest packed depth: nothing shadows by default
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                for (index, entry) in self.layers.iter_mut().enumerate() {
+                    let props = entry.layer.props();
+                    if !entry.initialized || !props.visible || props.operation.mask || !props.shadow_enabled {
+                        continue;
+                    }
+                    self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
+                    entry.layer.draw(&self.ctx, &mut pass)?;
+                }
+            }
+            maps.push(view);
+        }
+        self.ctx.queue.submit([encoder.finish()]);
+        self.ctx.shadow_pass = None;
+        self.ctx.shadow = Some(Arc::new(ShadowState {
+            light_matrices: state.light_matrices.clone(),
+            viewport_center: state.viewport_center,
+            maps,
+            dummy: self.shadow_dummy.clone(),
+            color: state.color,
+        }));
+        // The layers wrote shadow pass uniforms; write the frame's again
+        self.update_layers(false)
     }
 
     /// deck.gl's `CollisionFilterEffect`: draw the layers of every collision group into a

@@ -105,6 +105,10 @@ pub struct ModelDescriptor<'a> {
     pub pickable: bool,
     /// Share shader modules and pipelines with other models built through the same cache.
     pub cache: Option<PipelineCache>,
+    /// Also build a shadow map pipeline: same shader, a [`SHADOW_MAP_FORMAT`] target with a
+    /// [`SHADOW_DEPTH_FORMAT`] depth buffer, no blending and depth writes on. Drawn instead of
+    /// the main pipeline while [`Model::set_shadow_mode`] is on.
+    pub shadow: bool,
 }
 
 impl<'a> ModelDescriptor<'a> {
@@ -129,12 +133,18 @@ impl<'a> ModelDescriptor<'a> {
             cull_mode: None,
             pickable: false,
             cache: None,
+            shadow: false,
         }
     }
 }
 
 /// Format of the picking target every picking pipeline renders into.
 pub const PICKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Format of the shadow map every shadow pipeline renders into: depth packed into RGB.
+pub const SHADOW_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Depth buffer of the shadow map pass.
+pub const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 /// Blend state of deck.gl's picking pass: color written as is, alpha replaced by the blend
 /// constant, which the pass sets to the layer's id.
@@ -186,6 +196,9 @@ pub struct Model {
     device: wgpu::Device,
     pipeline: wgpu::RenderPipeline,
     picking_pipeline: Option<wgpu::RenderPipeline>,
+    shadow_pipeline: Option<wgpu::RenderPipeline>,
+    /// Draw with the shadow pipeline, see [`Model::set_shadow_mode`]
+    shadow_mode: bool,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     bind_group_dirty: bool,
@@ -297,7 +310,11 @@ impl Model {
         };
         let wgsl = crate::pipeline_cache::wgsl_hash(&shader.wgsl);
         let make_pipeline =
-            |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>, sample_count: u32| {
+            |label: &str,
+             format: wgpu::TextureFormat,
+             blend: Option<wgpu::BlendState>,
+             sample_count: u32,
+             depth: Option<(wgpu::TextureFormat, bool, wgpu::CompareFunction)>| {
                 let key = PipelineKey {
                     wgsl,
                     vertex_layouts: desc
@@ -308,11 +325,11 @@ impl Model {
                     bind_group_layout: layout_entries.clone(),
                     topology: desc.topology,
                     color_format: format,
-                    depth_format: desc.target.depth_format,
+                    depth_format: depth.map(|d| d.0),
                     sample_count,
                     blend,
-                    depth_write_enabled: desc.depth_write_enabled,
-                    depth_compare: desc.depth_compare,
+                    depth_write_enabled: depth.is_some_and(|d| d.1),
+                    depth_compare: depth.map_or(desc.depth_compare, |d| d.2),
                     depth_bias: (
                         depth_bias.constant,
                         depth_bias.slope_scale.to_bits(),
@@ -344,10 +361,10 @@ impl Model {
                             polygon_mode: wgpu::PolygonMode::Fill,
                             conservative: false,
                         },
-                        depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+                        depth_stencil: depth.map(|(format, write, compare)| wgpu::DepthStencilState {
                             format,
-                            depth_write_enabled: Some(desc.depth_write_enabled),
-                            depth_compare: Some(desc.depth_compare),
+                            depth_write_enabled: Some(write),
+                            depth_compare: Some(compare),
                             stencil: wgpu::StencilState::default(),
                             bias: depth_bias,
                         }),
@@ -367,11 +384,16 @@ impl Model {
                     })
                 })
             };
+        let main_depth = desc
+            .target
+            .depth_format
+            .map(|format| (format, desc.depth_write_enabled, desc.depth_compare));
         let pipeline = make_pipeline(
             desc.label,
             desc.target.color_format,
             desc.blend,
             desc.target.sample_count,
+            main_depth,
         );
         // The picking pass always renders into single sample textures.
         let picking_pipeline = desc.pickable.then(|| {
@@ -380,6 +402,17 @@ impl Model {
                 PICKING_FORMAT,
                 Some(picking_blend()),
                 1,
+                main_depth,
+            )
+        });
+        // The shadow pass writes packed depth without blending into its own depth tested target
+        let shadow_pipeline = desc.shadow.then(|| {
+            make_pipeline(
+                &format!("{}:shadow", desc.label),
+                SHADOW_MAP_FORMAT,
+                None,
+                1,
+                Some((SHADOW_DEPTH_FORMAT, true, wgpu::CompareFunction::LessEqual)),
             )
         });
 
@@ -388,6 +421,8 @@ impl Model {
             device: device.clone(),
             pipeline,
             picking_pipeline,
+            shadow_pipeline,
+            shadow_mode: false,
             bind_group_layout,
             bind_group,
             bind_group_dirty: false,
@@ -593,7 +628,20 @@ impl Model {
 
     /// Encode this model's draw call into the pass.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        self.draw_with(&self.pipeline, pass)
+        match (&self.shadow_pipeline, self.shadow_mode) {
+            (Some(pipeline), true) => self.draw_with(pipeline, pass),
+            _ => self.draw_with(&self.pipeline, pass),
+        }
+    }
+
+    /// Draw with the shadow pipeline (see [`ModelDescriptor::shadow`]) until turned off. A
+    /// model without one keeps drawing with its main pipeline.
+    pub fn set_shadow_mode(&mut self, on: bool) {
+        self.shadow_mode = on;
+    }
+
+    pub fn has_shadow_pipeline(&self) -> bool {
+        self.shadow_pipeline.is_some()
     }
 
     /// Encode a draw with the picking pipeline. The pass must render into a
