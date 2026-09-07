@@ -28,3 +28,6 @@ arrow-ipc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 winit = "0.30"
+egui = "0.32.3"
+egui-wgpu = "0.32.3"
+egui-winit = "0.32.3"

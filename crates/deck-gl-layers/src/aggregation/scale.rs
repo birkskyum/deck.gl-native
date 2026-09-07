@@ -53,20 +53,31 @@ pub fn aggregate(
     weights: &[f32],
     operation: AggregationOperation,
 ) -> (Vec<f32>, [f32; 2]) {
-    let mut domain = [f32::INFINITY, f32::NEG_INFINITY];
+    // Every bin's value depends only on that bin, so this runs on all cores. It is the other
+    // half of what a hexagon layer redoes when its radius moves, and on tens of millions of
+    // points it costs more than the binning did.
+    #[cfg(feature = "parallel")]
+    let values: Vec<f32> = {
+        use rayon::prelude::*;
+        bins.par_iter()
+            .map(|points| operation.apply(points, weights))
+            .collect()
+    };
+    #[cfg(not(feature = "parallel"))]
     let values: Vec<f32> = bins
         .iter()
-        .map(|points| {
-            let v = operation.apply(points, weights);
-            if v < domain[0] {
-                domain[0] = v;
-            }
-            if v > domain[1] {
-                domain[1] = v;
-            }
-            v
-        })
+        .map(|points| operation.apply(points, weights))
         .collect();
+
+    let mut domain = [f32::INFINITY, f32::NEG_INFINITY];
+    for value in &values {
+        if *value < domain[0] {
+            domain[0] = *value;
+        }
+        if *value > domain[1] {
+            domain[1] = *value;
+        }
+    }
     (values, domain)
 }
 

@@ -6,6 +6,7 @@ pub mod bin;
 pub mod scale;
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
 use deck_gl::data::{resolve_f32, resolve_positions};
@@ -105,9 +106,9 @@ pub struct Cell {
 /// Geometry of the bins in common (Web Mercator world) units.
 pub struct BinSpace {
     /// Bin id of a point relative to `origin`
-    pub bin_of: Box<dyn Fn([f64; 2]) -> [i64; 2]>,
+    pub bin_of: Box<dyn Fn([f64; 2]) -> [i64; 2] + Send + Sync>,
     /// Anchor position of a bin relative to `origin`
-    pub anchor_of: Box<dyn Fn([i64; 2]) -> [f64; 2]>,
+    pub anchor_of: Box<dyn Fn([i64; 2]) -> [f64; 2] + Send + Sync>,
     pub origin: [f64; 2],
 }
 
@@ -134,29 +135,133 @@ pub fn common_frame(
     Some((centroid, lng_lat_to_world(centroid), scales))
 }
 
+/// The distinct bins of a slice, in the order they first appear.
+fn distinct_bins(chunk: &[Option<[i64; 2]>]) -> Vec<[i64; 2]> {
+    let mut seen: HashMap<[i64; 2], (), BuildHasherDefault<BinHasher>> = HashMap::default();
+    let mut order = Vec::new();
+    for id in chunk.iter().flatten() {
+        if seen.insert(*id, ()).is_none() {
+            order.push(*id);
+        }
+    }
+    order
+}
+
+/// Hashes a bin's two integer coordinates by mixing rather than by a cryptographic round.
+/// Bin ids are dense and small, and the default hasher costs more than the collisions it
+/// avoids here.
+#[derive(Default)]
+pub struct BinHasher(u64);
+
+impl Hasher for BinHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.write_u8(*byte);
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        // A round of the same mixing xxHash and rustc-hash use
+        self.0 = (self.0 ^ value).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        self.0 ^= self.0 >> 29;
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 /// Bin the data and aggregate its weights.
 pub fn aggregate_points(data: &LayerData, props: &AggregationProps, space: &BinSpace) -> Result<Aggregation> {
+    let t0 = web_time::Instant::now();
     let positions = resolve_positions(data, &props.get_position)?;
     let color_weights = resolve_f32(data, &props.get_color_weight)?;
     let elevation_weights = resolve_f32(data, &props.get_elevation_weight)?;
+    let t_resolve = t0.elapsed();
+    let t1 = web_time::Instant::now();
 
-    let mut index_of: HashMap<[i64; 2], usize> = HashMap::new();
-    let mut ids: Vec<[i64; 2]> = Vec::new();
-    let mut members: Vec<Vec<usize>> = Vec::new();
-    for (i, p) in positions.iter().enumerate() {
+    // Which bin every point falls in. A projection and a bin lookup each, with nothing
+    // shared between them, so this runs on every core. It is most of the cost of binning,
+    // and binning is what a hexagon layer redoes every time its radius moves.
+    let bin_of = |p: &Position| -> Option<[i64; 2]> {
         if !p[0].is_finite() || !p[1].is_finite() {
-            continue;
+            return None;
         }
         let common = lng_lat_to_world([p[0], p[1]]);
-        let id = (space.bin_of)([common[0] - space.origin[0], common[1] - space.origin[1]]);
-        let slot = *index_of.entry(id).or_insert_with(|| {
-            ids.push(id);
-            members.push(Vec::new());
-            ids.len() - 1
-        });
-        members[slot].push(i);
+        Some((space.bin_of)([
+            common[0] - space.origin[0],
+            common[1] - space.origin[1],
+        ]))
+    };
+    #[cfg(feature = "parallel")]
+    let point_bins: Vec<Option<[i64; 2]>> = {
+        use rayon::prelude::*;
+        positions.par_iter().map(bin_of).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let point_bins: Vec<Option<[i64; 2]>> = positions.iter().map(bin_of).collect();
+
+    let t_map = t1.elapsed();
+
+    // Grouping the points by bin. Done in one pass this is a hash lookup and a push per
+    // point, all of it serial, which is what a hexagon layer's radius slider waits for. Done
+    // in four it is mostly parallel: the distinct bins of each chunk, merged in chunk order
+    // so the result is the same as the serial pass; then the slot of every point against a
+    // map nobody is writing to; then exact sized member lists so no push ever reallocates.
+    const CHUNK: usize = 1 << 16;
+    const NONE: u32 = u32::MAX;
+
+    #[cfg(feature = "parallel")]
+    let distinct: Vec<Vec<[i64; 2]>> = {
+        use rayon::prelude::*;
+        point_bins.par_chunks(CHUNK).map(distinct_bins).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let distinct: Vec<Vec<[i64; 2]>> = point_bins.chunks(CHUNK).map(distinct_bins).collect();
+
+    let mut index_of: HashMap<[i64; 2], u32, BuildHasherDefault<BinHasher>> = HashMap::default();
+    let mut ids: Vec<[i64; 2]> = Vec::new();
+    for chunk in distinct {
+        for id in chunk {
+            index_of.entry(id).or_insert_with(|| {
+                ids.push(id);
+                (ids.len() - 1) as u32
+            });
+        }
     }
 
+    let slot_of = |id: &Option<[i64; 2]>| -> u32 { id.map_or(NONE, |id| index_of[&id]) };
+    #[cfg(feature = "parallel")]
+    let slots: Vec<u32> = {
+        use rayon::prelude::*;
+        point_bins.par_iter().map(slot_of).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
+    let slots: Vec<u32> = point_bins.iter().map(slot_of).collect();
+
+    let mut counts = vec![0usize; ids.len()];
+    for slot in &slots {
+        if *slot != NONE {
+            counts[*slot as usize] += 1;
+        }
+    }
+    let mut members: Vec<Vec<usize>> = counts.iter().map(|n| Vec::with_capacity(*n)).collect();
+    for (i, slot) in slots.iter().enumerate() {
+        if *slot != NONE {
+            members[*slot as usize].push(i);
+        }
+    }
+
+    let t_bin = t1.elapsed();
+    let t2 = web_time::Instant::now();
     let (color_values, color_domain) = aggregate(&members, &color_weights, props.color_aggregation);
     let (elevation_values, elevation_domain) =
         aggregate(&members, &elevation_weights, props.elevation_aggregation);
@@ -177,6 +282,17 @@ pub fn aggregate_points(data: &LayerData, props: &AggregationProps, space: &BinS
         props.elevation_upper_percentile,
     );
 
+    let t_agg = t2.elapsed();
+    if std::env::var_os("DECKGL_TIME_BINNING").is_some() {
+        eprintln!(
+            "    resolve {:.1} ms  bin {:.1} ms (map {:.1}, group {:.1})  aggregate {:.1} ms",
+            t_resolve.as_secs_f64() * 1000.0,
+            t_bin.as_secs_f64() * 1000.0,
+            t_map.as_secs_f64() * 1000.0,
+            (t_bin - t_map).as_secs_f64() * 1000.0,
+            t_agg.as_secs_f64() * 1000.0
+        );
+    }
     let mut bins = Vec::with_capacity(ids.len());
     let mut cells = Vec::with_capacity(ids.len());
     for (b, id) in ids.iter().enumerate() {

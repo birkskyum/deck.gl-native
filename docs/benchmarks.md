@@ -48,6 +48,43 @@ Polygons are tessellated on all cores above 64 of them, which took the hundred t
 extruded polygons from 54.7 ms to 33.7 ms.
 Run to run noise on the laptop is around 10 percent.
 
+## Re-binning, the cost of moving a slider
+
+A hexagon layer bins every point again whenever its radius changes, which is what a radius
+slider costs to drag. The work is a mercator projection and a bin lookup per point, then
+grouping the points by bin, then a value per bin. All of it is per element and none of it
+shares state, which is the shape of work a single threaded renderer cannot make faster.
+
+`cargo run --release --bin load_race -- points.arrow --hexbin 200` measures it, and
+`DECKGL_TIME_BINNING=1` splits it into its three parts.
+
+Five million points, 200 m hexagons, Apple M series laptop with 18 cores:
+
+| | Before | After |
+| --- | ---: | ---: |
+| project and find the bin of every point | 210 ms | 11 ms |
+| group the points by bin | (part of the above) | 19 ms |
+| a value per bin | 16 ms | 7 ms |
+| **one radius change** | **240 ms** | **57 ms** |
+
+The first row is the pure form of it: nothing shared, so it divides by the core count and
+comes back nineteen times faster. The others are limited by memory rather than arithmetic and
+gain less. Twenty five million points cost about 390 ms a change, against roughly two seconds
+before.
+
+What changed:
+
+- the projection and bin lookup run on all cores
+- bin ids are hashed by mixing two integers rather than by the default hasher, which is built
+  for keys that can be attacked rather than for a pair of small integers
+- grouping is four passes instead of one, so only the merge is serial: the distinct bins of
+  each chunk in parallel, merged in chunk order so the result is identical to the serial pass,
+  then every point's bin looked up against a map nobody is writing to, then member lists
+  allocated to their exact size so no push reallocates
+- each bin's value is computed on all cores
+
+The layer's output is unchanged: the aggregation render tests compare pixels and still pass.
+
 ## How much data can be held at once
 
 `cargo run --release --bin gen_bench_data -- points 100000000 /tmp/points100m.arrow` writes a

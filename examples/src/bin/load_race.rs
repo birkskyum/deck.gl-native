@@ -24,8 +24,10 @@ use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_headless_context;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, ViewState};
+use deck_gl::{Accessor, Deck, DeckProps, LayerData, LayerProps, ViewState};
 use deck_gl_examples::bigdata;
+use deck_gl_layers::aggregation::AggregationProps;
+use deck_gl_layers::{HexagonLayer, HexagonLayerProps};
 
 const SIZE: u32 = 1024;
 const CLEAR: deck_gl::wgpu::Color = deck_gl::wgpu::Color {
@@ -48,11 +50,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut layer_kind = String::new();
     let mut frames = 60usize;
     let mut column = String::new();
+    let mut hexbin: Option<f64> = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--layer" => layer_kind = args.next().unwrap_or_default(),
             "--frames" => frames = args.next().unwrap_or_default().parse()?,
             "--column" => column = args.next().unwrap_or_default(),
+            "--hexbin" => hexbin = args.next().unwrap_or_default().parse().ok(),
             other => return Err(format!("unknown argument `{other}`").into()),
         }
     }
@@ -78,6 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Arrow arrays are reference counted, so keeping a handle for the restyle below copies
     // nothing; it is the same buffers.
     let again = batch.clone();
+    let for_hexbin = batch.clone();
     // build: the batch into a layer. The batch is moved in as it is.
     let started = Instant::now();
     let layer = bigdata::layer_from_batch(batch, &column, &kind)?;
@@ -131,6 +136,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     deck.set_layers(vec![restyled]);
     deck.snapshot(Some(CLEAR))?;
     let restyle_ms = ms(started);
+
+    // Binning is the work a kepler.gl style hexagon layer does every time its radius moves:
+    // a projection and a bin lookup for every single row.
+    if let Some(radius) = hexbin {
+        println!();
+        println!("  hexagon binning, the cost of moving a radius slider:");
+        for scale in [1.0, 0.5, 2.0] {
+            let props = HexagonLayerProps {
+                base: LayerProps::new("hexbin"),
+                data: LayerData::from_batch(for_hexbin.clone()),
+                radius: radius * scale,
+                aggregation: AggregationProps {
+                    get_position: Accessor::column(&column),
+                    ..Default::default()
+                },
+            };
+            let started = Instant::now();
+            let aggregation = HexagonLayer::aggregate(&props)?;
+            println!(
+                "    radius {:>7.0} m   {:>8.1} ms   {} bins",
+                radius * scale,
+                ms(started),
+                aggregation.bins.len()
+            );
+        }
+    }
 
     let name = Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
     println!();
