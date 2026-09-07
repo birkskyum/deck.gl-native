@@ -282,14 +282,8 @@ impl WmsLayer {
     }
 }
 
-#[cfg(feature = "fetch")]
 fn default_fetch(url: &str) -> std::result::Result<Vec<u8>, String> {
-    crate::tileset::fetch_bytes(url)
-}
-
-#[cfg(not(feature = "fetch"))]
-fn default_fetch(_url: &str) -> std::result::Result<Vec<u8>, String> {
-    Err("built without the fetch feature".to_string())
+    crate::tileset::fetch_bytes(url).map(|bytes| (*bytes).clone())
 }
 
 fn bounds_differ(a: [f64; 4], b: [f64; 4]) -> bool {

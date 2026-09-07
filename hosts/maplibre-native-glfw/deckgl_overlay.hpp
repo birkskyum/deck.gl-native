@@ -23,6 +23,9 @@ bool enabled();
 /// Record the map camera for the next frame. `width` and `height` are the map size in points.
 void setCamera(const mln::CameraOptions& camera, uint32_t width, uint32_t height, float pixelRatio);
 
+/// Whether deck.gl is still loading data or tiles; the view keeps repainting while it is.
+bool isLoading();
+
 /// Draw the overlay. Creates the deck on first use. `depth` may be null.
 void render(MTL::Device* device,
             MTL::CommandQueue* queue,

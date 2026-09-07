@@ -100,6 +100,10 @@ void setCamera(const mln::CameraOptions& camera, uint32_t width, uint32_t height
     }
 }
 
+bool isLoading() {
+    return handle != nullptr && deckgl_is_loading(handle) != 0;
+}
+
 void render(MTL::Device* device,
             MTL::CommandQueue* queue,
             MTL::Texture* color,

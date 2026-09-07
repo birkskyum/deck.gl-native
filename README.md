@@ -27,6 +27,9 @@ Working today, headless and verified pixel by pixel in tests:
 - deck.gl's `project` and `project32` shader modules, picking uniforms, `LightingEffect` with ambient, directional and point lights, and a per-layer `material`
 - Arrow record batches as layer data, with column, constant and function accessors, and
   incremental updates that rewrite only the rows marked as changed (`LayerData::with_changed_rows`)
+- Background loading of URLs through a shared `Fetcher` (thread pool, in memory cache, one
+  request per URL, cancellation of tiles that left the view, progress counters); JSON
+  descriptions and the C API show layers as their data arrives
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`

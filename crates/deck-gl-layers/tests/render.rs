@@ -1400,6 +1400,92 @@ fn tile_layer_loads_tiles_in_the_background_and_draws_them() {
 }
 
 #[test]
+fn tile_loads_are_cancelled_when_the_view_moves_on() {
+    use deck_gl_layers::{TileData, TileLayer, TileLayerProps, TileLoader};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let Some(ctx) = context() else { return };
+    let loads = Arc::new(AtomicUsize::new(0));
+    let counter = loads.clone();
+    let loader = TileLoader::new(move |_index, _bounds| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let rgba: Vec<u8> = [0u8, 200, 0, 255].iter().copied().cycle().take(16).collect();
+        Ok(Some(Arc::new(BitmapImage {
+            width: 2,
+            height: 2,
+            rgba: Arc::new(rgba),
+        }) as TileData))
+    });
+    // Small tiles, so the viewport selects many, loaded one at a time
+    let layer = TileLayer::new(TileLayerProps {
+        base: LayerProps::new("tiles"),
+        get_tile_data: Some(loader),
+        tile_size: 16.0,
+        max_requests: 1,
+        ..Default::default()
+    });
+    let view = |longitude: f64| ViewState {
+        longitude,
+        latitude: 45.0,
+        zoom: 1.0,
+        pitch: 0.0,
+        bearing: 0.0,
+    };
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: view(90.0),
+            layers: vec![Box::new(layer)],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    deck.snapshot(None).unwrap();
+    let tiles = |deck: &mut Deck| {
+        let layer = deck
+            .layer_mut("tiles")
+            .and_then(|l| l.as_any_mut().downcast_mut::<TileLayer>())
+            .unwrap();
+        (
+            layer.tileset().selected().len(),
+            layer.loading_count(),
+            layer.is_loaded(),
+        )
+    };
+    let (first_selection, queued, _) = tiles(&mut deck);
+    assert!(first_selection >= 4, "{first_selection} tiles selected");
+    assert_eq!(
+        queued, first_selection,
+        "every selected tile is queued or loading"
+    );
+    // Move far away before the queue drains: the old tiles are no longer wanted
+    deck.set_view_state(view(-90.0));
+    deck.snapshot(None).unwrap();
+    let (second_selection, _, _) = tiles(&mut deck);
+    assert!(second_selection >= 4);
+    for _ in 0..200 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        deck.snapshot(None).unwrap();
+        if tiles(&mut deck).2 {
+            break;
+        }
+    }
+    let (_, loading, loaded) = tiles(&mut deck);
+    assert!(loaded, "the new tiles finished loading");
+    assert_eq!(loading, 0);
+    let calls = loads.load(Ordering::SeqCst);
+    assert!(
+        calls <= second_selection + 1,
+        "{calls} loads for {second_selection} new tiles: the {first_selection} old ones were not all loaded"
+    );
+    assert!(calls >= second_selection);
+}
+
+#[test]
 fn geo_cell_layers_fill_their_cells() {
     use deck_gl_layers::{geohash_bounds, GeoCellLayer, GeoCellLayerProps};
     let Some(ctx) = context() else { return };

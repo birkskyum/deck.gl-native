@@ -13,6 +13,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use deck_gl::{Layer, LayerContext, LayerProps, Result, SubLayers, Viewport};
 
+use crate::fetch::CancelToken;
 use crate::tileset::{
     RefinementStrategy, TileBounds, TileIndex, TileStatus, Tileset, TilesetOptions, TILE_SIZE,
 };
@@ -42,15 +43,27 @@ impl LoadedTile {
 }
 
 /// Loads a tile's content, deck.gl's `getTileData`. Runs on a worker thread. `Ok(None)` is an
-/// empty tile (nothing to draw), `Err` a failed load.
+/// empty tile (nothing to draw), `Err` a failed load. The [`CancelToken`] is set when the
+/// tile stopped being needed; loaders that fetch should pass it on and give up early.
 #[derive(Clone)]
 pub struct TileLoader(pub Arc<TileLoaderFn>);
-pub type TileLoaderFn =
-    dyn Fn(TileIndex, TileBounds) -> std::result::Result<Option<TileData>, String> + Send + Sync;
+pub type TileLoaderFn = dyn Fn(TileIndex, TileBounds, &CancelToken) -> std::result::Result<Option<TileData>, String>
+    + Send
+    + Sync;
 
 impl TileLoader {
     pub fn new(
         f: impl Fn(TileIndex, TileBounds) -> std::result::Result<Option<TileData>, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(move |index, bounds, _| f(index, bounds)))
+    }
+
+    /// A loader that is told when its tile is no longer wanted.
+    pub fn cancellable(
+        f: impl Fn(TileIndex, TileBounds, &CancelToken) -> std::result::Result<Option<TileData>, String>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         Self(Arc::new(f))
     }
@@ -146,14 +159,18 @@ pub fn raster_renderer() -> TileRenderer {
 }
 
 /// Tiles waiting for a worker, with the condition variable that wakes the workers.
-type LoadQueue = Arc<(Mutex<VecDeque<(TileIndex, TileBounds)>>, Condvar)>;
+type LoadQueue = Arc<(Mutex<VecDeque<(TileIndex, TileBounds, CancelToken)>>, Condvar)>;
+/// What a worker reports for a tile: `None` when the load was cancelled.
+type LoadOutcome = Option<std::result::Result<Option<TileData>, String>>;
 
 /// A small thread pool: tiles queue up and `max_requests` workers load them.
 struct LoadPool {
     queue: LoadQueue,
-    results: Receiver<(TileIndex, std::result::Result<Option<TileData>, String>)>,
+    results: Receiver<(TileIndex, LoadOutcome)>,
     /// Generation of the loader; results from older loaders are dropped
     generation: u64,
+    /// Tokens of the tiles queued or loading, deck.gl's `AbortController` per tile
+    tokens: HashMap<TileIndex, CancelToken>,
 }
 
 impl LoadPool {
@@ -162,7 +179,7 @@ impl LoadPool {
         let (tx, results) = channel();
         for _ in 0..workers.max(1) {
             let queue = queue.clone();
-            let tx: Sender<(TileIndex, std::result::Result<Option<TileData>, String>)> = tx.clone();
+            let tx: Sender<(TileIndex, LoadOutcome)> = tx.clone();
             let loader = loader.clone();
             // A failed spawn leaves fewer workers; the queue still drains through the others
             std::thread::Builder::new()
@@ -182,9 +199,16 @@ impl LoadPool {
                             q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
                         }
                     };
-                    let Some((index, bounds)) = job else { return };
-                    let result = (loader.0)(index, bounds);
-                    if tx.send((index, result)).is_err() {
+                    let Some((index, bounds, cancel)) = job else {
+                        return;
+                    };
+                    let outcome = if cancel.is_cancelled() {
+                        None
+                    } else {
+                        let result = (loader.0)(index, bounds, &cancel);
+                        (!cancel.is_cancelled()).then_some(result)
+                    };
+                    if tx.send((index, outcome)).is_err() {
                         return;
                     }
                 })
@@ -194,15 +218,25 @@ impl LoadPool {
             queue,
             results,
             generation,
+            tokens: HashMap::new(),
         }
     }
 
-    fn submit(&self, index: TileIndex, bounds: TileBounds) {
+    fn submit(&mut self, index: TileIndex, bounds: TileBounds) {
+        let cancel = CancelToken::new();
+        self.tokens.insert(index, cancel.clone());
         let (lock, cvar) = &*self.queue;
         lock.lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push_back((index, bounds));
+            .push_back((index, bounds, cancel));
         cvar.notify_one();
+    }
+
+    /// Stop loading a tile; the worker reports it as cancelled.
+    fn cancel(&mut self, index: TileIndex) {
+        if let Some(token) = self.tokens.remove(&index) {
+            token.cancel();
+        }
     }
 }
 
@@ -313,25 +347,65 @@ impl TileLayer {
                 self.tileset.set_status(index, TileStatus::Loading, false);
             }
         }
+        // deck.gl's `_pruneRequests`: with more loads on the way than `maxRequests`, give up
+        // on the ones for tiles that are neither selected nor visible
+        let max_requests = self.props.max_requests.max(1);
+        if pool.tokens.len() > max_requests {
+            let mut unneeded: Vec<TileIndex> = pool
+                .tokens
+                .keys()
+                .copied()
+                .filter(|index| {
+                    self.tileset
+                        .tile(*index)
+                        .is_none_or(|tile| !tile.is_selected && !tile.is_visible)
+                })
+                .collect();
+            unneeded.sort();
+            for index in unneeded {
+                if pool.tokens.len() <= max_requests {
+                    break;
+                }
+                pool.cancel(index);
+                self.tileset.set_status(index, TileStatus::Pending, false);
+            }
+        }
         let mut changed = false;
-        while let Ok((index, result)) = pool.results.try_recv() {
+        while let Ok((index, outcome)) = pool.results.try_recv() {
             if pool.generation != self.generation {
                 continue;
             }
-            match result {
-                Ok(Some(data)) => {
+            pool.tokens.remove(&index);
+            match outcome {
+                Some(Ok(Some(data))) => {
                     self.contents.insert(index, data);
                     self.tileset.set_status(index, TileStatus::Loaded, true);
                 }
-                Ok(None) => self.tileset.set_status(index, TileStatus::Loaded, false),
-                Err(message) => {
+                Some(Ok(None)) => self.tileset.set_status(index, TileStatus::Loaded, false),
+                Some(Err(message)) => {
                     tracing::warn!("tile {} failed to load: {message}", index.id());
                     self.tileset.set_status(index, TileStatus::Failed, false);
+                }
+                // Cancelled: back to pending, so it loads again if it gets selected
+                None => {
+                    if self
+                        .tileset
+                        .tile(index)
+                        .is_some_and(|t| t.status == TileStatus::Loading)
+                    {
+                        self.tileset.set_status(index, TileStatus::Pending, false);
+                    }
+                    continue;
                 }
             }
             changed = true;
         }
         changed
+    }
+
+    /// Tiles queued or loading right now.
+    pub fn loading_count(&self) -> usize {
+        self.pool.as_ref().map_or(0, |pool| pool.tokens.len())
     }
 
     fn rebuild_sub_layers(&mut self) {
@@ -440,14 +514,14 @@ impl Default for TileLayer {
     }
 }
 
-/// A loader that fetches PNG or JPEG tiles from URL templates.
-#[cfg(feature = "fetch")]
+/// A loader that fetches PNG or JPEG tiles from URL templates through the shared
+/// [`Fetcher`](crate::fetch::Fetcher), giving up on tiles that stopped being needed.
 pub fn raster_loader(templates: Vec<String>) -> TileLoader {
-    TileLoader::new(move |index, _bounds| {
+    TileLoader::cancellable(move |index, _bounds, cancel| {
         let Some(url) = crate::tileset::url_from_template(&templates, index) else {
             return Ok(None);
         };
-        let bytes = crate::tileset::fetch_bytes(&url)?;
+        let bytes = crate::tileset::fetch_bytes_with(&url, cancel)?;
         let image = image::load_from_memory(&bytes)
             .map_err(|e| format!("{url}: {e}"))?
             .to_rgba8();

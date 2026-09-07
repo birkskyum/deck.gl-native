@@ -4,6 +4,7 @@
 //! ancestors or children while a tile loads.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use deck_gl::glam::{DMat4, DVec3, DVec4};
 use deck_gl::Viewport;
@@ -423,25 +424,19 @@ pub fn is_url_template(s: &str) -> bool {
     s.contains("{z}") && s.contains("{x}") && (s.contains("{y}") || s.contains("{-y}"))
 }
 
-/// Fetch a URL's bytes (GET with a deck.gl-native user agent); needs the `fetch` feature.
-#[cfg(feature = "fetch")]
-pub fn fetch_bytes(url: &str) -> std::result::Result<Vec<u8>, String> {
-    let response = ureq::get(url)
-        .header(
-            "User-Agent",
-            concat!("deck.gl-native/", env!("CARGO_PKG_VERSION")),
-        )
-        .call()
-        .map_err(|e| format!("{url}: {e}"))?;
-    if response.status().as_u16() >= 400 {
-        return Err(format!("{url}: HTTP {}", response.status()));
-    }
-    response
-        .into_body()
-        .with_config()
-        .limit(64 * 1024 * 1024)
-        .read_to_vec()
-        .map_err(|e| format!("{url}: {e}"))
+/// Fetch a URL's bytes through the shared [`Fetcher`](crate::fetch::Fetcher): cached
+/// responses come back at once and one request serves every layer asking for the URL. Needs
+/// the `fetch` feature to reach the network.
+pub fn fetch_bytes(url: &str) -> std::result::Result<Arc<Vec<u8>>, String> {
+    crate::fetch::Fetcher::global().fetch_blocking(url)
+}
+
+/// Like [`fetch_bytes`], giving up when `cancel` is set.
+pub fn fetch_bytes_with(
+    url: &str,
+    cancel: &crate::fetch::CancelToken,
+) -> std::result::Result<Arc<Vec<u8>>, String> {
+    crate::fetch::Fetcher::global().fetch_blocking_with(url, cancel)
 }
 
 /// Loading state of a cached tile.

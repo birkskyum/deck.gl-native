@@ -12,6 +12,7 @@ pub mod bitmap_layer;
 pub mod column_layer;
 pub mod contour_layer;
 pub mod extensions;
+pub mod fetch;
 pub mod geo_cell_layer;
 pub mod geojson_layer;
 pub mod grid_cell_layer;
@@ -51,6 +52,7 @@ pub use extensions::{
     FillPattern, FillPatternAtlas, FillStyleExtension, FilterCategories, FilterValues, MaskExtension,
     PathStyleExtension, PathStyleTarget,
 };
+pub use fetch::{CancelToken, FetchHandle, FetchResult, FetchStats, FetchStatus, Fetcher};
 pub use geo_cell_layer::{
     geohash_bounds, geohash_polygon, h3_polygon, quadkey_polygon, s2_polygon, CellKind, GeoCellLayer,
     GeoCellLayerProps,

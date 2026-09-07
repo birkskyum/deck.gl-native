@@ -32,16 +32,15 @@ impl Default for MvtLayerProps {
     }
 }
 
-/// A loader decoding `.mvt` / `.pbf` tiles fetched from URL templates. Needs the `fetch`
-/// feature.
-#[cfg(feature = "fetch")]
+/// A loader decoding `.mvt` / `.pbf` tiles fetched from URL templates through the shared
+/// [`Fetcher`](crate::fetch::Fetcher). Needs the `fetch` feature to reach the network.
 pub fn mvt_loader(templates: Vec<String>) -> TileLoader {
-    TileLoader::new(move |index, bounds| {
+    TileLoader::cancellable(move |index, bounds, cancel| {
         let Some(url) = crate::tileset::url_from_template(&templates, index) else {
             return Ok(None);
         };
-        let bytes = crate::tileset::fetch_bytes(&url)?;
-        let bytes = crate::mvt::maybe_gunzip(bytes)?;
+        let bytes = crate::tileset::fetch_bytes_with(&url, cancel)?;
+        let bytes = crate::mvt::maybe_gunzip((*bytes).clone())?;
         let collection =
             crate::mvt::decode_tile_features(&bytes, bounds).map_err(|e| format!("{url}: {e}"))?;
         Ok(Some(Arc::new(collection) as TileData))

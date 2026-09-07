@@ -34,6 +34,7 @@ use deck_gl::{
     Layer, LightingEffect, OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps,
     OrthographicViewState, View, ViewPadding, ViewState,
 };
+pub use deck_gl_layers::fetch::Fetcher;
 use serde_json::Value;
 
 pub mod data;
@@ -60,6 +61,10 @@ pub enum JsonError {
     Layer { layer: String, message: String },
     #[error("could not load `{url}`: {message}")]
     Load { url: String, message: String },
+    /// A URL is on its way through the [`Fetcher`] in [`ConvertOptions::fetcher`]; convert
+    /// again once the fetcher's generation moved.
+    #[error("`{url}` is still loading")]
+    Pending { url: String },
     #[error(transparent)]
     Deck(#[from] DeckError),
 }
@@ -75,6 +80,11 @@ pub struct ConvertOptions {
     /// accessors (or `@@=name` for a plain column name). Columns are read directly, so large
     /// data never goes through JSON.
     pub tables: HashMap<String, RecordBatch>,
+    /// Load URLs in the background through this fetcher instead of blocking: layers whose
+    /// data has not arrived are left out of the result and listed in [`JsonDeck::pending`].
+    /// Convert again when [`Fetcher::generation`] changed. Without a fetcher URLs load on the
+    /// calling thread through [`Fetcher::global`], so the cache still applies.
+    pub fetcher: Option<Fetcher>,
 }
 
 /// A converted description.
@@ -98,6 +108,9 @@ pub struct JsonDeck {
     pub cameras: HashMap<String, AnyViewState>,
     /// Layer types and props that were ignored, mirroring deck.gl's console warnings.
     pub warnings: Vec<String>,
+    /// URLs still loading through [`ConvertOptions::fetcher`]; their layers are missing from
+    /// `layers` until a later conversion finds them loaded.
+    pub pending: Vec<String>,
 }
 
 impl std::fmt::Debug for JsonDeck {
@@ -109,6 +122,7 @@ impl std::fmt::Debug for JsonDeck {
                 &self.layers.iter().map(|layer| layer.id()).collect::<Vec<_>>(),
             )
             .field("warnings", &self.warnings)
+            .field("pending", &self.pending)
             .finish()
     }
 }
@@ -169,8 +183,12 @@ impl JsonConverter {
         let mut camera = None;
         let mut deck_views: Vec<DeckView> = Vec::new();
         let mut cameras = HashMap::new();
+        let mut pending = Vec::new();
         let (view_state, layers) = match value {
-            Value::Array(_) => (None, self.convert_layers(value, &mut warnings)?),
+            Value::Array(_) => (
+                None,
+                self.convert_layers_pending(value, &mut warnings, &mut pending)?,
+            ),
             Value::Object(map) => {
                 if let Some(Value::Array(views)) = map.get("views") {
                     for item in views {
@@ -223,7 +241,7 @@ impl JsonConverter {
                 }
                 let view_state = camera.and_then(|c| c.map());
                 let layers = match map.get("layers") {
-                    Some(layers) => self.convert_layers(layers, &mut warnings)?,
+                    Some(layers) => self.convert_layers_pending(layers, &mut warnings, &mut pending)?,
                     None => Vec::new(),
                 };
                 if let Some(Value::Array(effects)) = map.get("effects") {
@@ -259,13 +277,31 @@ impl JsonConverter {
             },
             cameras,
             warnings,
+            pending,
         })
     }
 
     /// Convert a layer array (nested arrays and null entries are allowed, as in deck.gl).
     pub fn convert_layers(&self, value: &Value, warnings: &mut Vec<String>) -> Result<Vec<Box<dyn Layer>>> {
         let mut layers = Vec::new();
-        self.collect_layers(value, &mut layers, warnings)?;
+        let mut pending = Vec::new();
+        self.collect_layers(value, &mut layers, warnings, &mut pending)?;
+        match pending.into_iter().next() {
+            Some(url) => Err(JsonError::Pending { url }),
+            None => Ok(layers),
+        }
+    }
+
+    /// Like [`convert_layers`](Self::convert_layers), but layers whose URLs are still loading
+    /// through [`ConvertOptions::fetcher`] are left out and their URLs added to `pending`.
+    pub fn convert_layers_pending(
+        &self,
+        value: &Value,
+        warnings: &mut Vec<String>,
+        pending: &mut Vec<String>,
+    ) -> Result<Vec<Box<dyn Layer>>> {
+        let mut layers = Vec::new();
+        self.collect_layers(value, &mut layers, warnings, pending)?;
         Ok(layers)
     }
 
@@ -274,18 +310,26 @@ impl JsonConverter {
         value: &Value,
         layers: &mut Vec<Box<dyn Layer>>,
         warnings: &mut Vec<String>,
+        pending: &mut Vec<String>,
     ) -> Result<()> {
         match value {
             Value::Null | Value::Bool(false) => Ok(()),
             Value::Array(items) => {
                 for item in items {
-                    self.collect_layers(item, layers, warnings)?;
+                    self.collect_layers(item, layers, warnings, pending)?;
                 }
                 Ok(())
             }
             Value::Object(_) => {
-                if let Some(layer) = layers::convert_layer(self, value, warnings)? {
-                    layers.push(layer);
+                match layers::convert_layer(self, value, warnings) {
+                    Ok(Some(layer)) => layers.push(layer),
+                    Ok(None) => {}
+                    Err(JsonError::Pending { url }) => {
+                        if !pending.contains(&url) {
+                            pending.push(url);
+                        }
+                    }
+                    Err(e) => return Err(e),
                 }
                 Ok(())
             }

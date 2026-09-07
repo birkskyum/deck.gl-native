@@ -51,7 +51,7 @@ index 5df17a795b5c..63b414a93c99 100644
  #include <mln/annotation/annotation.hpp>
  #include <mln/gfx/backend.hpp>
  #include <mln/gfx/backend_scope.hpp>
-@@ -1187,6 +1191,15 @@ void GLFWView::render() {
+@@ -1187,6 +1191,21 @@ void GLFWView::render() {
  
          mln::gfx::BackendScope scope{backend->getRendererBackend()};
  
@@ -61,6 +61,10 @@ index 5df17a795b5c..63b414a93c99 100644
 +                                      static_cast<uint32_t>(width),
 +                                      static_cast<uint32_t>(height),
 +                                      pixelRatio);
++            // Data and tiles arrive in the background; keep rendering until they are in
++            if (deckgl_overlay::isLoading()) {
++                map->triggerRepaint();
++            }
 +        }
 +#endif
 +

@@ -9,7 +9,7 @@ use deck_gl_layers::BitmapImage;
 use serde_json::Value;
 
 use crate::props::Rows;
-use crate::{ConvertOptions, JsonError, Result};
+use crate::{ConvertOptions, Fetcher, JsonError, Result};
 
 fn is_url(source: &str) -> bool {
     source.starts_with("http://") || source.starts_with("https://")
@@ -24,10 +24,11 @@ pub fn resolve_path(source: &str, options: &ConvertOptions) -> PathBuf {
     }
 }
 
-/// Read a URL or file path to bytes.
+/// Read a URL or file path to bytes. URLs go through [`ConvertOptions::fetcher`] when there
+/// is one (`Err(JsonError::Pending)` until they arrive), else block on the shared fetcher.
 pub fn load_bytes(source: &str, options: &ConvertOptions) -> Result<Vec<u8>> {
     if is_url(source) {
-        return fetch(source);
+        return fetch(source, options);
     }
     let path = resolve_path(source, options);
     std::fs::read(&path).map_err(|e| JsonError::Load {
@@ -45,27 +46,19 @@ pub fn load_text(source: &str, options: &ConvertOptions) -> Result<String> {
     })
 }
 
-#[cfg(feature = "fetch")]
-fn fetch(url: &str) -> Result<Vec<u8>> {
+fn fetch(url: &str, options: &ConvertOptions) -> Result<Vec<u8>> {
     let load_error = |message: String| JsonError::Load {
         url: url.to_string(),
         message,
     };
-    let mut response = ureq::get(url).call().map_err(|e| load_error(e.to_string()))?;
-    response
-        .body_mut()
-        .with_config()
-        .limit(u64::MAX)
-        .read_to_vec()
-        .map_err(|e| load_error(e.to_string()))
-}
-
-#[cfg(not(feature = "fetch"))]
-fn fetch(url: &str) -> Result<Vec<u8>> {
-    Err(JsonError::Load {
-        url: url.to_string(),
-        message: "deck-gl-json was built without the `fetch` feature, so URLs cannot be loaded".into(),
-    })
+    let result = match &options.fetcher {
+        Some(fetcher) => match fetcher.fetch(url).result() {
+            Some(result) => result,
+            None => return Err(JsonError::Pending { url: url.to_string() }),
+        },
+        None => Fetcher::global().fetch_blocking(url),
+    };
+    result.map(|bytes| (*bytes).clone()).map_err(load_error)
 }
 
 /// A JSON prop that is either inline or a string pointing at a JSON document. CSV, TSV and

@@ -54,7 +54,9 @@ DECKGL_JSON=examples/json/heathrow-flights.json cargo run --release --manifest-p
 *deck.gl's LineLayer website example, from `examples/json/heathrow-flights.json`.*
 
 Over the C API, `deckgl_set_layers_json(deck, json, base_dir)` and
-`deckgl_load_json_file(deck, path)` do the same for a host renderer; maplibre-native's GLFW
+`deckgl_load_json_file(deck, path)` do the same for a host renderer, loading URLs in the
+background: `deckgl_is_loading` returns 1 while data or tiles are on their way, and every frame
+takes in what arrived, so a host that renders on demand keeps rendering meanwhile; maplibre-native's GLFW
 overlay reads `DECKGL_JSON` too.
 
 ## Data
@@ -64,6 +66,14 @@ string naming a local file or an `http(s)` URL of JSON, GeoJSON, CSV, TSV (`.csv
 extension; a header row names the fields and cells become numbers, booleans, `null` or text) or
 newline delimited JSON (`.ndjson`, `.jsonl`). URLs need the crate's default `fetch` feature. `image` (BitmapLayer) and `iconAtlas` (IconLayer) are PNG or JPEG files or URLs, and
 `iconMapping` is an inline object or a JSON file.
+
+URLs load through `deck_gl_layers::Fetcher`, a thread pool with an in memory cache that
+requests each URL once however many layers name it. `JsonConverter` blocks on them by default.
+Give `ConvertOptions::fetcher` a fetcher and `convert` returns at once instead: layers whose
+data is on its way are left out and their URLs listed in `JsonDeck::pending`, so a frame loop
+converts again when `Fetcher::generation` moved (a counter that changes whenever a request
+finishes). The tile layers use the same fetcher and cancel requests for tiles that scrolled out
+of view. `Fetcher::stats` reports queued, loading, completed and failed requests and bytes.
 
 ### GeoParquet, Parquet and FlatGeobuf
 

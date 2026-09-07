@@ -20,7 +20,7 @@ use arrow_array::{Array, RecordBatch, StructArray};
 
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{ClipDepthRange, Deck, DeckProps, Layer, ViewState, Viewport, WebMercatorViewportOptions};
-use deck_gl_json::JsonConverter;
+use deck_gl_json::{Fetcher, JsonConverter};
 
 mod debug;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -131,6 +131,12 @@ pub struct DeckglHandle {
     pub(crate) last_error: CString,
     /// Number of frames rendered so far
     pub(crate) frame: u64,
+    /// The last JSON description and its base directory, converted again while its URLs load
+    pub(crate) json_source: Option<(String, Option<String>)>,
+    /// Whether the last conversion left layers out because their URLs were still loading
+    pub(crate) json_pending: bool,
+    /// The fetcher generation the layers were converted at
+    pub(crate) fetch_generation: u64,
 }
 
 impl DeckglHandle {
@@ -150,7 +156,32 @@ impl DeckglHandle {
             repeat: false,
             last_error: CString::default(),
             frame: 0,
+            json_source: None,
+            json_pending: false,
+            fetch_generation: 0,
         }
+    }
+
+    /// Convert the last JSON description again once URLs it waited for arrived.
+    pub(crate) fn poll_json(&mut self) {
+        let generation = Fetcher::global().generation();
+        if generation == self.fetch_generation {
+            return;
+        }
+        self.fetch_generation = generation;
+        if !self.json_pending {
+            return;
+        }
+        if let Some((text, base_dir)) = self.json_source.clone() {
+            let converter = json_converter(base_dir.as_deref(), &self.tables);
+            let result = converter.parse(&text);
+            apply_json(self, result);
+        }
+    }
+
+    /// Whether data or tiles are still on their way.
+    pub(crate) fn is_loading(&self) -> bool {
+        self.json_pending || !Fetcher::global().is_idle()
     }
 
     pub(crate) fn set_error(&mut self, message: impl Into<String>) -> i32 {
@@ -160,8 +191,9 @@ impl DeckglHandle {
         1
     }
 
-    /// Create the deck once the attachment formats are known.
+    /// Create the deck once the attachment formats are known, and take in data that arrived.
     pub(crate) fn ensure_deck(&mut self, target: RenderTarget) -> Result<(), String> {
+        self.poll_json();
         if self.target != Some(target) {
             self.deck = None;
         }
@@ -326,12 +358,28 @@ unsafe fn c_string(ptr: *const c_char) -> Option<String> {
     }
 }
 
+/// A converter loading URLs in the background through the shared fetcher.
+fn json_converter(base_dir: Option<&str>, tables: &HashMap<String, RecordBatch>) -> JsonConverter {
+    let mut converter = match base_dir {
+        Some(dir) if !dir.is_empty() => JsonConverter::with_base_dir(dir),
+        _ => JsonConverter::new(),
+    };
+    converter.options.tables = tables.clone();
+    converter.options.fetcher = Some(Fetcher::global().clone());
+    converter
+}
+
 fn apply_json(handle: &mut DeckglHandle, result: deck_gl_json::Result<deck_gl_json::JsonDeck>) -> i32 {
     match result {
         Ok(json) => {
             for warning in &json.warnings {
                 tracing::warn!("{warning}");
             }
+            for url in &json.pending {
+                tracing::info!("waiting for {url}");
+            }
+            handle.json_pending = !json.pending.is_empty();
+            handle.fetch_generation = Fetcher::global().generation();
             handle.set_layers(json.layers);
             if let Some(lighting) = json.lighting {
                 if let Some(deck) = handle.deck.as_mut() {
@@ -366,12 +414,11 @@ pub unsafe extern "C" fn deckgl_set_layers_json(
     let Some(json) = (unsafe { c_string(json) }) else {
         return handle.set_error("deckgl_set_layers_json: json is null");
     };
-    let mut converter = match unsafe { c_string(base_dir) } {
-        Some(dir) if !dir.is_empty() => JsonConverter::with_base_dir(dir),
-        _ => JsonConverter::new(),
-    };
-    converter.options.tables = handle.tables.clone();
-    apply_json(handle, converter.parse(&json))
+    let base_dir = unsafe { c_string(base_dir) }.filter(|dir| !dir.is_empty());
+    let converter = json_converter(base_dir.as_deref(), &handle.tables);
+    let result = converter.parse(&json);
+    handle.json_source = Some((json, base_dir));
+    apply_json(handle, result)
 }
 
 /// # Safety
@@ -388,12 +435,30 @@ pub unsafe extern "C" fn deckgl_load_json_file(deck: *mut DeckglHandle, path: *c
         Ok(text) => text,
         Err(e) => return handle.set_error(format!("could not read {path}: {e}")),
     };
-    let mut converter = match std::path::Path::new(&path).parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => JsonConverter::with_base_dir(dir),
-        _ => JsonConverter::new(),
-    };
-    converter.options.tables = handle.tables.clone();
-    apply_json(handle, converter.parse(&text))
+    let base_dir = std::path::Path::new(&path)
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.to_string_lossy().into_owned());
+    let converter = json_converter(base_dir.as_deref(), &handle.tables);
+    let result = converter.parse(&text);
+    handle.json_source = Some((text, base_dir));
+    apply_json(handle, result)
+}
+
+/// Whether layer data or tiles are still loading. Hosts that render on demand should keep
+/// rendering while this returns 1: every frame takes in what arrived.
+///
+/// # Safety
+/// `deck` must be a valid handle.
+#[no_mangle]
+pub unsafe extern "C" fn deckgl_is_loading(deck: *mut DeckglHandle) -> i32 {
+    match unsafe { deck.as_mut() } {
+        Some(handle) => {
+            handle.poll_json();
+            i32::from(handle.is_loading())
+        }
+        None => 0,
+    }
 }
 
 /// Create a deck on a headless wgpu device (any platform). Rendering needs a host texture

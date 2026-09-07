@@ -70,6 +70,11 @@ int32_t deckgl_set_layers_json(DeckglHandle* deck, const char* json, const char*
 /** Load a JSON description from a file. Relative paths inside resolve against its directory. */
 int32_t deckgl_load_json_file(DeckglHandle* deck, const char* path);
 
+/** URLs in a description load in the background: layers whose data is still on its way are
+ *  left out and added on a later frame. Returns 1 while data or tiles are loading, so a host
+ *  that renders on demand knows to keep rendering. */
+int32_t deckgl_is_loading(DeckglHandle* deck);
+
 /* Arrow C Data Interface structs, see https://arrow.apache.org/docs/format/CDataInterface.html */
 struct ArrowSchema;
 struct ArrowArray;
