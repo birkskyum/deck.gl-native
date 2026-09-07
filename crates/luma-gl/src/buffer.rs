@@ -20,23 +20,45 @@ pub fn split_f64(values: &[f64]) -> (Vec<f32>, Vec<f32>) {
 /// Create a vertex buffer from bytes.
 pub fn create_vertex_buffer(device: &wgpu::Device, label: &str, contents: &[u8]) -> wgpu::Buffer {
     crate::stats::count_upload(contents.len());
-    // wgpu rejects zero sized buffers; keep a minimal placeholder so bindings stay valid.
-    let mut padded;
-    let contents = if contents.is_empty() {
-        padded = vec![0u8; 16];
-        padded.as_slice()
-    } else if !contents.len().is_multiple_of(4) {
-        padded = contents.to_vec();
-        padded.resize(contents.len().div_ceil(4) * 4, 0);
-        padded.as_slice()
-    } else {
-        contents
-    };
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
-        contents,
+        contents: &padded(contents),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     })
+}
+
+/// Upload vertex data into `existing` when it has exactly the size the data needs, and
+/// create a buffer otherwise. Writing into a buffer in use by an earlier frame is safe: the
+/// queue orders the write after that work.
+pub fn write_or_create_vertex_buffer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    existing: Option<&wgpu::Buffer>,
+    label: &str,
+    contents: &[u8],
+) -> wgpu::Buffer {
+    let bytes = padded(contents);
+    if let Some(buffer) = existing {
+        if buffer.size() == bytes.len() as u64 {
+            crate::stats::count_upload(contents.len());
+            queue.write_buffer(buffer, 0, &bytes);
+            return buffer.clone();
+        }
+    }
+    create_vertex_buffer(device, label, contents)
+}
+
+/// Contents padded to what wgpu accepts: at least 16 bytes and a multiple of 4.
+fn padded(contents: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if contents.is_empty() {
+        std::borrow::Cow::Owned(vec![0u8; 16])
+    } else if !contents.len().is_multiple_of(4) {
+        let mut padded = contents.to_vec();
+        padded.resize(contents.len().div_ceil(4) * 4, 0);
+        std::borrow::Cow::Owned(padded)
+    } else {
+        std::borrow::Cow::Borrowed(contents)
+    }
 }
 
 /// Create a vertex buffer from a slice of plain data.

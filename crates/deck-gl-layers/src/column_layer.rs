@@ -263,7 +263,7 @@ impl ColumnLayer {
         ];
         sources.extend(props.base.extensions.sources(&props.data)?);
         self.attributes
-            .update_many(&ctx.device, &mut models, data, &sources)?;
+            .update_many(&ctx.device, &ctx.queue, &mut models, data, &sources)?;
         for model in models {
             model.set_instance_count(data.len() as u32);
         }

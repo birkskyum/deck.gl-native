@@ -120,7 +120,8 @@ impl PointCloudLayer {
             ("color", AttributeSource::Colors(props.get_color.clone())),
         ];
         sources.extend(props.base.extensions.sources(&props.data)?);
-        self.attributes.update(&ctx.device, model, data, &sources)?;
+        self.attributes
+            .update(&ctx.device, &ctx.queue, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
         Ok(())
     }

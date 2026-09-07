@@ -249,8 +249,14 @@ impl SolidPolygonLayer {
         // Extension attributes: one value per polygon, expanded to the tessellated vertices
         let sources = props.base.extensions.sources(data)?;
         if let Some(top) = &mut self.top {
-            self.top_extensions
-                .update_expanded(device, &mut [top], data, &sources, &tesselated.row_index)?;
+            self.top_extensions.update_expanded(
+                device,
+                &ctx.queue,
+                &mut [top],
+                data,
+                &sources,
+                &tesselated.row_index,
+            )?;
         }
         let mut sides: Vec<&mut Model> = [&mut self.side, &mut self.wireframe]
             .into_iter()
@@ -259,6 +265,7 @@ impl SolidPolygonLayer {
         if !sides.is_empty() {
             self.side_extensions.update_expanded(
                 device,
+                &ctx.queue,
                 &mut sides,
                 data,
                 &sources,

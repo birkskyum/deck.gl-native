@@ -472,12 +472,19 @@ impl TextLayer {
             .flatten()
             .collect();
         if !characters.is_empty() {
-            self.character_extensions
-                .update_expanded(device, &mut characters, data, &sources, &char_rows)?;
+            self.character_extensions.update_expanded(
+                device,
+                &ctx.queue,
+                &mut characters,
+                data,
+                &sources,
+                &char_rows,
+            )?;
         }
         if let Some(background) = &mut self.background {
             self.background_extensions.update_expanded(
                 device,
+                &ctx.queue,
                 &mut [background],
                 data,
                 &sources,

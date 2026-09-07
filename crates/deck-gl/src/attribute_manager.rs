@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use arrow_array::cast::AsArray;
 use arrow_array::types::{Float32Type, UInt8Type};
 use arrow_array::Array;
-use luma_gl::buffer::create_vertex_buffer;
+use luma_gl::buffer::write_or_create_vertex_buffer;
 use luma_gl::{Model, VertexBufferLayout};
 use wgpu::VertexFormat;
 
@@ -172,6 +172,8 @@ pub struct AttributeManager {
     force: bool,
     /// Bounds of every position attribute resolved so far
     position_bounds: HashMap<&'static str, Option<[f64; 4]>>,
+    /// The GPU buffer of every spec, written into again when its size does not change
+    gpu: HashMap<&'static str, wgpu::Buffer>,
 }
 
 impl AttributeManager {
@@ -182,6 +184,7 @@ impl AttributeManager {
             previous_data: None,
             force: true,
             position_bounds: HashMap::new(),
+            gpu: HashMap::new(),
         }
     }
 
@@ -213,11 +216,12 @@ impl AttributeManager {
     pub fn update(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         model: &mut Model,
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
     ) -> Result<usize> {
-        self.update_many(device, &mut [model], data, sources)
+        self.update_many(device, queue, &mut [model], data, sources)
     }
 
     /// Like [`AttributeManager::update`] for several models sharing the buffers (a layer with
@@ -225,11 +229,12 @@ impl AttributeManager {
     pub fn update_many(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         models: &mut [&mut Model],
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
     ) -> Result<usize> {
-        self.update_impl(device, models, data, sources, None)
+        self.update_impl(device, queue, models, data, sources, None)
     }
 
     /// Build every buffer with one entry per element of `expand`, the data row of each
@@ -238,18 +243,20 @@ impl AttributeManager {
     pub fn update_expanded(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         models: &mut [&mut Model],
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
         expand: &[u32],
     ) -> Result<usize> {
         self.force = true;
-        self.update_impl(device, models, data, sources, Some(expand))
+        self.update_impl(device, queue, models, data, sources, Some(expand))
     }
 
     fn update_impl(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         models: &mut [&mut Model],
         data: &LayerData,
         sources: &[(&'static str, AttributeSource)],
@@ -269,16 +276,19 @@ impl AttributeManager {
             if !data_changed && !buffer.fields.iter().any(|f| changed(f.attribute)) {
                 continue;
             }
-            let gpu_buffer = build_buffer(device, buffer, data, sources, &mut resolved, expand)?;
+            let existing = self.gpu.get(buffer.name);
+            let upload =
+                |bytes: &[u8]| write_or_create_vertex_buffer(device, queue, existing, buffer.name, bytes);
+            let gpu_buffer = build_buffer(&upload, buffer, data, sources, &mut resolved, expand)?;
             for model in models.iter_mut() {
                 model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
             }
+            self.gpu.insert(buffer.name, gpu_buffer);
             uploaded += 1;
         }
         for (name, values) in &resolved {
             if let Resolved::Positions(positions) = values {
-                self.position_bounds
-                    .insert(name, position_bounds(positions.iter()));
+                self.position_bounds.insert(name, parallel_bounds(positions));
             }
         }
         self.previous = sources
@@ -333,7 +343,7 @@ fn u8x4_column<'a>(data: &'a LayerData, accessor: &Accessor<Color>) -> Option<&'
 }
 
 fn build_buffer(
-    device: &wgpu::Device,
+    upload: &dyn Fn(&[u8]) -> wgpu::Buffer,
     spec: &BufferSpec,
     data: &LayerData,
     sources: &[(&'static str, AttributeSource)],
@@ -346,25 +356,17 @@ fn build_buffer(
             match (source_of(sources, field.attribute)?, field.part) {
                 (AttributeSource::Positions(accessor), Part::High) => {
                     if let Some(values) = f32x3_column(data, accessor) {
-                        return Ok(create_vertex_buffer(
-                            device,
-                            spec.name,
-                            bytemuck::cast_slice(values),
-                        ));
+                        return Ok(upload(bytemuck::cast_slice(values)));
                     }
                 }
                 (AttributeSource::Positions(accessor), Part::Low) => {
                     if f32x3_column(data, accessor).is_some() {
-                        return Ok(create_vertex_buffer(
-                            device,
-                            spec.name,
-                            &vec![0u8; data.len() * 12],
-                        ));
+                        return Ok(upload(&vec![0u8; data.len() * 12]));
                     }
                 }
                 (AttributeSource::Colors(accessor), _) => {
                     if let Some(bytes) = u8x4_column(data, accessor) {
-                        return Ok(create_vertex_buffer(device, spec.name, bytes));
+                        return Ok(upload(bytes));
                     }
                 }
                 _ => {}
@@ -399,7 +401,7 @@ fn build_buffer(
     if let [field] = spec.fields.as_slice() {
         if field.offset == 0 && spec.stride == format_size(field.format) {
             let values = &resolved[field.attribute];
-            let buffer = |bytes: &[u8]| create_vertex_buffer(device, spec.name, bytes);
+            let buffer = |bytes: &[u8]| upload(bytes);
             return Ok(match (values, field.part) {
                 (Resolved::Positions(p), Part::High) => buffer(bytemuck::cast_slice(&map_rows(p, high_part))),
                 (Resolved::Positions(p), Part::Low) => buffer(bytemuck::cast_slice(&map_rows(p, low_part))),
@@ -453,11 +455,23 @@ fn build_buffer(
             write_row(row, chunk);
         }
     }
-    Ok(create_vertex_buffer(device, spec.name, &bytes))
+    Ok(upload(&bytes))
 }
 
 /// Rows above which packing runs on all cores.
 const PARALLEL_ROWS: usize = 16_384;
+
+/// The bounds of many positions, folded on all cores when there are many.
+fn parallel_bounds(positions: &[Position]) -> Option<[f64; 4]> {
+    if positions.len() < PARALLEL_ROWS {
+        return position_bounds(positions.iter());
+    }
+    use rayon::prelude::*;
+    positions
+        .par_chunks(PARALLEL_ROWS)
+        .map(|chunk| position_bounds(chunk.iter()))
+        .reduce(|| None, union_bounds)
+}
 
 impl Resolved {
     /// The values of the rows in `indices`, in that order (out of range rows take the last).

@@ -173,7 +173,14 @@ pub(crate) fn upload_path_attributes(
     model.set_instance_count(tesselated.instance_count() as u32);
     // Extension attributes: one value per path, expanded to the segments
     let sources = props.base.extensions.sources(data)?;
-    extensions.update_expanded(device, &mut [model], data, &sources, &tesselated.row_index)?;
+    extensions.update_expanded(
+        device,
+        &ctx.queue,
+        &mut [model],
+        data,
+        &sources,
+        &tesselated.row_index,
+    )?;
     Ok((tesselated, bounds))
 }
 
