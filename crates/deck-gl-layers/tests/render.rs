@@ -2939,3 +2939,96 @@ fn layers_of_one_type_share_shader_modules_and_pipelines() {
     assert_eq!(cache.builds(), 2, "pipelines built");
     assert_eq!(cache.len(), 2);
 }
+
+#[test]
+fn high_zoom_positions_keep_pixel_precision() {
+    let Some(ctx) = context() else { return };
+    // At zoom 22 a pixel is about 2 millionths of a degree: f32 alone could not place points,
+    // the high and low parts of the positions with the offset origin do
+    let zoom = 22.0;
+    let px_per_degree_lng = 512.0 * 2f64.powf(zoom) / 360.0;
+    let px_per_degree_lat = px_per_degree_lng / CENTER[1].to_radians().cos();
+    let deck_at_zoom = |layers: Vec<Box<dyn Layer>>| {
+        Deck::new(
+            &ctx.device,
+            &ctx.queue,
+            RenderTarget::default(),
+            DeckProps {
+                width: SIZE,
+                height: SIZE,
+                view_state: ViewState {
+                    longitude: CENTER[0],
+                    latitude: CENTER[1],
+                    zoom,
+                    pitch: 0.0,
+                    bearing: 0.0,
+                },
+                layers,
+                ..Default::default()
+            },
+        )
+        .expect("deck")
+    };
+    let centroid = |shot: &deck_gl::Snapshot| {
+        let hits: Vec<(u32, u32)> = (0..SIZE)
+            .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+            .filter(|&(x, y)| shot.pixel(x, y)[3] > 0)
+            .collect();
+        assert!(!hits.is_empty(), "nothing drawn");
+        let n = hits.len() as f64;
+        let (sx, sy) = hits
+            .iter()
+            .fold((0.0, 0.0), |a, h| (a.0 + h.0 as f64, a.1 + h.1 as f64));
+        (sx / n, sy / n)
+    };
+    let cases = [(12.0, 0.0), (0.0, -8.0), (-20.0, 6.0)];
+    for (dx, dy) in cases {
+        let position = [
+            CENTER[0] + dx / px_per_degree_lng,
+            CENTER[1] - dy / px_per_degree_lat,
+            0.0,
+        ];
+        let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new("precise"),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(2.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        });
+        let shot = deck_at_zoom(vec![Box::new(layer)]).snapshot(None).unwrap();
+        let centre = centroid(&shot);
+        let expected = (SIZE as f64 / 2.0 - 0.5 + dx, SIZE as f64 / 2.0 - 0.5 + dy);
+        assert!(
+            (centre.0 - expected.0).abs() < 1.0 && (centre.1 - expected.1).abs() < 1.0,
+            "point {dx},{dy}: drawn at {centre:?}, expected {expected:?}"
+        );
+    }
+    // a path segment 24 pixels long lands where it should as well
+    let half = 12.0 / px_per_degree_lng;
+    let path = PathLayer::new(PathLayerProps {
+        base: LayerProps::new("precise-path"),
+        data: LayerData::with_length(1),
+        get_path: Accessor::func(move |_| {
+            vec![
+                [CENTER[0] - half, CENTER[1], 0.0],
+                [CENTER[0] + half, CENTER[1], 0.0],
+            ]
+        }),
+        get_width: Accessor::Constant(2.0),
+        width_units: Unit::Pixels,
+        get_color: Accessor::Constant([255, 0, 0, 255]),
+        ..Default::default()
+    });
+    let shot = deck_at_zoom(vec![Box::new(path)]).snapshot(None).unwrap();
+    let c = SIZE / 2;
+    assert!(
+        shot.pixel(c - 10, c)[3] > 0 && shot.pixel(c + 10, c)[3] > 0,
+        "path ends"
+    );
+    assert_eq!(shot.pixel(c - 14, c)[3], 0);
+    assert_eq!(shot.pixel(c + 14, c)[3], 0);
+    assert_eq!(shot.pixel(c, c - 4)[3], 0);
+}
