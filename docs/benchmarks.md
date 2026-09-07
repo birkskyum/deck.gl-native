@@ -9,23 +9,31 @@ frame) and the **frame** (drawing again with everything resident). Both include 
 cargo bench -p deck-gl-layers --bench layers
 ```
 
-Results on an Apple M series laptop (Metal, release build, 2026-09-07):
+Results on an Apple M series laptop (Metal, release build, 2026-09-07 evening). Run to run
+variation is around 10%, so treat these as orders of magnitude rather than exact figures:
 
 | Layer | Objects | Upload | Frame |
 | --- | ---: | ---: | ---: |
-| `ScatterplotLayer` (function accessors) | 1,000,000 points | 18.8 ms | 2.7 ms |
-| `ScatterplotLayer` (Arrow `Float32` positions, `UInt8` colours) | 1,000,000 points | 15.2 ms | 2.7 ms |
-| `SolidPolygonLayer` (extruded) | 100,000 polygons | 50 ms | 1.5 ms |
-| `PathLayer` (20 vertices each) | 10,000 paths | 11 ms | 1.6 ms |
+| `ScatterplotLayer` (function accessors) | 1,000,000 points | 20.8 ms | 2.9 ms |
+| `ScatterplotLayer` (Arrow `Float32` positions, `UInt8` colours) | 1,000,000 points | 16.8 ms | 2.9 ms |
+| `ScatterplotLayer` (Arrow positions, constant styling) | 1,000,000 points | 16.3 ms | 2.9 ms |
+| `SolidPolygonLayer` (extruded) | 100,000 polygons | 54.7 ms | 1.6 ms |
+| `PathLayer` (20 vertices each) | 10,000 paths | 12.8 ms | 1.8 ms |
+
+Constant accessors upload a single element with a zero vertex stride instead of one value per
+object, so the colour buffer of that third row is four bytes rather than four megabytes. The
+upload time barely moves, since writing a buffer is cheap next to resolving the positions, but
+the memory and the buffer creation go away: a layer whose styling is all constants keeps only
+the buffers that vary per object.
 
 Prop updates on the million points, drawn again through a snapshot: a `radius_scale` change
-(uniform only) costs 4.6 ms and a fill colour accessor change 6.2 ms, against the full upload
+(uniform only) costs 5.7 ms and a fill colour accessor change 8.5 ms, against the full upload
 above. Attribute updates write into the existing GPU buffers when the size is unchanged
 (`AttributeManager`), so they allocate nothing; the colour update is bound by evaluating the
 accessor for a million rows.
 
 Many small layers (`many_layers/init`, 200 scatterplot layers of 10 points, created and drawn
-once): 170 ms, against 384 ms when every layer compiled its own shader module and pipeline.
+once): 165 ms, against 384 ms when every layer compiled its own shader module and pipeline.
 Layers of one type share a pipeline through the deck's `PipelineCache`, which is why deck.gl's
 per layer depth bias is a uniform here rather than pipeline state.
 

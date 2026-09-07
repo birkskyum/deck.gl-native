@@ -205,6 +205,28 @@ fn bench_layers(c: &mut Criterion) {
     });
     group.finish();
 
+    // A million points that share their styling: the colour, radius and width accessors are
+    // constants, so those buffers hold a single element
+    let mut group = c.benchmark_group("scatterplot_constant");
+    group.throughput(Throughput::Elements(1_000_000));
+    group.sample_size(10);
+    group.bench_function(BenchmarkId::new("upload", 1_000_000), |b| {
+        b.iter(|| {
+            let layer = Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+                base: LayerProps::new("constant"),
+                data: LayerData::from_batch(batch.clone()),
+                get_position: Accessor::column("position"),
+                get_fill_color: Accessor::Constant([255, 80, 200, 255]),
+                get_radius: Accessor::Constant(20.0),
+                radius_units: Unit::Meters,
+                ..Default::default()
+            })) as Box<dyn Layer>;
+            let mut deck = deck(&ctx, vec![layer]);
+            deck.snapshot(None).expect("frame");
+        });
+    });
+    group.finish();
+
     // Prop updates on the million points: a uniform only change and a colour accessor change
     let mut group = c.benchmark_group("scatterplot_update");
     group.sample_size(10);
