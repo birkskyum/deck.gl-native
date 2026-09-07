@@ -6,13 +6,13 @@ use arrow_array::RecordBatch;
 use deck_gl::{FeatureCollection, Layer, LayerData};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
-    BitmapLayerProps, CharacterSet, ColumnLayer, ColumnLayerProps, FontSettings, FontSource, GeoJsonLayer,
-    GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer,
-    HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer,
-    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
-    PolygonLayerProps, ScaleType, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
-    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
-    TripsLayer, TripsLayerProps, WordBreak,
+    BitmapLayerProps, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps,
+    ContourThreshold, FontSettings, FontSource, GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps,
+    GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer,
+    HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer,
+    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType,
+    ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer,
+    SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -109,6 +109,59 @@ pub fn convert_layer(
                 data,
                 cell_size: props.f64("cellSize", d.cell_size)?,
                 aggregation: aggregation(&props)?,
+            }))
+        }
+        "ContourLayer" => {
+            let data = load_rows(&mut props, options)?;
+            let d = ContourLayerProps::default();
+            props.get("gpuAggregation");
+            let aggregation = match props.get("aggregation") {
+                None | Some(Value::Null) => d.aggregation,
+                Some(Value::String(name)) => AggregationOperation::parse(name)
+                    .filter(|op| !matches!(op, AggregationOperation::Count))
+                    .ok_or_else(|| {
+                        props.error(
+                            "aggregation",
+                            format!("expected SUM, MEAN, MIN or MAX, got `{name}`"),
+                        )
+                    })?,
+                Some(other) => {
+                    return Err(props.error(
+                        "aggregation",
+                        format!("expected a string, got {}", crate::props::describe(other)),
+                    ))
+                }
+            };
+            let contours = match props.get("contours") {
+                None | Some(Value::Null) => d.contours,
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|item| contour_from_value(item).map_err(|m| props.error("contours", m)))
+                    .collect::<Result<Vec<_>>>()?,
+                Some(other) => {
+                    return Err(props.error(
+                        "contours",
+                        format!("expected an array, got {}", crate::props::describe(other)),
+                    ))
+                }
+            };
+            let grid_origin = match props.get("gridOrigin") {
+                None | Some(Value::Null) => d.grid_origin,
+                Some(v) => {
+                    let n = convert::numbers(v, 2, 2).map_err(|m| props.error("gridOrigin", m))?;
+                    [n[0], n[1]]
+                }
+            };
+            Box::new(ContourLayer::new(ContourLayerProps {
+                base: props.base()?,
+                data,
+                cell_size: props.f32("cellSize", d.cell_size as f32)? as f64,
+                grid_origin,
+                aggregation,
+                contours,
+                z_offset: props.f32("zOffset", d.z_offset as f32)? as f64,
+                get_position: props.accessor("getPosition", "position", convert::position)?,
+                get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
             }))
         }
         "HeatmapLayer" => {
@@ -774,4 +827,34 @@ fn bounds(value: &Value) -> std::result::Result<[f64; 4], String> {
         bounds[3] = bounds[3].max(y);
     }
     Ok(bounds)
+}
+
+/// One entry of a ContourLayer's `contours`: `threshold` (a number for an isoline or
+/// `[min, max]` for an isoband), `color`, `strokeWidth` and `zIndex`.
+fn contour_from_value(value: &Value) -> std::result::Result<Contour, String> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| format!("expected an object, got {}", crate::props::describe(value)))?;
+    let threshold = match map.get("threshold") {
+        Some(Value::Array(_)) => {
+            let n = convert::numbers(map.get("threshold").unwrap(), 2, 2)?;
+            ContourThreshold::Band([n[0] as f32, n[1] as f32])
+        }
+        Some(v) if v.is_number() => ContourThreshold::Line(convert::f32(v)?),
+        _ => return Err("threshold must be a number or [min, max]".to_string()),
+    };
+    let mut contour = Contour {
+        threshold,
+        ..Contour::line(0.0)
+    };
+    if let Some(color) = map.get("color").filter(|v| !v.is_null()) {
+        contour.color = convert::color(color)?;
+    }
+    if let Some(width) = map.get("strokeWidth").filter(|v| !v.is_null()) {
+        contour.stroke_width = convert::f32(width)?;
+    }
+    if let Some(z) = map.get("zIndex").filter(|v| !v.is_null()) {
+        contour.z_index = Some(convert::f32(z)? as i32);
+    }
+    Ok(contour)
 }

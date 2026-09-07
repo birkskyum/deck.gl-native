@@ -14,12 +14,12 @@ use deck_gl::{
 };
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer,
-    BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer, GeoJsonLayerProps, GridLayer,
-    GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps,
-    IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
-    PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
+    BitmapLayerProps, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps, GeoJsonLayer,
+    GeoJsonLayerProps, GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps,
+    HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer,
+    LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
+    PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -987,6 +987,140 @@ fn heatmap_layer_colours_dense_points_and_follows_the_view() {
         let moved = deck.snapshot(None).unwrap();
         assert_eq!(moved.pixel(c, c), [0, 0, 0, 0], "{aggregation:?}");
     }
+}
+
+#[test]
+fn cartesian_positions_with_a_model_matrix_land_where_expected() {
+    use deck_gl::glam::{DMat4, DVec3};
+    use deck_gl::math_gl::web_mercator::lng_lat_to_world;
+    let Some(ctx) = context() else { return };
+    let common = lng_lat_to_world([CENTER[0], CENTER[1]]);
+    for (label, position, matrix) in [
+        ("plain", [common[0], common[1], 0.0], None),
+        (
+            "matrix",
+            [1.0, 1.0, 0.0],
+            Some(DMat4::from_translation(DVec3::new(
+                common[0] - 1.0,
+                common[1] - 1.0,
+                0.0,
+            ))),
+        ),
+    ] {
+        let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                coordinate_system: deck_gl::CoordinateSystem::Cartesian,
+                model_matrix: matrix,
+                ..LayerProps::new("probe")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            get_radius: Accessor::Constant(2.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        });
+        let shot = make_deck(&ctx, vec![Box::new(layer)]).snapshot(None).unwrap();
+        let hits: Vec<(u32, u32)> = (0..SIZE)
+            .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+            .filter(|&(x, y)| shot.pixel(x, y)[3] > 0)
+            .collect();
+        assert!(!hits.is_empty(), "{label}: nothing drawn");
+        let n = hits.len() as f64;
+        let (sx, sy) = hits
+            .iter()
+            .fold((0.0, 0.0), |a, h| (a.0 + h.0 as f64, a.1 + h.1 as f64));
+        let centre = (sx / n, sy / n);
+        let expected = (SIZE as f64 / 2.0 - 0.5, SIZE as f64 / 2.0 - 0.5);
+        assert!(
+            (centre.0 - expected.0).abs() < 0.6 && (centre.1 - expected.1).abs() < 0.6,
+            "{label}: drawn at {centre:?}"
+        );
+    }
+}
+
+#[test]
+fn contour_layer_draws_isolines_and_isobands() {
+    use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
+    let Some(ctx) = context() else { return };
+    // A 3 x 3 block of cells of 40 m around the view centre, one point per cell
+    let cell_size = 40.0;
+    let scales = get_distance_scales(CENTER[0], CENTER[1], false);
+    let size = [
+        scales.units_per_meter.x * cell_size,
+        scales.units_per_meter.y * cell_size,
+    ];
+    let centroid = lng_lat_to_world([CENTER[0], CENTER[1]]);
+    let origin = [
+        (centroid[0] / size[0]).floor() * size[0],
+        (centroid[1] / size[1]).floor() * size[1],
+    ];
+    let positions: Vec<[f64; 3]> = (-1..=1)
+        .flat_map(|i| {
+            (-1..=1).map(move |j| {
+                let p = world_to_lng_lat([
+                    origin[0] + (i as f64 + 0.5) * size[0],
+                    origin[1] + (j as f64 + 0.5) * size[1],
+                ]);
+                [p[0], p[1], 0.0]
+            })
+        })
+        .collect();
+    let positions = Arc::new(positions);
+    let props = |contours: Vec<Contour>| {
+        let positions = positions.clone();
+        ContourLayerProps {
+            base: LayerProps::new("contours"),
+            data: LayerData::with_length(9),
+            get_position: Accessor::Func(Arc::new(move |i| positions[i])),
+            cell_size,
+            contours,
+            ..Default::default()
+        }
+    };
+    // The layer's grid origin is a whole number of cells from the world origin, so take it
+    // from the layer rather than recomputing it with a slightly different cell size
+    let grid = ContourLayer::aggregate(&props(Vec::new())).unwrap();
+    assert_eq!((grid.x_range, grid.y_range), ([-1, 2], [-1, 2]));
+    let (origin, size) = (grid.cell_origin_common, grid.cell_size_common);
+    // Lattice point (lx, ly) in cell units to a pixel
+    let pixel_at = |lx: f64, ly: f64| {
+        let scale = 2f64.powi(14);
+        let x = SIZE as f64 / 2.0 + (origin[0] + lx * size[0] - centroid[0]) * scale;
+        let y = SIZE as f64 / 2.0 - (origin[1] + ly * size[1] - centroid[1]) * scale;
+        (x.round() as u32, y.round() as u32)
+    };
+    // Cell values sit at cell centres: the block spans lattice -0.5 to 2.5 with its middle at
+    // (0.5, 0.5), and the isoline crosses halfway between the last centre (1.5) and the empty one
+    let (cx, cy) = pixel_at(0.5, 0.5);
+    let (rx, ry) = pixel_at(2.0, 0.5);
+
+    let bands = make_deck(
+        &ctx,
+        vec![Box::new(ContourLayer::new(props(vec![
+            Contour::band(0.5, 10.0).with_color([255, 0, 0, 255])
+        ])))],
+    )
+    .snapshot(None)
+    .unwrap();
+    assert_eq!(bands.pixel(cx, cy), [255, 0, 0, 255], "inside the band");
+    assert_eq!(bands.pixel(1, 1), [0, 0, 0, 0], "far outside");
+
+    let lines = make_deck(
+        &ctx,
+        vec![Box::new(ContourLayer::new(props(vec![Contour::line(0.5)
+            .with_color([0, 255, 0, 255])
+            .with_stroke_width(6.0)])))],
+    )
+    .snapshot(None)
+    .unwrap();
+    assert_eq!(lines.pixel(cx, cy), [0, 0, 0, 0], "no line through the middle");
+    assert_eq!(
+        lines.pixel(rx, ry),
+        [0, 255, 0, 255],
+        "the isoline rings the block"
+    );
 }
 
 #[test]
