@@ -163,13 +163,13 @@ fn reports_row_conversion_errors() {
 #[test]
 fn warns_about_unknown_layers_and_props() {
     let spec = json!([
-        {"@@type": "TextLayer", "id": "labels"},
+        {"@@type": "HexagonLayer", "id": "bins"},
         {"@@type": "ScatterplotLayer", "id": "p", "data": [], "bogusProp": 1, "onHover": "ignored"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 1);
     assert_eq!(deck.warnings.len(), 2, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("TextLayer"));
+    assert!(deck.warnings[0].contains("HexagonLayer"));
     assert!(deck.warnings[1].contains("bogusProp"));
 }
 
@@ -271,4 +271,38 @@ fn loads_data_and_images_relative_to_the_spec_file() {
     let missing = JsonConverter::parse_file(dir.join("missing.json")).unwrap_err();
     assert!(matches!(missing, JsonError::Load { .. }));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn text_layer_props_and_font_settings() {
+    let spec = json!([{
+        "@@type": "TextLayer",
+        "id": "labels",
+        "data": [{"name": "Park", "coordinates": [-122.5, 37.77]}],
+        "getText": "@@=name",
+        "getPosition": "@@=coordinates",
+        "getSize": 24,
+        "getTextAnchor": "start",
+        "getAlignmentBaseline": "@@=name == 'Park' ? 'top' : 'bottom'",
+        "background": true,
+        "backgroundPadding": [4, 2],
+        "backgroundBorderRadius": 3,
+        "characterSet": "auto",
+        "fontFamily": "Monaco, monospace",
+        "fontWeight": "bold",
+        "fontSettings": {"sdf": true, "fontSize": 48, "buffer": 6},
+        "outlineWidth": 2,
+        "wordBreak": "break-all",
+        "maxWidth": 12
+    }]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 1);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+
+    let bad = json!([{"@@type": "TextLayer", "data": [], "getTextAnchor": "left"}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(
+        error.contains("getTextAnchor") && error.contains("left"),
+        "{error}"
+    );
 }

@@ -15,6 +15,8 @@ pub mod polygon;
 pub mod polygon_layer;
 pub mod scatterplot_layer;
 pub mod solid_polygon_layer;
+pub mod text;
+pub mod text_layer;
 
 pub use arc_layer::{ArcLayer, ArcLayerProps};
 pub use bitmap_layer::{BitmapImage, BitmapLayer, BitmapLayerProps};
@@ -27,3 +29,5 @@ pub use point_cloud_layer::{PointCloudLayer, PointCloudLayerProps};
 pub use polygon_layer::{PolygonLayer, PolygonLayerProps};
 pub use scatterplot_layer::{ScatterplotLayer, ScatterplotLayerProps};
 pub use solid_polygon_layer::{SolidPolygonLayer, SolidPolygonLayerProps};
+pub use text::{CharacterSet, FontAtlas, FontSettings, FontSource, WordBreak};
+pub use text_layer::{AlignmentBaseline, TextAnchor, TextLayer, TextLayerProps};

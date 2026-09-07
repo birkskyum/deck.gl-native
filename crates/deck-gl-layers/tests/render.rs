@@ -13,6 +13,7 @@ use deck_gl_layers::{
     GeoJsonLayer, GeoJsonLayerProps, IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer,
     LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer,
     PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    TextLayer, TextLayerProps,
 };
 
 const SIZE: u32 = 64;
@@ -641,4 +642,97 @@ impl AnchorFix for IconMapping {
         self.anchor_x = None;
         self
     }
+}
+
+#[test]
+fn text_layer_draws_glyphs_and_picks_the_label() {
+    let Some(ctx) = context() else { return };
+    let layer = TextLayer::new(TextLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("labels")
+        },
+        data: LayerData::with_length(1),
+        get_text: Accessor::Constant("HI".to_string()),
+        get_position: Accessor::Constant(CENTER),
+        get_size: Accessor::Constant(40.0),
+        get_color: Accessor::Constant([255, 0, 0, 255]),
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let c = SIZE / 2;
+    // Two 40 px glyphs centred on the middle: red ink somewhere in the middle rows, none at
+    // the far edges.
+    let ink = |y: u32| (0..SIZE).filter(|x| pixel(&pixels, *x, y)[3] > 200).count();
+    assert!(ink(c) > 4, "middle row has ink: {}", ink(c));
+    let red = (0..SIZE)
+        .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            let p = pixel(&pixels, *x, *y);
+            p[3] > 200 && p[0] > 200 && p[1] < 50
+        })
+        .count();
+    assert!(red > 40, "red glyph pixels {red}");
+    assert_eq!(ink(0), 0);
+    assert_eq!(ink(SIZE - 1), 0);
+
+    // Picking on an inked pixel returns the label
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(TextLayer::new(TextLayerProps {
+            base: LayerProps {
+                pickable: true,
+                ..LayerProps::new("labels")
+            },
+            data: LayerData::with_length(1),
+            get_text: Accessor::Constant("HI".to_string()),
+            get_position: Accessor::Constant(CENTER),
+            get_size: Accessor::Constant(40.0),
+            ..Default::default()
+        }))],
+    );
+    let inked = (0..SIZE)
+        .flat_map(|y| (0..SIZE).map(move |x| (x, y)))
+        .find(|(x, y)| pixel(&pixels, *x, *y)[3] > 200)
+        .expect("an inked pixel");
+    let hit = deck.pick(inked.0 as f64 + 0.5, inked.1 as f64 + 0.5).unwrap();
+    assert_eq!(
+        hit.map(|h: PickingInfo| (h.layer_id, h.index)),
+        Some(("labels".to_string(), 0))
+    );
+}
+
+#[test]
+fn text_layer_background_and_sdf_outline() {
+    let Some(ctx) = context() else { return };
+    let layer = TextLayer::new(TextLayerProps {
+        base: LayerProps::new("labels"),
+        data: LayerData::with_length(1),
+        get_text: Accessor::Constant("A".to_string()),
+        get_position: Accessor::Constant(CENTER),
+        get_size: Accessor::Constant(32.0),
+        get_color: Accessor::Constant([255, 255, 255, 255]),
+        background: true,
+        get_background_color: Accessor::Constant([0, 0, 255, 255]),
+        background_padding: [4.0, 4.0, 4.0, 4.0],
+        font: deck_gl_layers::FontSettings {
+            sdf: true,
+            ..Default::default()
+        },
+        outline_width: 6.0,
+        outline_color: [255, 0, 0, 255],
+        ..Default::default()
+    });
+    let pixels = render(&ctx, vec![Box::new(layer)]);
+    let count = |f: &dyn Fn([u8; 4]) -> bool| {
+        (0..SIZE * SIZE)
+            .filter(|i| f(pixel(&pixels, i % SIZE, i / SIZE)))
+            .count()
+    };
+    let blue = count(&|p| p[2] > 200 && p[0] < 50 && p[3] > 200);
+    let white = count(&|p| p[0] > 200 && p[1] > 200 && p[2] > 200);
+    let red = count(&|p| p[0] > 150 && p[1] < 100 && p[2] < 100);
+    assert!(blue > 100, "background box {blue}");
+    assert!(white > 10, "white fill {white}");
+    assert!(red > 10, "red outline {red}");
 }

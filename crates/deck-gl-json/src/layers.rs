@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use deck_gl::{FeatureCollection, Layer, LayerData};
 use deck_gl_layers::{
-    ArcLayer, ArcLayerProps, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps, GeoJsonLayer,
-    GeoJsonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer,
-    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer,
-    ScatterplotLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
+    AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer, BitmapLayerProps, CharacterSet, ColumnLayer,
+    ColumnLayerProps, FontSettings, FontSource, GeoJsonLayer, GeoJsonLayerProps, IconAtlas, IconLayer,
+    IconLayerProps, LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
+    PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -70,6 +71,10 @@ pub fn convert_layer(
         "GeoJsonLayer" => {
             let collection = load_geojson(&mut props, options)?;
             Box::new(GeoJsonLayer::new(geojson(&props, collection)?))
+        }
+        "TextLayer" => {
+            let data = load_rows(&mut props, options)?;
+            Box::new(TextLayer::new(text(&props, data, options)?))
         }
         "BitmapLayer" => Box::new(BitmapLayer::new(bitmap(&props, options)?)),
         _ => {
@@ -340,6 +345,140 @@ fn geojson(p: &Props, collection: Arc<FeatureCollection>) -> Result<GeoJsonLayer
         get_line_width: p.accessor("getLineWidth", &d.get_line_width, convert::f32)?,
         get_point_radius: p.accessor("getPointRadius", &d.get_point_radius, convert::f32)?,
         get_elevation: p.accessor("getElevation", &d.get_elevation, convert::f32)?,
+    })
+}
+
+fn text_anchor(value: &Value) -> std::result::Result<TextAnchor, String> {
+    let name = convert::string(value)?;
+    TextAnchor::parse(&name).ok_or_else(|| format!("expected start, middle or end, got `{name}`"))
+}
+
+fn alignment_baseline(value: &Value) -> std::result::Result<AlignmentBaseline, String> {
+    let name = convert::string(value)?;
+    AlignmentBaseline::parse(&name).ok_or_else(|| format!("expected top, center or bottom, got `{name}`"))
+}
+
+/// `[x, y]` or `[left, top, right, bottom]`.
+fn box_sides(value: &Value) -> std::result::Result<[f32; 4], String> {
+    let v = convert::numbers(value, 2, 4)?;
+    Ok(match v.len() {
+        2 => [v[0] as f32, v[1] as f32, v[0] as f32, v[1] as f32],
+        4 => [v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32],
+        n => return Err(format!("expected 2 or 4 numbers, got {n}")),
+    })
+}
+
+fn text(p: &Props, data: LayerData, options: &ConvertOptions) -> Result<TextLayerProps> {
+    let d = TextLayerProps::default();
+    let mut font = FontSettings::default();
+    if let Some(family) = p.string("fontFamily")? {
+        // deck.gl takes a CSS family; here a font file (path or URL) can be named instead,
+        // anything else uses the bundled font.
+        let lower = family.to_ascii_lowercase();
+        if lower.ends_with(".ttf") || lower.ends_with(".otf") {
+            let bytes = data::load_bytes(&family, options).map_err(|e| in_layer(p, e))?;
+            font.font = FontSource::Bytes(Arc::new(bytes));
+        }
+    }
+    p.get("fontWeight");
+    font.character_set = match p.get("characterSet") {
+        None | Some(Value::Null) => font.character_set,
+        Some(Value::String(s)) if s == "auto" => CharacterSet::Auto,
+        Some(Value::String(s)) => CharacterSet::Chars(s.clone()),
+        Some(Value::Array(items)) => CharacterSet::Chars(
+            items
+                .iter()
+                .map(convert::string)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|m| p.error("characterSet", m))?
+                .concat(),
+        ),
+        Some(other) => {
+            return Err(p.error(
+                "characterSet",
+                format!(
+                    "expected \"auto\", a string or an array, got {}",
+                    crate::props::describe(other)
+                ),
+            ))
+        }
+    };
+    if let Some(settings) = p.get("fontSettings") {
+        let object = settings
+            .as_object()
+            .ok_or_else(|| p.error("fontSettings", "expected an object"))?;
+        let number = |key: &str, default: f32| -> Result<f32> {
+            match object.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(v) => convert::f32(v).map_err(|m| p.error("fontSettings", format!("{key}: {m}"))),
+            }
+        };
+        font.font_size = number("fontSize", font.font_size)?;
+        font.buffer = number("buffer", font.buffer as f32)?.max(0.0) as u32;
+        font.cutoff = number("cutoff", font.cutoff)?;
+        font.radius = number("radius", font.radius)?;
+        font.smoothing = number("smoothing", font.smoothing)?;
+        font.sdf = match object.get("sdf") {
+            None | Some(Value::Null) => font.sdf,
+            Some(Value::Bool(b)) => *b,
+            Some(v) => convert::number(v).map_err(|m| p.error("fontSettings", format!("sdf: {m}")))? != 0.0,
+        };
+    }
+    let word_break = match p.string("wordBreak")?.as_deref() {
+        None => d.word_break,
+        Some("break-word") => WordBreak::BreakWord,
+        Some("break-all") => WordBreak::BreakAll,
+        Some(other) => {
+            return Err(p.error(
+                "wordBreak",
+                format!("expected break-word or break-all, got `{other}`"),
+            ))
+        }
+    };
+    let background_padding = match p.get("backgroundPadding") {
+        None | Some(Value::Null) => d.background_padding,
+        Some(v) => box_sides(v).map_err(|m| p.error("backgroundPadding", m))?,
+    };
+    let background_border_radius = match p.get("backgroundBorderRadius") {
+        None | Some(Value::Null) => d.background_border_radius,
+        Some(Value::Number(n)) => [n.as_f64().unwrap_or(0.0) as f32; 4],
+        Some(v) => {
+            let r = convert::numbers(v, 4, 4).map_err(|m| p.error("backgroundBorderRadius", m))?;
+            [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]
+        }
+    };
+    Ok(TextLayerProps {
+        base: p.base()?,
+        data,
+        billboard: p.bool("billboard", d.billboard)?,
+        size_scale: p.f32("sizeScale", d.size_scale)?,
+        size_units: p.unit("sizeUnits", d.size_units)?,
+        size_min_pixels: p.f32("sizeMinPixels", d.size_min_pixels)?,
+        size_max_pixels: p.f32("sizeMaxPixels", d.size_max_pixels)?,
+        background: p.bool("background", d.background)?,
+        get_background_color: p.accessor("getBackgroundColor", &d.get_background_color, convert::color)?,
+        get_border_color: p.accessor("getBorderColor", &d.get_border_color, convert::color)?,
+        get_border_width: p.accessor("getBorderWidth", &d.get_border_width, convert::f32)?,
+        background_border_radius,
+        background_padding,
+        font,
+        line_height: p.f32("lineHeight", d.line_height)?,
+        outline_width: p.f32("outlineWidth", d.outline_width)?,
+        outline_color: p.color("outlineColor", d.outline_color)?,
+        word_break,
+        max_width: p.f32("maxWidth", d.max_width)?,
+        get_text: p.accessor("getText", "text", convert::string)?,
+        get_position: p.accessor("getPosition", "position", convert::position)?,
+        get_color: p.accessor("getColor", &d.get_color, convert::color)?,
+        get_size: p.accessor("getSize", &d.get_size, convert::f32)?,
+        get_angle: p.accessor("getAngle", &d.get_angle, convert::f32)?,
+        get_text_anchor: p.accessor("getTextAnchor", &d.get_text_anchor, text_anchor)?,
+        get_alignment_baseline: p.accessor(
+            "getAlignmentBaseline",
+            &d.get_alignment_baseline,
+            alignment_baseline,
+        )?,
+        get_pixel_offset: p.accessor("getPixelOffset", &d.get_pixel_offset, convert::vec2)?,
     })
 }
 

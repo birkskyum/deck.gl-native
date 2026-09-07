@@ -20,7 +20,7 @@ and the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
 
 Working today, headless and verified pixel by pixel in tests:
 
-- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `ColumnLayer`, `PointCloudLayer`, and the composite `PolygonLayer` and `GeoJsonLayer`
+- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `PointCloudLayer`, and the composite `PolygonLayer` and `GeoJsonLayer`
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it
 - deck.gl's `project` and `project32` shader modules, picking uniforms and lighting
 - Arrow record batches as layer data, with column, constant and function accessors
@@ -33,9 +33,9 @@ Working today, headless and verified pixel by pixel in tests:
 
 ![GeoJsonLayer rendering deck.gl's Vancouver blocks example](docs/images/geojson-vancouver.png)
 
-- Rendering into a maplibre-native map, either inside maplibre-native's own Metal backend
-  through a C API, or from an all-Rust host through maplibre-native-ffi. See
-  [docs/maplibre-native.md](docs/maplibre-native.md).
+- Rendering into a maplibre-native map, depth interleaved with its 3D buildings, either inside
+  maplibre-native's own Metal backend through a C API, or from an all-Rust host through
+  maplibre-native-ffi. See [docs/maplibre-native.md](docs/maplibre-native.md).
 - The C API library cross-compiles for iOS (`cargo build --target aarch64-apple-ios -p deck-gl-ffi`).
 
 Not yet: transitions, controllers, and the wider layer catalog. See
@@ -52,7 +52,7 @@ Not yet: transitions, controllers, and the wider layer catalog. See
 | `math-gl` | `@math.gl/web-mercator` | Web Mercator projection and camera math, f64 |
 | `luma-gl` | `@luma.gl/core`, `@luma.gl/shadertools` | Shader assembly, uniform blocks, textures, `Model`, headless device helpers |
 | `deck-gl` | `@deck.gl/core` | `Deck`, `Layer`, `Viewport`, the `project` shader module, Arrow data accessors |
-| `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `BitmapLayer`, `IconLayer`, `ColumnLayer`, `PointCloudLayer`, `PolygonLayer`, `GeoJsonLayer` |
+| `deck-gl-layers` | `@deck.gl/layers` | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer`, `PathLayer`, `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer`, `ColumnLayer`, `PointCloudLayer`, `PolygonLayer`, `GeoJsonLayer` |
 | `deck-gl-json` | `@deck.gl/json` | JSON descriptions (pydeck format) with expression accessors |
 | `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop; JSON layers |
 | `deck-gl-examples` | | Example binaries |

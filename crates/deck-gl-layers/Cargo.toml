@@ -1,6 +1,6 @@
 [package]
 name = "deck-gl-layers"
-description = "Rust port of @deck.gl/layers: ScatterplotLayer, LineLayer, SolidPolygonLayer on wgpu"
+description = "Rust port of @deck.gl/layers on wgpu"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,5 +16,6 @@ glam = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
 earcutr = { workspace = true }
+fontdue = { workspace = true }
 arrow-array = { workspace = true }
 serde_json = { workspace = true }

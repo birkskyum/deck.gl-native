@@ -11,7 +11,7 @@ use deck_gl_layers::{
     ArcLayer, ArcLayerProps, BitmapImage, BitmapLayer, BitmapLayerProps, ColumnLayer, ColumnLayerProps,
     IconAtlas, IconLayer, IconLayerProps, IconMapping, LineLayer, LineLayerProps, PathLayer, PathLayerProps,
     PolygonLayer, PolygonLayerProps, ScatterplotLayer, ScatterplotLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps,
+    SolidPolygonLayerProps, TextLayer, TextLayerProps,
 };
 
 pub const CENTER: [f64; 2] = [-122.42, 37.775];
@@ -338,10 +338,49 @@ pub fn layers() -> Vec<Box<dyn Layer>> {
         Box::new(lines),
         Box::new(arcs),
         Box::new(icons),
+        Box::new(labels()),
     ]
 }
 
 /// A 64x32 atlas with a map pin on the left and a ring on the right, as alpha masks.
+/// District labels: SDF text with an outline, plus one boxed label.
+pub fn labels() -> TextLayer {
+    let places: Vec<(&str, [f64; 3])> = vec![
+        ("Downtown", [CENTER[0] + 0.034, CENTER[1] - 0.004, 0.0]),
+        ("Mission", [CENTER[0] + 0.005, CENTER[1] - 0.02, 0.0]),
+        ("Golden Gate Park", [CENTER[0] - 0.046, CENTER[1] - 0.014, 0.0]),
+        ("deck.gl-native", [CENTER[0] - 0.008, CENTER[1] + 0.036, 0.0]),
+    ];
+    let names: Vec<String> = places.iter().map(|p| p.0.to_string()).collect();
+    let positions: Vec<[f64; 3]> = places.iter().map(|p| p.1).collect();
+    let n = places.len();
+    TextLayer::new(TextLayerProps {
+        base: LayerProps {
+            pickable: true,
+            ..LayerProps::new("labels")
+        },
+        data: LayerData::with_length(n),
+        get_text: Accessor::func(move |i| names[i].clone()),
+        get_position: Accessor::func(move |i| positions[i]),
+        get_size: Accessor::func(|i| if i == 3 { 28.0 } else { 20.0 }),
+        get_color: Accessor::Constant([255, 255, 255, 255]),
+        get_background_color: Accessor::Constant([20, 24, 40, 220]),
+        get_border_color: Accessor::Constant([255, 200, 80, 255]),
+        get_border_width: Accessor::func(|i| if i == 3 { 2.0 } else { 0.0 }),
+        background: true,
+        background_padding: [8.0, 4.0, 8.0, 4.0],
+        background_border_radius: [6.0; 4],
+        font: deck_gl_layers::FontSettings {
+            sdf: true,
+            character_set: deck_gl_layers::CharacterSet::Auto,
+            ..Default::default()
+        },
+        outline_width: 4.0,
+        outline_color: [0, 0, 0, 255],
+        ..Default::default()
+    })
+}
+
 pub fn icon_atlas() -> IconAtlas {
     let (w, h) = (64u32, 32u32);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
