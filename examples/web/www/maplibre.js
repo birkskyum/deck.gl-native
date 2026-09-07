@@ -41,7 +41,7 @@ const deckLayer = {
       })
       .catch((error) => say(String(error), true))
   },
-  render() {
+  render(gl) {
     if (!this.overlay) return
     const center = this.map.getCenter()
     try {
@@ -55,10 +55,17 @@ const deckLayer = {
     } catch (error) {
       say(String(error), true)
       this.overlay = null
+      return
     }
+    // wgpu left the context set up for its own drawing. maplibre keeps a cache of the GL
+    // state and would otherwise go on believing its own, which shows up as symbols losing
+    // their blending a frame later.
+    gl.bindVertexArray(null)
+    this.map.painter?.context?.setDirty?.()
   },
 }
 
+window.deckMap = map
 map.on('load', () => {
   // Above the buildings in the layer order, but the depth buffer decides what is seen
   map.addLayer(deckLayer)
