@@ -1672,6 +1672,54 @@ fn prop_changes_upload_only_what_changed() {
 }
 
 #[test]
+fn arrow_columns_upload_without_conversion() {
+    use arrow_array::builder::{FixedSizeListBuilder, Float32Builder, UInt8Builder};
+    use arrow_array::{Array, RecordBatch};
+    use arrow_schema::{Field, Schema};
+    let Some(ctx) = context() else { return };
+    let batch = |count: usize| {
+        let mut positions = FixedSizeListBuilder::new(Float32Builder::new(), 3);
+        let mut colors = FixedSizeListBuilder::new(UInt8Builder::new(), 4);
+        for i in 0..count {
+            positions.values().append_value(CENTER[0] as f32);
+            positions.values().append_value(CENTER[1] as f32);
+            positions.values().append_value(0.0);
+            positions.append(true);
+            colors
+                .values()
+                .append_slice(&[0, 0, 255, if i == 0 { 255 } else { 0 }]);
+            colors.append(true);
+        }
+        let positions = positions.finish();
+        let colors = colors.finish();
+        let schema = Schema::new(vec![
+            Field::new("position", positions.data_type().clone(), false),
+            Field::new("color", colors.data_type().clone(), false),
+        ]);
+        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(positions), Arc::new(colors)]).unwrap()
+    };
+    let uploaded = |count: usize| {
+        let layer = ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new("arrow"),
+            data: LayerData::from_batch(batch(count)),
+            get_position: Accessor::column("position"),
+            get_fill_color: Accessor::column("color"),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        });
+        let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+        let shot = deck.snapshot(None).unwrap();
+        assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
+        deck.stats().uploaded_bytes
+    };
+    // Per row: positions high and low (12 bytes each), fill and line colours (4 each) and the
+    // 20 byte instance data; the quad geometry of the layer is the same for both
+    assert_eq!(uploaded(100) - uploaded(50), 50 * (12 + 12 + 4 + 4 + 20));
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

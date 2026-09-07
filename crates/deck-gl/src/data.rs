@@ -157,7 +157,8 @@ impl LayerData {
         self.length == 0
     }
 
-    fn column(&self, name: &str) -> Result<&ArrayRef> {
+    /// The Arrow column of the layer's table, by name.
+    pub fn column(&self, name: &str) -> Result<&ArrayRef> {
         let batch = self.batch.as_ref().ok_or_else(|| {
             DeckError::Data(format!("column `{name}` requested but layer has no record batch"))
         })?;

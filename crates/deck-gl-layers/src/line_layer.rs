@@ -1,12 +1,13 @@
 //! Port of `@deck.gl/layers/src/line-layer/line-layer.ts`.
 
-use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions};
+use deck_gl::attributes::{color_buffer, position_buffers};
+use deck_gl::data::resolve_f32;
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
-use luma_gl::buffer::{create_vertex_buffer_from, split_f64};
+use luma_gl::buffer::create_vertex_buffer_from;
 use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
@@ -122,43 +123,28 @@ impl LineLayer {
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
         if dirty.sources {
-            let sources: Vec<f64> = resolve_positions(data, &props.get_source_position)?
-                .iter()
-                .flatten()
-                .copied()
-                .collect();
-            let (hi, lo) = split_f64(&sources);
-            model.set_vertex_buffer(
+            let (hi, lo) = position_buffers(
+                device,
+                data,
+                &props.get_source_position,
                 "instanceSourcePositions",
-                create_vertex_buffer_from(device, "instanceSourcePositions", &hi),
             )?;
-            model.set_vertex_buffer(
-                "instanceSourcePositions64Low",
-                create_vertex_buffer_from(device, "instanceSourcePositions64Low", &lo),
-            )?;
+            model.set_vertex_buffer("instanceSourcePositions", hi)?;
+            model.set_vertex_buffer("instanceSourcePositions64Low", lo)?;
         }
         if dirty.targets {
-            let targets: Vec<f64> = resolve_positions(data, &props.get_target_position)?
-                .iter()
-                .flatten()
-                .copied()
-                .collect();
-            let (hi, lo) = split_f64(&targets);
-            model.set_vertex_buffer(
+            let (hi, lo) = position_buffers(
+                device,
+                data,
+                &props.get_target_position,
                 "instanceTargetPositions",
-                create_vertex_buffer_from(device, "instanceTargetPositions", &hi),
             )?;
-            model.set_vertex_buffer(
-                "instanceTargetPositions64Low",
-                create_vertex_buffer_from(device, "instanceTargetPositions64Low", &lo),
-            )?;
+            model.set_vertex_buffer("instanceTargetPositions", hi)?;
+            model.set_vertex_buffer("instanceTargetPositions64Low", lo)?;
         }
         if dirty.colors {
-            let colors = resolve_colors(data, &props.get_color)?;
-            model.set_vertex_buffer(
-                "instanceColors",
-                create_vertex_buffer_from(device, "instanceColors", &colors),
-            )?;
+            let buffer = color_buffer(device, data, &props.get_color, "instanceColors")?;
+            model.set_vertex_buffer("instanceColors", buffer)?;
         }
         if dirty.widths {
             let widths = resolve_f32(data, &props.get_width)?;

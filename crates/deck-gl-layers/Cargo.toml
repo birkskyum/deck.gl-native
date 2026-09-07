@@ -32,6 +32,7 @@ s2 = "0.0.12"
 flate2 = "1"
 
 [dev-dependencies]
+arrow-schema = { workspace = true }
 criterion = { version = "0.5", default-features = false }
 
 [[bench]]

@@ -137,6 +137,51 @@ fn bench_layers(c: &mut Criterion) {
         group.finish();
     }
 
+    // A million points from Arrow columns in the GPU layout: positions and colours upload as
+    // they are
+    let mut group = c.benchmark_group("scatterplot_arrow");
+    group.throughput(Throughput::Elements(1_000_000));
+    group.sample_size(10);
+    let batch = {
+        use arrow_array::builder::{FixedSizeListBuilder, Float32Builder, UInt8Builder};
+        use arrow_array::{Array, RecordBatch};
+        use arrow_schema::{Field, Schema};
+        let mut positions = FixedSizeListBuilder::new(Float32Builder::new(), 3);
+        let mut colors = FixedSizeListBuilder::new(UInt8Builder::new(), 4);
+        for i in 0..1_000_000usize {
+            let p = position(i, 0.5);
+            positions.values().append_value(p[0] as f32);
+            positions.values().append_value(p[1] as f32);
+            positions.values().append_value(0.0);
+            positions.append(true);
+            colors.values().append_slice(&[(i % 255) as u8, 80, 200, 255]);
+            colors.append(true);
+        }
+        let positions = positions.finish();
+        let colors = colors.finish();
+        let schema = Schema::new(vec![
+            Field::new("position", positions.data_type().clone(), false),
+            Field::new("color", colors.data_type().clone(), false),
+        ]);
+        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(positions), Arc::new(colors)]).expect("batch")
+    };
+    group.bench_function(BenchmarkId::new("upload", 1_000_000), |b| {
+        b.iter(|| {
+            let layer = Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+                base: LayerProps::new("arrow"),
+                data: LayerData::from_batch(batch.clone()),
+                get_position: Accessor::column("position"),
+                get_fill_color: Accessor::column("color"),
+                get_radius: Accessor::Constant(20.0),
+                radius_units: Unit::Meters,
+                ..Default::default()
+            })) as Box<dyn Layer>;
+            let mut deck = deck(&ctx, vec![layer]);
+            deck.snapshot(None).expect("frame");
+        });
+    });
+    group.finish();
+
     // Prop updates on the million points: a uniform only change and a colour accessor change
     let mut group = c.benchmark_group("scatterplot_update");
     group.sample_size(10);

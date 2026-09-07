@@ -1,12 +1,13 @@
 //! Port of `@deck.gl/layers/src/scatterplot-layer/scatterplot-layer.ts`.
 
-use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_vec2};
+use deck_gl::attributes::{color_buffer, position_buffers};
+use deck_gl::data::{resolve_f32, resolve_vec2};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
-use luma_gl::buffer::{create_vertex_buffer_from, split_f64};
+use luma_gl::buffer::create_vertex_buffer_from;
 use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
@@ -146,17 +147,9 @@ impl ScatterplotLayer {
         let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
         if dirty.positions {
-            let positions = resolve_positions(data, &props.get_position)?;
-            let flat: Vec<f64> = positions.iter().flatten().copied().collect();
-            let (hi, lo) = split_f64(&flat);
-            model.set_vertex_buffer(
-                "instancePositions",
-                create_vertex_buffer_from(device, "instancePositions", &hi),
-            )?;
-            model.set_vertex_buffer(
-                "instancePositions64Low",
-                create_vertex_buffer_from(device, "instancePositions64Low", &lo),
-            )?;
+            let (hi, lo) = position_buffers(device, data, &props.get_position, "instancePositions")?;
+            model.set_vertex_buffer("instancePositions", hi)?;
+            model.set_vertex_buffer("instancePositions64Low", lo)?;
         }
         if dirty.instance {
             let radius = resolve_f32(data, &props.get_radius)?;
@@ -176,18 +169,12 @@ impl ScatterplotLayer {
             )?;
         }
         if dirty.fill_colors {
-            let fill_colors = resolve_colors(data, &props.get_fill_color)?;
-            model.set_vertex_buffer(
-                "instanceFillColors",
-                create_vertex_buffer_from(device, "instanceFillColors", &fill_colors),
-            )?;
+            let buffer = color_buffer(device, data, &props.get_fill_color, "instanceFillColors")?;
+            model.set_vertex_buffer("instanceFillColors", buffer)?;
         }
         if dirty.line_colors {
-            let line_colors = resolve_colors(data, &props.get_line_color)?;
-            model.set_vertex_buffer(
-                "instanceLineColors",
-                create_vertex_buffer_from(device, "instanceLineColors", &line_colors),
-            )?;
+            let buffer = color_buffer(device, data, &props.get_line_color, "instanceLineColors")?;
+            model.set_vertex_buffer("instanceLineColors", buffer)?;
         }
         model.set_instance_count(data.len() as u32);
         self.dirty = DirtyAttributes::default();
