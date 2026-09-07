@@ -211,14 +211,14 @@ fn fixed_size_list_to_f64(array: &dyn Array) -> Result<(Vec<f64>, usize)> {
 }
 
 /// Resolve an accessor, reading columns through `from_column`.
-pub fn resolve_with<T: Clone>(
+pub fn resolve_with<T: Clone + Send>(
     data: &LayerData,
     accessor: &Accessor<T>,
     from_column: impl FnOnce(&ArrayRef) -> Result<Vec<T>>,
 ) -> Result<Vec<T>> {
     match accessor {
         Accessor::Constant(v) => Ok(vec![v.clone(); data.len()]),
-        Accessor::Func(f) => Ok((0..data.len()).map(|i| f(i)).collect()),
+        Accessor::Func(f) => Ok(resolve_function(f.as_ref(), data.len())),
         Accessor::Column(name) => {
             let column = data.column(name)?;
             let values = from_column(column)?;
@@ -248,6 +248,18 @@ pub fn resolve_positions(data: &LayerData, accessor: &Accessor<Position>) -> Res
             .map(|c| [c[0], c[1], if width == 3 { c[2] } else { 0.0 }])
             .collect())
     })
+}
+
+/// Rows above which function accessors are evaluated on all cores.
+const PARALLEL_ROWS: usize = 16_384;
+
+/// Evaluate a function accessor for every row, in parallel for large data.
+fn resolve_function<T: Clone + Send>(f: &(dyn Fn(usize) -> T + Send + Sync), len: usize) -> Vec<T> {
+    if len < PARALLEL_ROWS {
+        return (0..len).map(f).collect();
+    }
+    use rayon::prelude::*;
+    (0..len).into_par_iter().map(f).collect()
 }
 
 /// Resolve scalar floats from any numeric column.

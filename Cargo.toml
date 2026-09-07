@@ -35,6 +35,7 @@ thiserror = "2"
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tracing = { version = "0.1", features = ["log"] }
+rayon = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arrow-array = "59"
 arrow-schema = "59"

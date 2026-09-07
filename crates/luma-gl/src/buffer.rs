@@ -6,14 +6,15 @@ use wgpu::util::DeviceExt;
 ///
 /// The shader reconstructs `hi + lo` in a way that preserves precision relative to an offset.
 pub fn split_f64(values: &[f64]) -> (Vec<f32>, Vec<f32>) {
-    let mut hi = Vec::with_capacity(values.len());
-    let mut lo = Vec::with_capacity(values.len());
-    for &v in values {
+    let split = |v: f64| {
         let h = v as f32;
-        hi.push(h);
-        lo.push((v - h as f64) as f32);
+        (h, (v - h as f64) as f32)
+    };
+    if values.len() < 65_536 {
+        return values.iter().map(|&v| split(v)).unzip();
     }
-    (hi, lo)
+    use rayon::prelude::*;
+    values.par_iter().map(|&v| split(v)).unzip()
 }
 
 /// Create a vertex buffer from bytes.

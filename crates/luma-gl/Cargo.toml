@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rayon = { workspace = true }
 tracing = { workspace = true }
 wgpu = { workspace = true }
 naga = { workspace = true }
