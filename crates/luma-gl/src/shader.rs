@@ -122,7 +122,8 @@ pub fn assemble_shader(label: &str, modules: &[ShaderModuleSource], main: &str) 
     wgsl.push_str(main);
     wgsl.push('\n');
 
-    let wgsl = resolve_bindings(&wgsl);
+    // Sources checked out with CRLF line endings must still match exact text anchors.
+    let wgsl = resolve_bindings(&wgsl.replace("\r\n", "\n"));
 
     let module = naga::front::wgsl::parse_str(&wgsl)
         .map_err(|e| LumaError::Shader(format!("{label}: {}", e.emit_to_string(&wgsl))))?;

@@ -38,7 +38,8 @@ const INJECTIONS: [(&str, &str); 5] = [
 
 /// The path shader with the trips injections applied.
 pub fn trips_shader() -> Result<String> {
-    let mut source = PATH_SHADER.to_string();
+    // Windows checkouts may carry CRLF line endings; anchors are written with LF.
+    let mut source = PATH_SHADER.replace("\r\n", "\n");
     for (anchor, replacement) in INJECTIONS {
         if !source.contains(anchor) {
             return Err(DeckError::Layer {
