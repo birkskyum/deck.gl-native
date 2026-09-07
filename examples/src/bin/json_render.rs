@@ -31,9 +31,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     for warning in &json.warnings {
         eprintln!("{warning}");
     }
-    let view_state = json
-        .view_state
-        .ok_or("the description has no initialViewState, so there is nothing to look at")?;
+    if json.camera.is_none() {
+        return Err("the description has no initialViewState, so there is nothing to look at".into());
+    }
+    let view_state = json.view_state.unwrap_or_default();
 
     let ctx = create_headless_context()?;
     let target = RenderTarget {
@@ -56,6 +57,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         deck.set_lighting(lighting);
     }
     deck.set_repeat(json.repeat);
+    deck.set_view(json.view);
+    if let Some(camera) = json.camera {
+        deck.set_any_view_state(camera);
+    }
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");

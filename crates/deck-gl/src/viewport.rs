@@ -110,6 +110,215 @@ pub struct Viewport {
     /// Whole worlds this viewport is shifted by along longitude, see
     /// [`Viewport::sub_viewports`]. Zero for the viewport itself.
     pub world_offset: i32,
+    /// Depth of the viewport centre in pixel space, the default depth `unproject` uses when
+    /// none is given (orbit viewports, deck.gl's `projectedCenter`)
+    pub projected_center_depth: Option<f64>,
+}
+
+/// Options of the generic constructor, deck.gl's `Viewport` base class. The camera is given
+/// as an uncentered view matrix and either a projection matrix or its parameters.
+#[derive(Clone, Debug)]
+pub struct ViewportOptions {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// Both set for a geospatial viewport
+    pub longitude: Option<f64>,
+    pub latitude: Option<f64>,
+    /// Viewport centre in world space, meter offsets from the anchor when geospatial
+    pub position: DVec3,
+    pub zoom: f64,
+    pub distance_scales: Option<DistanceScales>,
+    /// The uncentered view matrix
+    pub view_matrix: DMat4,
+    pub projection_matrix: Option<DMat4>,
+    pub orthographic: bool,
+    /// Field of view in degrees
+    pub fovy: f64,
+    pub near: f64,
+    pub far: f64,
+    /// Pixels per common unit at zoom 0
+    pub focal_distance: f64,
+}
+
+impl Default for ViewportOptions {
+    fn default() -> Self {
+        Self {
+            id: "viewport".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            longitude: None,
+            latitude: None,
+            position: DVec3::ZERO,
+            zoom: 0.0,
+            distance_scales: None,
+            view_matrix: DMat4::IDENTITY,
+            projection_matrix: None,
+            orthographic: false,
+            fovy: 75.0,
+            near: 0.1,
+            far: 1000.0,
+            focal_distance: 1.0,
+        }
+    }
+}
+
+/// Options of [`Viewport::orthographic`], deck.gl's `OrthographicViewport`.
+#[derive(Clone, Debug)]
+pub struct OrthographicViewportOptions {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// World position at the centre of the viewport
+    pub target: DVec3,
+    /// `zoom: 0` maps one world unit to one pixel; each level doubles the size
+    pub zoom: f64,
+    /// Independent zoom along X and Y, overriding `zoom`
+    pub zoom_x: Option<f64>,
+    pub zoom_y: Option<f64>,
+    pub near: f64,
+    pub far: f64,
+    /// Top left screen coordinates (`true`) or bottom left
+    pub flip_y: bool,
+}
+
+impl Default for OrthographicViewportOptions {
+    fn default() -> Self {
+        Self {
+            id: "orthographic".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            target: DVec3::ZERO,
+            zoom: 0.0,
+            zoom_x: None,
+            zoom_y: None,
+            near: 0.1,
+            far: 1000.0,
+            flip_y: true,
+        }
+    }
+}
+
+/// Options of [`Viewport::orbit`], deck.gl's `OrbitViewport`.
+#[derive(Clone, Debug)]
+pub struct OrbitViewportOptions {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub orbit_axis: crate::views::OrbitAxis,
+    pub target: DVec3,
+    pub zoom: f64,
+    /// Rotation around the orbit axis in degrees
+    pub rotation_orbit: f64,
+    /// Rotation around the X axis in degrees
+    pub rotation_x: f64,
+    /// Field of view in degrees
+    pub fovy: f64,
+    pub near: f64,
+    pub far: f64,
+    pub orthographic: bool,
+}
+
+impl Default for OrbitViewportOptions {
+    fn default() -> Self {
+        Self {
+            id: "orbit".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            orbit_axis: crate::views::OrbitAxis::Z,
+            target: DVec3::ZERO,
+            zoom: 0.0,
+            rotation_orbit: 0.0,
+            rotation_x: 0.0,
+            fovy: 50.0,
+            near: 0.1,
+            far: 1000.0,
+            orthographic: false,
+        }
+    }
+}
+
+/// Options of [`Viewport::first_person`], deck.gl's `FirstPersonViewport`.
+#[derive(Clone, Debug)]
+pub struct FirstPersonViewportOptions {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    /// Anchor of the camera when geospatial
+    pub longitude: Option<f64>,
+    pub latitude: Option<f64>,
+    /// Meter offsets of the camera from the anchor, or its world position
+    pub position: DVec3,
+    pub bearing: f64,
+    pub pitch: f64,
+    pub up: DVec3,
+    pub fovy: f64,
+    pub near: f64,
+    pub far: f64,
+    /// Pixels per meter
+    pub focal_distance: f64,
+}
+
+impl Default for FirstPersonViewportOptions {
+    fn default() -> Self {
+        Self {
+            id: "first-person".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            longitude: None,
+            latitude: None,
+            position: DVec3::ZERO,
+            bearing: 0.0,
+            pitch: 0.0,
+            up: DVec3::Z,
+            fovy: 75.0,
+            near: 0.1,
+            far: 1000.0,
+            focal_distance: 1.0,
+        }
+    }
+}
+
+/// gl-matrix's `lookAt`: a right handed view matrix looking from `eye` at `center`.
+fn look_at(eye: DVec3, center: DVec3, up: DVec3) -> DMat4 {
+    let f = (center - eye).normalize();
+    let s = f.cross(up).normalize();
+    let u = s.cross(f);
+    DMat4::from_cols(
+        DVec4::new(s.x, u.x, -f.x, 0.0),
+        DVec4::new(s.y, u.y, -f.y, 0.0),
+        DVec4::new(s.z, u.z, -f.z, 0.0),
+        DVec4::new(-s.dot(eye), -u.dot(eye), f.dot(eye), 1.0),
+    )
+}
+
+/// gl-matrix's `ortho`: an orthographic projection with OpenGL clip space depth.
+fn ortho_gl(left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64) -> DMat4 {
+    let lr = 1.0 / (left - right);
+    let bt = 1.0 / (bottom - top);
+    let nf = 1.0 / (near - far);
+    DMat4::from_cols(
+        DVec4::new(-2.0 * lr, 0.0, 0.0, 0.0),
+        DVec4::new(0.0, -2.0 * bt, 0.0, 0.0),
+        DVec4::new(0.0, 0.0, 2.0 * nf, 0.0),
+        DVec4::new((left + right) * lr, (top + bottom) * bt, (far + near) * nf, 1.0),
+    )
 }
 
 fn fround(v: f64) -> f64 {
@@ -215,7 +424,216 @@ impl Viewport {
             near: projection_parameters.near,
             far: projection_parameters.far,
             world_offset: 0,
+            projected_center_depth: None,
         }
+    }
+
+    /// The generic constructor: deck.gl's `Viewport` base class, used by the non map views.
+    pub fn from_options(opts: &ViewportOptions) -> Self {
+        let width = if opts.width > 0.0 { opts.width } else { 1.0 };
+        let height = if opts.height > 0.0 { opts.height } else { 1.0 };
+        let is_geospatial = opts.longitude.is_some() && opts.latitude.is_some();
+        let (longitude, latitude) = (opts.longitude.unwrap_or(0.0), opts.latitude.unwrap_or(0.0));
+        let distance_scales = match (&opts.distance_scales, is_geospatial) {
+            (Some(scales), _) => *scales,
+            (None, true) => get_distance_scales(longitude, latitude, false),
+            (None, false) => DistanceScales::identity(),
+        };
+        let scale = wm::zoom_to_scale(opts.zoom);
+        let center = if is_geospatial {
+            let center_ll = Self::project_flat_geospatial([longitude, latitude]);
+            DVec3::new(center_ll[0], center_ll[1], 0.0) + opts.position * distance_scales.units_per_meter
+        } else {
+            DVec3::new(
+                opts.position.x * distance_scales.units_per_meter.x,
+                opts.position.y * distance_scales.units_per_meter.y,
+                opts.position.z * distance_scales.units_per_meter.z,
+            )
+        };
+        let view_matrix_uncentered = opts.view_matrix;
+        let view_matrix = view_matrix_uncentered * DMat4::from_translation(-center);
+        let fovy_radians = opts.fovy.to_radians();
+        let aspect = width / height;
+        let projection_matrix = opts.projection_matrix.unwrap_or_else(|| {
+            if opts.orthographic {
+                let top = opts.focal_distance * (fovy_radians / 2.0).tan();
+                let right = top * aspect;
+                ortho_gl(-right, right, -top, top, opts.near, opts.far)
+            } else {
+                wm::perspective(fovy_radians, aspect, opts.near, opts.far)
+            }
+        });
+        let view_projection_matrix = projection_matrix * view_matrix;
+        let view_matrix_inverse = view_matrix.inverse();
+        let camera_position = view_matrix_inverse.w_axis.truncate();
+        let viewport_matrix = DMat4::from_scale(DVec3::new(width / 2.0, -height / 2.0, 1.0))
+            * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0));
+        let pixel_projection_matrix = viewport_matrix * view_projection_matrix;
+        let pixel_unprojection_matrix = pixel_projection_matrix.inverse();
+        Self {
+            id: opts.id.clone(),
+            x: opts.x,
+            y: opts.y,
+            width,
+            height,
+            is_geospatial,
+            longitude,
+            latitude,
+            zoom: opts.zoom,
+            pitch: 0.0,
+            bearing: 0.0,
+            altitude: opts.focal_distance,
+            fovy: opts.fovy,
+            focal_distance: opts.focal_distance,
+            position: opts.position,
+            model_matrix: None,
+            distance_scales,
+            scale,
+            center,
+            camera_position,
+            projection_matrix,
+            view_matrix,
+            view_matrix_uncentered,
+            view_matrix_inverse,
+            view_projection_matrix,
+            pixel_projection_matrix,
+            pixel_unprojection_matrix,
+            near: opts.near,
+            far: opts.far,
+            world_offset: 0,
+            projected_center_depth: None,
+        }
+    }
+
+    /// A 2D view of cartesian coordinates, deck.gl's `OrthographicViewport`.
+    pub fn orthographic(opts: &OrthographicViewportOptions) -> Self {
+        let width = if opts.width > 0.0 { opts.width } else { 1.0 };
+        let height = if opts.height > 0.0 { opts.height } else { 1.0 };
+        let zoom_x = opts.zoom_x.unwrap_or(opts.zoom);
+        let zoom_y = opts.zoom_y.unwrap_or(opts.zoom);
+        let scale = wm::zoom_to_scale(opts.zoom);
+        // Axis specific zooms override the scalar one independently on each axis
+        let distance_scales = if zoom_x != opts.zoom || zoom_y != opts.zoom {
+            let (scale_x, scale_y) = (wm::zoom_to_scale(zoom_x), wm::zoom_to_scale(zoom_y));
+            Some(DistanceScales::scaled(
+                DVec3::new(scale_x / scale, scale_y / scale, 1.0),
+                DVec3::new(scale / scale_x, scale / scale_y, 1.0),
+            ))
+        } else {
+            None
+        };
+        let flip = if opts.flip_y { -1.0 } else { 1.0 };
+        let view_matrix = look_at(DVec3::Z, DVec3::ZERO, DVec3::Y)
+            * DMat4::from_scale(DVec3::new(scale, scale * flip, scale));
+        let projection_matrix = ortho_gl(
+            -width / 2.0,
+            width / 2.0,
+            -height / 2.0,
+            height / 2.0,
+            opts.near,
+            opts.far,
+        );
+        Self::from_options(&ViewportOptions {
+            id: opts.id.clone(),
+            x: opts.x,
+            y: opts.y,
+            width,
+            height,
+            position: opts.target,
+            zoom: opts.zoom,
+            distance_scales,
+            view_matrix,
+            projection_matrix: Some(projection_matrix),
+            near: opts.near,
+            far: opts.far,
+            ..Default::default()
+        })
+    }
+
+    /// A 3D view orbiting a target in cartesian coordinates, deck.gl's `OrbitViewport`: one
+    /// common unit at the target maps to one pixel, as in the map view.
+    pub fn orbit(opts: &OrbitViewportOptions) -> Self {
+        use crate::views::OrbitAxis;
+        let height = if opts.height > 0.0 { opts.height } else { 1.0 };
+        let focal_distance = wm::fovy_to_altitude(opts.fovy);
+        let (up, eye) = match opts.orbit_axis {
+            OrbitAxis::Z => (DVec3::Z, DVec3::new(0.0, -focal_distance, 0.0)),
+            OrbitAxis::Y => (DVec3::Y, DVec3::new(0.0, 0.0, focal_distance)),
+        };
+        let orbit = match opts.orbit_axis {
+            OrbitAxis::Z => DMat4::from_rotation_z(opts.rotation_orbit.to_radians()),
+            OrbitAxis::Y => DMat4::from_rotation_y(opts.rotation_orbit.to_radians()),
+        };
+        // Scale the common space down instead of moving the camera away, so the depth field
+        // keeps the default near and far planes
+        let projection_scale = wm::zoom_to_scale(opts.zoom) / height;
+        let view_matrix = look_at(eye, DVec3::ZERO, up)
+            * DMat4::from_rotation_x(opts.rotation_x.to_radians())
+            * orbit
+            * DMat4::from_scale(DVec3::splat(projection_scale));
+        let mut viewport = Self::from_options(&ViewportOptions {
+            id: opts.id.clone(),
+            x: opts.x,
+            y: opts.y,
+            width: opts.width,
+            height,
+            position: opts.target,
+            zoom: opts.zoom,
+            view_matrix,
+            orthographic: opts.orthographic,
+            fovy: opts.fovy,
+            near: opts.near,
+            far: opts.far,
+            focal_distance,
+            ..Default::default()
+        });
+        viewport.pitch = opts.rotation_x;
+        viewport.bearing = opts.rotation_orbit;
+        let projected_center = viewport.project(viewport.center, true);
+        viewport.projected_center_depth = Some(projected_center.z);
+        viewport
+    }
+
+    /// A camera at a position looking along a bearing and pitch, deck.gl's
+    /// `FirstPersonViewport`. Geospatial when longitude and latitude are given.
+    pub fn first_person(opts: &FirstPersonViewportOptions) -> Self {
+        // Avoid a non invertible pixel projection matrix when looking straight up
+        let pitch = if opts.pitch == -90.0 {
+            0.0001
+        } else {
+            90.0 + opts.pitch
+        };
+        // math.gl's SphericalCoordinates: bearing 0 looks north, pitch 0 is horizontal
+        let direction = DMat4::from_rotation_z(std::f64::consts::PI - opts.bearing.to_radians())
+            * DMat4::from_rotation_x(pitch.to_radians())
+            * DVec4::new(0.0, 0.0, 1.0, 0.0);
+        let center = direction.truncate().normalize();
+        let zoom = match opts.latitude {
+            Some(latitude) => wm::get_meter_zoom(latitude),
+            None => 0.0,
+        };
+        let scale = wm::zoom_to_scale(zoom);
+        let view_matrix = look_at(DVec3::ZERO, center, opts.up) * DMat4::from_scale(DVec3::splat(scale));
+        let mut viewport = Self::from_options(&ViewportOptions {
+            id: opts.id.clone(),
+            x: opts.x,
+            y: opts.y,
+            width: opts.width,
+            height: opts.height,
+            longitude: opts.longitude,
+            latitude: opts.latitude,
+            position: opts.position,
+            zoom,
+            view_matrix,
+            fovy: opts.fovy,
+            near: opts.near,
+            far: opts.far,
+            focal_distance: opts.focal_distance,
+            ..Default::default()
+        });
+        viewport.pitch = opts.pitch;
+        viewport.bearing = opts.bearing;
+        viewport
     }
 
     /// A copy of this viewport looking at the world shifted by `offset` whole worlds (512
@@ -296,7 +714,8 @@ impl Viewport {
         if self.is_geospatial {
             Self::project_flat_geospatial(xy)
         } else {
-            xy
+            let u = self.distance_scales.units_per_meter;
+            [xy[0] * u.x, xy[1] * u.y]
         }
     }
 
@@ -319,7 +738,8 @@ impl Viewport {
         if self.is_geospatial {
             world_to_lng_lat(xy)
         } else {
-            xy
+            let m = self.distance_scales.meters_per_unit;
+            [xy[0] * m.x, xy[1] * m.y]
         }
     }
 
@@ -361,6 +781,12 @@ impl Viewport {
     /// plane at `target_z` meters.
     pub fn unproject(&self, xy: DVec2, z: Option<f64>, top_left: bool, target_z: Option<f64>) -> DVec3 {
         let y2 = if top_left { xy.y } else { self.height - xy.y };
+        // Orbit viewports unproject onto the plane through the target by default
+        let z = z.or(if target_z.is_none() {
+            self.projected_center_depth
+        } else {
+            None
+        });
         let target_z_world = target_z.unwrap_or(0.0) * self.distance_scales.units_per_meter.z;
         let coord = pixels_to_world(
             DVec2::new(xy.x, y2),
@@ -447,6 +873,99 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(inside.sub_viewports().len(), 1);
+    }
+
+    #[test]
+    fn orthographic_viewport_maps_units_to_pixels() {
+        let v = Viewport::orthographic(&OrthographicViewportOptions {
+            width: 200.0,
+            height: 100.0,
+            target: DVec3::new(10.0, 20.0, 0.0),
+            zoom: 1.0,
+            ..Default::default()
+        });
+        assert!(!v.is_geospatial);
+        let c = v.project(DVec3::new(10.0, 20.0, 0.0), true);
+        assert!((c.x - 100.0).abs() < 1e-9 && (c.y - 50.0).abs() < 1e-9, "{c:?}");
+        // Zoom 1: one unit is two pixels; flipY puts +y downwards on screen
+        let p = v.project(DVec3::new(15.0, 25.0, 0.0), true);
+        assert!((p.x - 110.0).abs() < 1e-9 && (p.y - 60.0).abs() < 1e-9, "{p:?}");
+        let back = v.unproject(DVec2::new(110.0, 60.0), None, true, None);
+        assert!(
+            (back.x - 15.0).abs() < 1e-9 && (back.y - 25.0).abs() < 1e-9,
+            "{back:?}"
+        );
+        // Independent axis zooms
+        let v = Viewport::orthographic(&OrthographicViewportOptions {
+            width: 200.0,
+            height: 100.0,
+            zoom: 0.0,
+            zoom_x: Some(2.0),
+            zoom_y: Some(0.0),
+            ..Default::default()
+        });
+        let p = v.project(DVec3::new(5.0, 5.0, 0.0), true);
+        assert!((p.x - 120.0).abs() < 1e-9 && (p.y - 55.0).abs() < 1e-9, "{p:?}");
+    }
+
+    #[test]
+    fn orbit_viewport_looks_at_the_target() {
+        let target = DVec3::new(3.0, -2.0, 1.0);
+        let v = Viewport::orbit(&OrbitViewportOptions {
+            width: 300.0,
+            height: 200.0,
+            target,
+            zoom: 2.0,
+            rotation_x: 30.0,
+            rotation_orbit: 45.0,
+            ..Default::default()
+        });
+        let c = v.project(target, true);
+        assert!((c.x - 150.0).abs() < 1e-6 && (c.y - 100.0).abs() < 1e-6, "{c:?}");
+        // Unprojecting the centre without a depth lands back on the target
+        let back = v.unproject(DVec2::new(150.0, 100.0), None, true, None);
+        assert!((back - target).length() < 1e-6, "{back:?}");
+        // One unit at the target is 2^zoom pixels, regardless of the viewport height
+        let side = v.project(target + DVec3::new(0.0, 0.0, 1.0), true);
+        let flat = Viewport::orbit(&OrbitViewportOptions {
+            width: 300.0,
+            height: 200.0,
+            target,
+            zoom: 2.0,
+            ..Default::default()
+        });
+        let up = flat.project(target + DVec3::new(1.0, 0.0, 0.0), true);
+        assert!((up.x - 154.0).abs() < 1e-6, "{up:?}");
+        assert!(side.y < c.y, "z goes up on screen: {side:?}");
+    }
+
+    #[test]
+    fn first_person_viewport_looks_along_the_bearing() {
+        let v = Viewport::first_person(&FirstPersonViewportOptions {
+            width: 100.0,
+            height: 100.0,
+            position: DVec3::new(0.0, 0.0, 2.0),
+            bearing: 0.0,
+            pitch: 0.0,
+            ..Default::default()
+        });
+        // A point straight ahead (north) at eye height sits at the centre
+        let p = v.project(DVec3::new(0.0, 10.0, 2.0), true);
+        assert!((p.x - 50.0).abs() < 1e-6 && (p.y - 50.0).abs() < 1e-6, "{p:?}");
+        // East is to the right, up is up
+        let e = v.project(DVec3::new(1.0, 10.0, 2.0), true);
+        assert!(e.x > 50.0, "{e:?}");
+        let u = v.project(DVec3::new(0.0, 10.0, 3.0), true);
+        assert!(u.y < 50.0, "{u:?}");
+        // Facing east instead
+        let v = Viewport::first_person(&FirstPersonViewportOptions {
+            width: 100.0,
+            height: 100.0,
+            bearing: 90.0,
+            ..Default::default()
+        });
+        let p = v.project(DVec3::new(10.0, 0.0, 0.0), true);
+        assert!((p.x - 50.0).abs() < 1e-6 && (p.y - 50.0).abs() < 1e-6, "{p:?}");
     }
 
     fn sf() -> Viewport {

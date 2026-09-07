@@ -1046,7 +1046,7 @@ fn offset_coordinate_systems_place_points_relative_to_the_origin() {
     let Some(ctx) = context() else { return };
     // At zoom 14 near the view centre one pixel is about 3.75 m
     let meters_per_pixel = 40_075_016.686 * CENTER[1].to_radians().cos() / (512.0 * 2f64.powi(14));
-    let cases: [(&str, CoordinateSystem, [f64; 3], (i64, i64)); 3] = [
+    let cases = [
         (
             "meter offsets",
             CoordinateSystem::MeterOffsets,
@@ -1101,6 +1101,77 @@ fn offset_coordinate_systems_place_points_relative_to_the_origin() {
             "{label}: drawn at {centre:?}, expected {expected:?}"
         );
     }
+}
+
+#[test]
+fn orthographic_and_orbit_views_draw_cartesian_data() {
+    use deck_gl::{
+        AnyViewState, OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState, View,
+    };
+    let Some(ctx) = context() else { return };
+    let point = |position: [f64; 3], color: [u8; 4]| {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new(format!("point-{}", color[0])),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant(color),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let deck_with = |view: View, camera: AnyViewState, layers: Vec<Box<dyn Layer>>| {
+        let mut deck = Deck::new(
+            &ctx.device,
+            &ctx.queue,
+            RenderTarget::default(),
+            DeckProps {
+                width: SIZE,
+                height: SIZE,
+                view,
+                layers,
+                ..Default::default()
+            },
+        )
+        .expect("deck");
+        deck.set_any_view_state(camera);
+        deck
+    };
+    let c = SIZE / 2;
+    // Orthographic: the target sits at the centre, zoom 2 makes one unit four pixels, +y is down
+    let mut deck = deck_with(
+        View::Orthographic(OrthographicViewProps::default()),
+        AnyViewState::Orthographic(OrthographicViewState {
+            target: [100.0, 50.0, 0.0],
+            zoom: 2.0,
+            ..Default::default()
+        }),
+        vec![
+            point([100.0, 50.0, 0.0], [255, 0, 0, 255]),
+            point([104.0, 53.0, 0.0], [0, 255, 0, 255]),
+        ],
+    );
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [255, 0, 0, 255]);
+    assert_eq!(shot.pixel(c + 16, c + 12), [0, 255, 0, 255]);
+    // Orbit: looking straight down at the target, +y is up on screen
+    let mut deck = deck_with(
+        View::Orbit(OrbitViewProps::default()),
+        AnyViewState::Orbit(OrbitViewState {
+            target: [10.0, 10.0, 0.0],
+            zoom: 3.0,
+            rotation_x: 90.0,
+            rotation_orbit: 0.0,
+        }),
+        vec![
+            point([10.0, 10.0, 0.0], [255, 0, 0, 255]),
+            point([12.0, 11.0, 0.0], [0, 0, 255, 255]),
+        ],
+    );
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [255, 0, 0, 255]);
+    assert_eq!(shot.pixel(c + 16, c - 8), [0, 0, 255, 255]);
 }
 
 #[test]

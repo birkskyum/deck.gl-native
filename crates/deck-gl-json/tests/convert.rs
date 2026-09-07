@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons, resolve_positions};
 use deck_gl::wgpu;
-use deck_gl::{Accessor, CoordinateSystem, CullMode, LayerData, Material};
+use deck_gl::{
+    Accessor, AnyViewState, CoordinateSystem, CullMode, LayerData, Material, OrbitAxis,
+    OrthographicViewProps, OrthographicViewState, View,
+};
 use deck_gl_json::props::{convert, Props};
 use deck_gl_json::{JsonConverter, JsonError};
 use serde_json::{json, Value};
@@ -551,11 +554,77 @@ fn render_parameters() {
 #[test]
 fn map_view_repeat() {
     let spec = json!({
-        "views": [{"@@type": "MapView", "repeat": true, "controller": true}, {"@@type": "OrbitView"}],
+        "views": [{"@@type": "MapView", "repeat": true, "controller": true}, {"@@type": "GlobeView"}],
         "layers": []
     });
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert!(deck.repeat);
     assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("OrbitView"));
+    assert!(deck.warnings[0].contains("GlobeView"));
+}
+
+#[test]
+fn non_map_views_and_their_view_states() {
+    let spec = json!({
+        "views": [{"@@type": "OrbitView", "orbitAxis": "Y", "fovy": 40}],
+        "initialViewState": {"target": [1, 2, 3], "zoom": 2, "rotationOrbit": 30, "rotationX": 15},
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    match deck.view {
+        View::Orbit(props) => assert_eq!((props.orbit_axis, props.fovy), (OrbitAxis::Y, 40.0)),
+        other => panic!("{other:?}"),
+    }
+    match deck.camera {
+        Some(AnyViewState::Orbit(state)) => {
+            assert_eq!(state.target, [1.0, 2.0, 3.0]);
+            assert_eq!(
+                (state.zoom, state.rotation_orbit, state.rotation_x),
+                (2.0, 30.0, 15.0)
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(deck.view_state.is_none());
+
+    let spec = json!({
+        "views": [{"@@type": "OrthographicView", "flipY": false}],
+        "initialViewState": {"target": [5, 6], "zoom": 1, "zoomX": 3},
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(
+        deck.view,
+        View::Orthographic(OrthographicViewProps {
+            flip_y: false,
+            ..Default::default()
+        })
+    );
+    assert_eq!(
+        deck.camera,
+        Some(AnyViewState::Orthographic(OrthographicViewState {
+            target: [5.0, 6.0, 0.0],
+            zoom: 1.0,
+            zoom_x: Some(3.0),
+            zoom_y: None,
+        }))
+    );
+
+    let spec = json!({
+        "views": [{"@@type": "FirstPersonView"}],
+        "initialViewState": {"longitude": 10, "latitude": 20, "position": [0, 0, 50], "bearing": 90},
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    match deck.camera {
+        Some(AnyViewState::FirstPerson(state)) => {
+            assert_eq!((state.longitude, state.latitude), (Some(10.0), Some(20.0)));
+            assert_eq!(
+                (state.position, state.bearing, state.pitch),
+                ([0.0, 0.0, 50.0], 90.0, 0.0)
+            );
+        }
+        other => panic!("{other:?}"),
+    }
 }

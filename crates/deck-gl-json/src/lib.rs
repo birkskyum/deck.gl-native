@@ -25,7 +25,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use arrow_array::RecordBatch;
-use deck_gl::{DeckError, Layer, LightingEffect, ViewState};
+use deck_gl::{
+    AnyViewState, DeckError, FirstPersonViewProps, FirstPersonViewState, Layer, LightingEffect, OrbitAxis,
+    OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState, View, ViewState,
+};
 use serde_json::Value;
 
 pub mod data;
@@ -76,6 +79,11 @@ pub struct JsonDeck {
     pub lighting: Option<LightingEffect>,
     /// `repeat` of the `MapView` among `views`: draw world copies across the antimeridian.
     pub repeat: bool,
+    /// The view among `views` (a map unless an `OrthographicView`, `OrbitView` or
+    /// `FirstPersonView` is given).
+    pub view: View,
+    /// `initialViewState` read for `view`, of any kind; `view_state` is its map form.
+    pub camera: Option<AnyViewState>,
     /// Layer types and props that were ignored, mirroring deck.gl's console warnings.
     pub warnings: Vec<String>,
 }
@@ -145,32 +153,35 @@ impl JsonConverter {
         let mut warnings = Vec::new();
         let mut lighting = None;
         let mut repeat = false;
+        let mut view = View::Map;
+        let mut camera = None;
         let (view_state, layers) = match value {
             Value::Array(_) => (None, self.convert_layers(value, &mut warnings)?),
             Value::Object(map) => {
-                let view_state = map
+                if let Some(Value::Array(views)) = map.get("views") {
+                    for item in views {
+                        if item.get(props::TYPE_KEY).and_then(Value::as_str) == Some("MapView") {
+                            repeat |= item.get("repeat").and_then(Value::as_bool).unwrap_or(false);
+                        }
+                        match view_from_value(item) {
+                            Ok(Some(v)) => view = v,
+                            Ok(None) => {}
+                            Err(warning) => warnings.push(warning),
+                        }
+                    }
+                }
+                let state_value = map
                     .get("initialViewState")
                     .or_else(|| map.get("viewState"))
-                    .filter(|v| !v.is_null())
-                    .map(view_state_from_value)
+                    .filter(|v| !v.is_null());
+                camera = state_value
+                    .map(|v| any_view_state_from_value(v, &view))
                     .transpose()?;
+                let view_state = camera.and_then(|c| c.map());
                 let layers = match map.get("layers") {
                     Some(layers) => self.convert_layers(layers, &mut warnings)?,
                     None => Vec::new(),
                 };
-                if let Some(Value::Array(views)) = map.get("views") {
-                    for view in views {
-                        match view.get(props::TYPE_KEY).and_then(Value::as_str) {
-                            Some("MapView") => {
-                                repeat |= view.get("repeat").and_then(Value::as_bool).unwrap_or(false)
-                            }
-                            Some(other) => {
-                                warnings.push(format!("view `{other}` is not available yet and was skipped"))
-                            }
-                            None => warnings.push("view without @@type was skipped".to_string()),
-                        }
-                    }
-                }
                 if let Some(Value::Array(effects)) = map.get("effects") {
                     for effect in effects {
                         match effect.get(props::TYPE_KEY).and_then(Value::as_str) {
@@ -195,6 +206,8 @@ impl JsonConverter {
             layers,
             lighting,
             repeat,
+            view,
+            camera,
             warnings,
         })
     }
@@ -299,6 +312,131 @@ pub fn lighting_from_value(value: &Value) -> Result<LightingEffect> {
     effect.directional = directional;
     effect.point = point;
     Ok(effect)
+}
+
+/// One entry of `views`: `MapView`, `OrthographicView`, `OrbitView` or `FirstPersonView` with
+/// deck.gl's props. `Ok(None)` for a `MapView` (the default); `Err` carries a warning for
+/// unknown view types.
+pub fn view_from_value(value: &Value) -> std::result::Result<Option<View>, String> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| "view must be an object".to_string())?;
+    let number = |key: &str, default: f64| -> std::result::Result<f64, String> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(v) => props::convert::number(v).map_err(|m| format!("view `{key}`: {m}")),
+        }
+    };
+    let boolean = |key: &str, default: bool| map.get(key).and_then(Value::as_bool).unwrap_or(default);
+    match map.get(props::TYPE_KEY).and_then(Value::as_str) {
+        Some("MapView") => Ok(None),
+        Some("OrthographicView") => {
+            let d = OrthographicViewProps::default();
+            Ok(Some(View::Orthographic(OrthographicViewProps {
+                near: number("near", d.near)?,
+                far: number("far", d.far)?,
+                flip_y: boolean("flipY", d.flip_y),
+            })))
+        }
+        Some("OrbitView") => {
+            let d = OrbitViewProps::default();
+            let orbit_axis = match map.get("orbitAxis").and_then(Value::as_str) {
+                None | Some("Z") => OrbitAxis::Z,
+                Some("Y") => OrbitAxis::Y,
+                Some(other) => return Err(format!("view `orbitAxis`: expected Y or Z, got `{other}`")),
+            };
+            Ok(Some(View::Orbit(OrbitViewProps {
+                orbit_axis,
+                fovy: number("fovy", d.fovy)?,
+                near: number("near", d.near)?,
+                far: number("far", d.far)?,
+                orthographic: boolean("orthographic", d.orthographic),
+            })))
+        }
+        Some("FirstPersonView") => {
+            let d = FirstPersonViewProps::default();
+            Ok(Some(View::FirstPerson(FirstPersonViewProps {
+                fovy: number("fovy", d.fovy)?,
+                near: number("near", d.near)?,
+                far: number("far", d.far)?,
+                focal_distance: number("focalDistance", d.focal_distance)?,
+            })))
+        }
+        Some(other) => Err(format!("view `{other}` is not available yet and was skipped")),
+        None => Err("view without @@type was skipped".to_string()),
+    }
+}
+
+/// Read the `initialViewState` of a view of any kind.
+pub fn any_view_state_from_value(value: &Value, view: &View) -> Result<AnyViewState> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| JsonError::Parse("view state must be an object".into()))?;
+    let number = |key: &str, default: f64| -> Result<f64> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(v) => {
+                props::convert::number(v).map_err(|m| JsonError::Parse(format!("view state `{key}`: {m}")))
+            }
+        }
+    };
+    let optional = |key: &str| -> Result<Option<f64>> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => props::convert::number(v)
+                .map(Some)
+                .map_err(|m| JsonError::Parse(format!("view state `{key}`: {m}"))),
+        }
+    };
+    let target = |default: [f64; 3]| -> Result<[f64; 3]> {
+        match map.get("target") {
+            None | Some(Value::Null) => Ok(default),
+            Some(v) => {
+                let n = props::convert::numbers(v, 2, 3)
+                    .map_err(|m| JsonError::Parse(format!("view state `target`: {m}")))?;
+                Ok([n[0], n[1], n.get(2).copied().unwrap_or(0.0)])
+            }
+        }
+    };
+    Ok(match view {
+        View::Map => AnyViewState::Map(view_state_from_value(value)?),
+        View::Orthographic(_) => {
+            let d = OrthographicViewState::default();
+            AnyViewState::Orthographic(OrthographicViewState {
+                target: target(d.target)?,
+                zoom: number("zoom", d.zoom)?,
+                zoom_x: optional("zoomX")?,
+                zoom_y: optional("zoomY")?,
+            })
+        }
+        View::Orbit(_) => {
+            let d = OrbitViewState::default();
+            AnyViewState::Orbit(OrbitViewState {
+                target: target(d.target)?,
+                zoom: number("zoom", d.zoom)?,
+                rotation_orbit: number("rotationOrbit", d.rotation_orbit)?,
+                rotation_x: number("rotationX", d.rotation_x)?,
+            })
+        }
+        View::FirstPerson(_) => {
+            let d = FirstPersonViewState::default();
+            let position = match map.get("position") {
+                None | Some(Value::Null) => d.position,
+                Some(v) => {
+                    let n = props::convert::numbers(v, 3, 3)
+                        .map_err(|m| JsonError::Parse(format!("view state `position`: {m}")))?;
+                    [n[0], n[1], n[2]]
+                }
+            };
+            AnyViewState::FirstPerson(FirstPersonViewState {
+                longitude: optional("longitude")?,
+                latitude: optional("latitude")?,
+                position,
+                bearing: number("bearing", d.bearing)?,
+                pitch: number("pitch", d.pitch)?,
+            })
+        }
+    })
 }
 
 /// Read `longitude`, `latitude`, `zoom`, `pitch` and `bearing`; missing fields are zero.

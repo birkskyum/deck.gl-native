@@ -42,6 +42,26 @@ impl Default for DistanceScales {
     }
 }
 
+impl DistanceScales {
+    /// One unit per meter on every axis, the scales of non geospatial viewports.
+    pub fn identity() -> Self {
+        Self {
+            units_per_meter: DVec3::ONE,
+            meters_per_unit: DVec3::ONE,
+            ..Default::default()
+        }
+    }
+
+    /// Custom first order scales, for viewports with independent axis zooms.
+    pub fn scaled(units_per_meter: DVec3, meters_per_unit: DVec3) -> Self {
+        Self {
+            units_per_meter,
+            meters_per_unit,
+            ..Default::default()
+        }
+    }
+}
+
 /// Projection matrix parameters.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ProjectionParameters {

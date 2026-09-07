@@ -5,7 +5,7 @@
 
 use std::error::Error;
 
-use deck_gl::{Layer, LightingEffect, ViewState};
+use deck_gl::{AnyViewState, Layer, LightingEffect, View, ViewState};
 use deck_gl_json::JsonConverter;
 
 use crate::scene;
@@ -38,6 +38,9 @@ pub struct Scene {
     pub lighting: Option<LightingEffect>,
     /// Draw world copies across the antimeridian (`views: [{"@@type": "MapView", "repeat": true}]`)
     pub repeat: bool,
+    /// The kind of view, and its camera when the description is not a map
+    pub view: View,
+    pub camera: Option<AnyViewState>,
 }
 
 /// The built-in scene, or the description named by `DECKGL_JSON`.
@@ -54,6 +57,8 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
                 layers: keep_only(json.layers),
                 lighting: json.lighting,
                 repeat: json.repeat,
+                view: json.view,
+                camera: json.camera,
             })
         }
         _ => Ok(Scene {
@@ -61,6 +66,8 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
             layers: keep_only(scene::layers()),
             lighting: None,
             repeat: true,
+            view: View::Map,
+            camera: None,
         }),
     }
 }

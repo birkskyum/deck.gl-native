@@ -20,6 +20,7 @@ pub mod parameters;
 pub mod shaderlib;
 pub mod transition;
 pub mod viewport;
+pub mod views;
 
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
@@ -32,7 +33,14 @@ pub use parameters::{CullMode, RenderParameters};
 pub use transition::{
     TransitionDuration, TransitionInterpolator, TransitionInterruption, TransitionProps, ViewStateTransition,
 };
-pub use viewport::{Viewport, WebMercatorViewportOptions};
+pub use viewport::{
+    FirstPersonViewportOptions, OrbitViewportOptions, OrthographicViewportOptions, Viewport, ViewportOptions,
+    WebMercatorViewportOptions,
+};
+pub use views::{
+    AnyViewState, FirstPersonViewProps, FirstPersonViewState, OrbitAxis, OrbitViewProps, OrbitViewState,
+    OrthographicViewProps, OrthographicViewState, View,
+};
 
 pub use glam;
 pub use luma_gl;

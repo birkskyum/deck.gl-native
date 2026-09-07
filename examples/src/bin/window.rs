@@ -36,6 +36,8 @@ struct State {
     dragging: Option<MouseButton>,
     /// Where the pressed button went down, to tell clicks from drags
     press_pixel: [f64; 2],
+    /// Whether the map controller drives the camera (non map views keep their JSON camera)
+    map_view: bool,
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -109,6 +111,11 @@ impl State {
             deck.set_lighting(lighting);
         }
         deck.set_repeat(loaded.repeat);
+        deck.set_view(loaded.view);
+        if let Some(camera) = loaded.camera {
+            deck.set_any_view_state(camera);
+        }
+        let map_view = matches!(loaded.view, deck_gl::View::Map);
         deck.set_on_hover(Some(HoverCallback::new(|info| {
             if let Some(hit) = info {
                 println!(
@@ -131,6 +138,7 @@ impl State {
             deck,
             base_view,
             controller,
+            map_view,
             start: Instant::now(),
             cursor: None,
             last_cursor: (0.0, 0.0),
@@ -253,7 +261,9 @@ impl State {
         let elapsed = self.start.elapsed().as_secs_f64();
         let now = elapsed * 1000.0;
         self.controller.tick(now);
-        if self.controller.interacted() {
+        if !self.map_view {
+            // The controller only knows map cameras; leave the view's camera alone
+        } else if self.controller.interacted() {
             self.deck.set_view_state(self.controller.view_state());
         } else {
             let mut view = self.base_view;

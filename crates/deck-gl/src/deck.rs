@@ -10,7 +10,8 @@ use crate::layer::{
 };
 use crate::lighting::LightingEffect;
 use crate::transition::{TransitionProps, ViewStateTransition};
-use crate::viewport::{Viewport, WebMercatorViewportOptions};
+use crate::viewport::Viewport;
+use crate::views::{AnyViewState, View};
 use crate::{DeckError, Result};
 
 /// Camera state for the default map view. Mirrors deck.gl's `MapViewState`.
@@ -51,6 +52,9 @@ pub struct DeckProps {
     /// Draw extra copies of the world when the view spans the antimeridian, deck.gl's
     /// `MapView({repeat: true})`.
     pub repeat: bool,
+    /// The kind of camera: a map by default, or an orthographic, orbit or first person view.
+    /// With a non map view, set the camera with [`Deck::set_any_view_state`].
+    pub view: View,
 }
 
 impl Default for DeckProps {
@@ -65,6 +69,7 @@ impl Default for DeckProps {
             depth_bias_base: 0,
             clip_depth_range: ClipDepthRange::default(),
             repeat: false,
+            view: View::Map,
         }
     }
 }
@@ -111,7 +116,10 @@ pub struct Deck {
     msaa: Option<MsaaTextures>,
     width: u32,
     height: u32,
+    view: View,
     view_state: ViewState,
+    /// The view state of the current view; mirrors `view_state` for a map view
+    camera: AnyViewState,
     viewport: Viewport,
     external_viewport: bool,
     picking: Option<PickingTarget>,
@@ -142,14 +150,19 @@ impl Deck {
             clip_depth_range: props.clip_depth_range,
             uniform_slot: 0,
         };
-        let viewport = make_viewport(props.width, props.height, &props.view_state);
+        let camera = AnyViewState::Map(props.view_state);
+        let viewport = props
+            .view
+            .make_viewport(&camera, props.width as f64, props.height as f64);
         let mut deck = Self {
             ctx,
             layers: Vec::new(),
             msaa: None,
             width: props.width,
             height: props.height,
+            view: props.view,
             view_state: props.view_state,
+            camera,
             viewport,
             external_viewport: false,
             picking: None,
@@ -184,7 +197,7 @@ impl Deck {
         self.width = width;
         self.height = height;
         if !self.external_viewport {
-            self.viewport = make_viewport(width, height, &self.view_state);
+            self.viewport = self.view.make_viewport(&self.camera, width as f64, height as f64);
         }
     }
 
@@ -192,12 +205,60 @@ impl Deck {
         self.ctx.device_pixel_ratio = ratio;
     }
 
-    /// Move the default map camera, ending any transition.
+    /// Move the map camera, ending any transition. With a non map view this only records the
+    /// state; see [`Deck::set_any_view_state`].
     pub fn set_view_state(&mut self, view_state: ViewState) {
         self.transition = None;
         self.view_state = view_state;
+        if matches!(self.view, View::Map) {
+            self.camera = AnyViewState::Map(view_state);
+        }
         self.external_viewport = false;
-        self.viewport = make_viewport(self.width, self.height, &view_state);
+        self.viewport = self
+            .view
+            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+    }
+
+    /// Switch the kind of camera (map, orthographic, orbit or first person). The camera keeps
+    /// its state when it matches the new view, otherwise the view's default state is used.
+    pub fn set_view(&mut self, view: View) {
+        self.view = view;
+        let matches = matches!(
+            (&view, &self.camera),
+            (View::Map, AnyViewState::Map(_))
+                | (View::Orthographic(_), AnyViewState::Orthographic(_))
+                | (View::Orbit(_), AnyViewState::Orbit(_))
+                | (View::FirstPerson(_), AnyViewState::FirstPerson(_))
+        );
+        if !matches {
+            self.camera = view.default_view_state();
+        }
+        self.external_viewport = false;
+        self.viewport = self
+            .view
+            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+    }
+
+    pub fn view(&self) -> View {
+        self.view
+    }
+
+    /// Move the camera of any view kind; a map state also updates [`Deck::view_state`].
+    pub fn set_any_view_state(&mut self, state: AnyViewState) {
+        self.transition = None;
+        if let AnyViewState::Map(view_state) = state {
+            self.view_state = view_state;
+        }
+        self.camera = state;
+        self.external_viewport = false;
+        self.viewport = self
+            .view
+            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+    }
+
+    /// The camera state of the current view.
+    pub fn any_view_state(&self) -> AnyViewState {
+        self.camera
     }
 
     /// Animate the map camera to `end` with deck.gl's transition props, for decks driven
@@ -236,8 +297,11 @@ impl Deck {
         };
         let view = transition.at(now);
         self.view_state = view;
+        self.camera = AnyViewState::Map(view);
         self.external_viewport = false;
-        self.viewport = make_viewport(self.width, self.height, &view);
+        self.viewport = self
+            .view
+            .make_viewport(&self.camera, self.width as f64, self.height as f64);
         if transition.is_done(now) {
             self.transition = None;
         }
@@ -858,19 +922,6 @@ impl Deck {
         }
         self.msaa.as_ref().expect("msaa textures")
     }
-}
-
-fn make_viewport(width: u32, height: u32, view_state: &ViewState) -> Viewport {
-    Viewport::web_mercator(&WebMercatorViewportOptions {
-        width: width as f64,
-        height: height as f64,
-        longitude: view_state.longitude,
-        latitude: view_state.latitude,
-        zoom: view_state.zoom,
-        pitch: view_state.pitch,
-        bearing: view_state.bearing,
-        ..Default::default()
-    })
 }
 
 /// Pixels read back by [`Deck::snapshot`]: RGBA, 8 bits per channel, rows top to bottom.

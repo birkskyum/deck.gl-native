@@ -38,6 +38,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         deck.set_lighting(lighting);
     }
     deck.set_repeat(loaded.repeat);
+    deck.set_view(loaded.view);
+    if let Some(camera) = loaded.camera {
+        deck.set_any_view_state(camera);
+    }
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");
