@@ -51,6 +51,26 @@ pub struct Scene {
 /// The built-in scene, or the description named by `DECKGL_JSON`.
 pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
     match std::env::var(ENV_VAR) {
+        // A columnar file rather than a description: one layer around the whole batch, with
+        // the camera fitted to it once the layer knows its extent.
+        Ok(path) if crate::bigdata::is_data_file(&path) => {
+            let opened = crate::bigdata::open(&path)?;
+            println!(
+                "loaded {} rows from {path} as a {} layer",
+                opened.rows, opened.kind
+            );
+            Ok(Scene {
+                view_state: scene::view_state(bearing),
+                layers: vec![opened.layer],
+                lighting: None,
+                post_process: Vec::new(),
+                repeat: false,
+                view: View::Map,
+                camera: None,
+                views: Vec::new(),
+                cameras: Default::default(),
+            })
+        }
         Ok(path) if !path.is_empty() => {
             let json = JsonConverter::parse_file(&path)?;
             for warning in &json.warnings {

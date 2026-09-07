@@ -48,35 +48,41 @@ Polygons are tessellated on all cores above 64 of them, which took the hundred t
 extruded polygons from 54.7 ms to 33.7 ms.
 Run to run noise on the laptop is around 10 percent.
 
-## Getting a large file on screen
+## How much data can be held at once
 
-`cargo run --release --bin load_race -- <file.parquet>` reports the four costs between a file
-on disk and a drawn frame. The point of the numbers is not the frame rate, which a browser on
-WebGPU matches, but how quickly a file becomes a picture and how large that file may be.
+`cargo run --release --bin gen_bench_data -- points 100000000 /tmp/points100m.arrow` writes a
+file and `cargo run --release --bin load_race -- /tmp/points100m.arrow` opens it. The same
+files open in the window: `DECKGL_JSON=/tmp/points100m.arrow cargo run --release --bin window`.
 
-Apple M series laptop, release build, files written with DuckDB, 1024 x 1024 headless frames
-read back to the CPU (so the frame times are an upper bound):
+Arrow IPC rather than Parquet, so the file is the buffers and the read is not a decode. Apple
+M series laptop, release build, 1024 x 1024 headless frames read back to the CPU, so the frame
+times are an upper bound and depend on how much of the screen the data covers.
 
-| File | Rows | Read | Build | Upload | Frame | On screen |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 80 MB GeoParquet, separated coordinates | 5,000,000 points | 43.5 ms | 0.1 ms | 199.2 ms | 6.8 ms | **243 ms** |
-| 400 MB GeoParquet, separated coordinates | 25,000,000 points | 192.0 ms | 0.1 ms | 814.4 ms | 36.4 ms | **1.0 s** |
-| 85 MB GeoParquet, WKB polygons of 17 vertices | 500,000 polygons | 90.3 ms | 0.1 ms | 772.4 ms | 2.4 ms | **863 ms** |
+| Rows | File | Arrow in memory | GPU buffers | Read | Build | Upload | Frame |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5,000,000 points | 41.9 MB | 41.9 MB | 220 MB | 8.8 ms | 0.2 ms | 107.6 ms | 8.2 ms |
+| 25,000,000 points | 209.4 MB | 209.4 MB | 1.1 GB | 48.4 ms | 0.1 ms | 2210.7 ms | 127.5 ms |
+| 50,000,000 points | 418.8 MB | 418.8 MB | 2.2 GB | 105.3 ms | 0.1 ms | 1226.8 ms | 94.4 ms |
+| 100,000,000 points | 837.5 MB | 837.5 MB | 4.4 GB | 203.8 ms | 0.1 ms | 2521.9 ms | 202.7 ms |
+| 500,000 polygons, 8 vertices each | 77.8 MB | 233.4 MB | 342 MB | 23.3 ms | 0.1 ms | 327.3 ms | 2.7 ms |
 
-- **read** is the Parquet decode into an Arrow record batch. Nothing becomes rows of objects
-  on the way.
-- **build** is that record batch becoming a layer, and it is a tenth of a millisecond for
-  twenty five million rows because the batch is moved in as it is. This is the difference
-  columnar data makes: there is no conversion step to measure.
-- **upload** resolves the accessors, tessellates where the layer needs it, creates the GPU
-  buffers and draws once.
-- The twenty five million point run puts 400 MB of Arrow in memory and 1.1 GB in GPU buffers.
-  A browser tab has neither.
+Two things to read out of it.
+
+**Build is a tenth of a millisecond, whatever the row count.** A columnar file already holds
+the coordinates in the layout the GPU wants, so a file becomes a layer by moving the record
+batch in. There is no row by row conversion left to measure. This is the difference columnar
+data makes and it is the reason the rest of the table is possible.
+
+**A hundred million rows is 837 MB of Arrow and 4.4 GB of GPU buffers.** That is the working
+set that fits without tiling the data first or throwing any of it away.
+
+Restyling the resident data costs one frame: new colours on twenty five million points took
+131.0 ms against a 127.5 ms frame, because nothing is uploaded again except the styling.
 
 Reaching the second row needed a fix rather than a faster machine: the device was asking for
 wgpu's default limits, whose 256 MB maximum buffer size a layer of a few million rows runs
-into on hardware that has no such limit. `create_headless_context` now asks for what the
-adapter offers.
+into on hardware that has no such limit. `create_headless_context` now asks the adapter for
+what it offers.
 
 ## Comparing with deck.gl JS
 

@@ -1,5 +1,6 @@
 //! Shared example scene and JSON description loading.
 
+pub mod bigdata;
 pub mod scene;
 pub mod spec;
 
