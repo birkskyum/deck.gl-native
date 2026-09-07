@@ -236,6 +236,9 @@ struct Inner {
     generation: AtomicU64,
     workers: usize,
     spawned: AtomicBool,
+    /// Live `Fetcher` handles; the workers stop when the last one is dropped
+    handles: AtomicUsize,
+    shutdown: AtomicBool,
     cache_limit: usize,
     max_bytes: usize,
 }
@@ -257,9 +260,9 @@ impl Inner {
         self.counters.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Take the next request that was not cancelled while queued; `None` once the fetcher
-    /// is gone.
-    fn next(&self, inner: &Arc<Inner>) -> Option<Arc<Request>> {
+    /// Take the next request that was not cancelled while queued; `None` once the last
+    /// `Fetcher` handle is gone.
+    fn next(&self) -> Option<Arc<Request>> {
         let mut queue = self.queue();
         loop {
             while let Some(request) = queue.pop_front() {
@@ -275,8 +278,7 @@ impl Inner {
                 }
                 return Some(request);
             }
-            // Only workers hold the fetcher: stop
-            if Arc::strong_count(inner) <= self.workers {
+            if self.shutdown.load(Ordering::SeqCst) {
                 return None;
             }
             queue = self.wake.wait(queue).unwrap_or_else(|e| e.into_inner());
@@ -301,7 +303,7 @@ impl Inner {
     }
 
     fn work(inner: Arc<Inner>) {
-        while let Some(request) = inner.next(&inner) {
+        while let Some(request) = inner.next() {
             {
                 let mut state = request.lock();
                 if state.0 == FetchStatus::Queued {
@@ -328,10 +330,19 @@ impl Inner {
     }
 }
 
-/// Loads URLs on worker threads and keeps what it loaded. Clones share the pool and cache.
-#[derive(Clone)]
+/// Loads URLs on worker threads and keeps what it loaded. Clones share the pool and cache;
+/// the workers stop when the last clone is dropped.
 pub struct Fetcher {
     inner: Arc<Inner>,
+}
+
+impl Clone for Fetcher {
+    fn clone(&self) -> Self {
+        self.inner.handles.fetch_add(1, Ordering::SeqCst);
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Fetcher {
@@ -368,6 +379,8 @@ impl Fetcher {
                 generation: AtomicU64::new(0),
                 workers: workers.max(1),
                 spawned: AtomicBool::new(false),
+                handles: AtomicUsize::new(1),
+                shutdown: AtomicBool::new(false),
                 cache_limit: DEFAULT_CACHE_BYTES,
                 max_bytes: MAX_RESPONSE_BYTES,
             }),
@@ -504,8 +517,12 @@ impl Fetcher {
 
 impl Drop for Fetcher {
     fn drop(&mut self) {
-        // Wake the workers so they notice when only they hold the pool
-        self.inner.wake.notify_all();
+        if self.inner.handles.fetch_sub(1, Ordering::SeqCst) == 1 {
+            // The last handle: let the workers finish what they took and stop
+            let _queue = self.inner.queue();
+            self.inner.shutdown.store(true, Ordering::SeqCst);
+            self.inner.wake.notify_all();
+        }
     }
 }
 
@@ -582,6 +599,32 @@ mod tests {
         assert!(cache.get("d").is_none(), "larger than the budget");
         cache.insert("a", Arc::new(vec![0; 50]), 250);
         assert_eq!(cache.bytes, 150, "replacing an entry accounts for the old size");
+    }
+
+    #[test]
+    fn every_worker_survives_startup_and_stops_with_the_last_handle() {
+        let fetcher = Fetcher::new(4);
+        fetcher.spawn_workers();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let clone = fetcher.clone();
+        drop(fetcher);
+        assert!(
+            !clone.inner.shutdown.load(Ordering::SeqCst),
+            "a clone still holds the pool"
+        );
+        let inner = clone.inner.clone();
+        // Four workers plus this reference: none of them stopped at startup
+        assert_eq!(Arc::strong_count(&inner), 6);
+        drop(clone);
+        assert!(inner.shutdown.load(Ordering::SeqCst));
+        // The workers release their references once they stop
+        for _ in 0..100 {
+            if Arc::strong_count(&inner) == 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(Arc::strong_count(&inner), 1, "workers stopped");
     }
 
     #[test]

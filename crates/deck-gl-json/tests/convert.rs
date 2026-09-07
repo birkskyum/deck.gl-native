@@ -1017,3 +1017,82 @@ fn transitions_prop_parses_durations_easings_and_springs() {
         Some(PropTransition::interpolation(300.0))
     );
 }
+
+#[test]
+fn simple_mesh_layer_reads_inline_meshes_and_obj_files() {
+    use deck_gl_layers::SimpleMeshLayer;
+    let dir = std::env::temp_dir().join(format!("deckgl-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("tri.obj"),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n",
+    )
+    .unwrap();
+    let converter = JsonConverter::with_base_dir(&dir);
+    let spec = json!({
+        "layers": [
+            {
+                "@@type": "SimpleMeshLayer",
+                "id": "inline",
+                "mesh": {
+                    "positions": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]],
+                    "texCoords": [0, 0, 1, 0, 0, 1, 1, 1],
+                    "indices": [0, 1, 2, 1, 3, 2]
+                },
+                "data": [{"position": [1, 2], "yaw": 45}],
+                "getPosition": "@@=position",
+                "getOrientation": "@@=[0, yaw, 0]",
+                "getScale": [2, 2, 2],
+                "sizeScale": 10,
+                "wireframe": true
+            },
+            {
+                "@@type": "SimpleMeshLayer",
+                "id": "obj",
+                "mesh": "tri.obj",
+                "data": [{"position": [1, 2]}],
+                "getPosition": "@@=position",
+                "getTransformMatrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1]
+            }
+        ]
+    });
+    let mut deck = converter.convert(&spec).unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    assert_eq!(deck.layers.len(), 2);
+    let props = |layer: &mut Box<dyn deck_gl::Layer>| {
+        layer
+            .as_any_mut()
+            .downcast_mut::<SimpleMeshLayer>()
+            .unwrap()
+            .props()
+            .clone()
+    };
+    let inline = props(&mut deck.layers[0]);
+    let mesh = inline.mesh.as_ref().unwrap();
+    assert_eq!(mesh.vertex_count(), 4);
+    assert_eq!(mesh.tex_coords.as_ref().unwrap()[3], [1.0, 1.0]);
+    assert_eq!(mesh.indices.as_ref().unwrap().len(), 6);
+    assert!(mesh.normals.is_none());
+    assert_eq!(inline.size_scale, 10.0);
+    assert!(inline.wireframe);
+    assert_eq!(
+        deck_gl::data::resolve_vec3(&inline.data, &inline.get_orientation).unwrap(),
+        vec![[0.0, 45.0, 0.0]]
+    );
+    assert_eq!(inline.get_scale, deck_gl::Accessor::Constant([2.0, 2.0, 2.0]));
+    let obj = props(&mut deck.layers[1]);
+    let mesh = obj.mesh.as_ref().unwrap();
+    assert_eq!(mesh.vertex_count(), 3);
+    assert!(mesh.has_normals());
+    let matrix = obj.get_transform_matrix.as_ref().unwrap();
+    assert!(matches!(matrix, deck_gl::Accessor::Constant(m) if m[12..15] == [5.0, 6.0, 7.0]));
+    // A mesh whose indices point past its vertices is rejected
+    let bad = json!([{
+        "@@type": "SimpleMeshLayer",
+        "mesh": {"positions": [0, 0, 0], "indices": [0, 1, 2]},
+        "data": []
+    }]);
+    let error = converter.convert(&bad).unwrap_err().to_string();
+    assert!(error.contains("out of range"), "{error}");
+    std::fs::remove_dir_all(&dir).ok();
+}

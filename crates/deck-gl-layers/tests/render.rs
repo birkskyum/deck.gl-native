@@ -1835,6 +1835,122 @@ fn changed_rows_are_written_in_place_and_appends_grow_buffers() {
 }
 
 #[test]
+fn simple_mesh_layer_draws_lit_oriented_cubes() {
+    use deck_gl_layers::{Mesh, SimpleMeshLayer, SimpleMeshLayerProps};
+    let Some(ctx) = context() else { return };
+    // At zoom 14 a pixel is about 4.8 m at this latitude; a 60 m box spans about 12 px
+    let props = |yaw: f32, scale: [f32; 3], color: [u8; 4]| SimpleMeshLayerProps {
+        base: LayerProps::new("cubes"),
+        data: LayerData::with_length(1),
+        mesh: Some(Arc::new(Mesh::cube())),
+        get_position: Accessor::Constant(CENTER),
+        get_color: Accessor::Constant(color),
+        get_orientation: Accessor::Constant([0.0, yaw, 0.0]),
+        get_scale: Accessor::Constant(scale),
+        get_translation: Accessor::Constant([0.0, 0.0, scale[2] / 2.0]),
+        ..Default::default()
+    };
+    let shot = render(
+        &ctx,
+        vec![Box::new(SimpleMeshLayer::new(props(
+            0.0,
+            [60.0, 20.0, 20.0],
+            [255, 0, 0, 255],
+        )))],
+    );
+    let px = |shot: &[u8], x: u32, y: u32| {
+        let i = ((y * SIZE + x) * 4) as usize;
+        [shot[i], shot[i + 1], shot[i + 2], shot[i + 3]]
+    };
+    let c = SIZE / 2;
+    let top = px(&shot, c, c);
+    assert!(
+        top[0] > 60 && top[1] == 0 && top[2] == 0 && top[3] == 255,
+        "lit red top face: {top:?}"
+    );
+    assert_eq!(px(&shot, c + 4, c)[3], 255, "the box is long along x");
+    assert_eq!(px(&shot, c, c + 4)[3], 0, "and narrow along y");
+    // A yaw of 90 degrees turns the box along y
+    let shot = render(
+        &ctx,
+        vec![Box::new(SimpleMeshLayer::new(props(
+            90.0,
+            [60.0, 20.0, 20.0],
+            [255, 0, 0, 255],
+        )))],
+    );
+    assert_eq!(px(&shot, c, c + 4)[3], 255, "now long along y");
+    assert_eq!(px(&shot, c + 4, c)[3], 0, "and narrow along x");
+    // Picking reports the instance and highlighting tints it
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(SimpleMeshLayer::new(SimpleMeshLayerProps {
+            base: LayerProps {
+                pickable: true,
+                auto_highlight: true,
+                ..LayerProps::new("cubes")
+            },
+            ..props(0.0, [60.0, 60.0, 60.0], [255, 0, 0, 255])
+        }))],
+    );
+    deck.snapshot(None).unwrap();
+    let info = deck.pick(c as f64, c as f64).unwrap();
+    assert_eq!(
+        info.as_ref().map(|i| (i.layer_id.as_str(), i.index)),
+        Some(("cubes", 0))
+    );
+    assert!(deck.pick(2.0, 2.0).unwrap().is_none());
+}
+
+#[test]
+fn simple_mesh_layer_samples_textures_and_scales_by_size() {
+    use deck_gl_layers::{Mesh, SimpleMeshLayer, SimpleMeshLayerProps};
+    let Some(ctx) = context() else { return };
+    // A flat square with texture coordinates: the left half samples red, the right green
+    // (two texels per half, so linear filtering blends nothing at the sampled points)
+    let quad = Mesh::new(vec![
+        [-0.5, -0.5, 0.0],
+        [0.5, -0.5, 0.0],
+        [0.5, 0.5, 0.0],
+        [-0.5, 0.5, 0.0],
+    ])
+    .with_normals(vec![[0.0, 0.0, 1.0]; 4])
+    .with_tex_coords(vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]])
+    .with_indices(vec![0, 1, 2, 0, 2, 3]);
+    let texture = BitmapImage::new(
+        4,
+        1,
+        vec![255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255],
+    );
+    let layer = SimpleMeshLayer::new(SimpleMeshLayerProps {
+        base: LayerProps::new("quad"),
+        data: LayerData::with_length(1),
+        mesh: Some(Arc::new(quad)),
+        texture: Some(texture),
+        size_scale: 100.0,
+        get_position: Accessor::Constant(CENTER),
+        get_color: Accessor::Constant([255, 255, 255, 255]),
+        ..Default::default()
+    });
+    let shot = render(&ctx, vec![Box::new(layer)]);
+    let px = |x: u32, y: u32| {
+        let i = ((y * SIZE + x) * 4) as usize;
+        [shot[i], shot[i + 1], shot[i + 2], shot[i + 3]]
+    };
+    let c = SIZE / 2;
+    let left = px(c - 6, c);
+    let right = px(c + 6, c);
+    assert!(left[0] > 60 && left[1] == 0, "red texel on the left: {left:?}");
+    assert!(
+        right[1] > 60 && right[0] == 0,
+        "green texel on the right: {right:?}"
+    );
+    // sizeScale 100 makes the unit quad about 20 px wide: the corners of the view stay empty
+    assert_eq!(px(2, 2)[3], 0);
+    assert_eq!(px(c + 16, c)[3], 0);
+}
+
+#[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };
     let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {

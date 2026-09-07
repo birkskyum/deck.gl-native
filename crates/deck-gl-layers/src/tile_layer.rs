@@ -8,6 +8,7 @@
 
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -159,7 +160,11 @@ pub fn raster_renderer() -> TileRenderer {
 }
 
 /// Tiles waiting for a worker, with the condition variable that wakes the workers.
-type LoadQueue = Arc<(Mutex<VecDeque<(TileIndex, TileBounds, CancelToken)>>, Condvar)>;
+type LoadQueue = Arc<(
+    Mutex<VecDeque<(TileIndex, TileBounds, CancelToken)>>,
+    Condvar,
+    AtomicBool,
+)>;
 /// What a worker reports for a tile: `None` when the load was cancelled.
 type LoadOutcome = Option<std::result::Result<Option<TileData>, String>>;
 
@@ -175,7 +180,11 @@ struct LoadPool {
 
 impl LoadPool {
     fn new(loader: TileLoader, workers: usize, generation: u64) -> Self {
-        let queue: LoadQueue = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let queue: LoadQueue = Arc::new((
+            Mutex::new(VecDeque::new()),
+            Condvar::new(),
+            AtomicBool::new(false),
+        ));
         let (tx, results) = channel();
         for _ in 0..workers.max(1) {
             let queue = queue.clone();
@@ -186,14 +195,14 @@ impl LoadPool {
                 .name("deck-gl tile loader".into())
                 .spawn(move || loop {
                     let job = {
-                        let (lock, cvar) = &*queue;
+                        let (lock, cvar, closed) = &*queue;
                         let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
                         loop {
                             if let Some(job) = q.pop_front() {
                                 break Some(job);
                             }
-                            // Stop once the layer dropped the queue (only workers hold it)
-                            if Arc::strong_count(&queue) <= workers.max(1) {
+                            // Stop once the layer dropped the pool
+                            if closed.load(Ordering::SeqCst) {
                                 break None;
                             }
                             q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
@@ -225,7 +234,7 @@ impl LoadPool {
     fn submit(&mut self, index: TileIndex, bounds: TileBounds) {
         let cancel = CancelToken::new();
         self.tokens.insert(index, cancel.clone());
-        let (lock, cvar) = &*self.queue;
+        let (lock, cvar, _) = &*self.queue;
         lock.lock()
             .unwrap_or_else(|e| e.into_inner())
             .push_back((index, bounds, cancel));
@@ -242,8 +251,10 @@ impl LoadPool {
 
 impl Drop for LoadPool {
     fn drop(&mut self) {
-        // Wake the workers so they notice the queue is gone
-        let (_, cvar) = &*self.queue;
+        // Tell the workers to stop and wake them; loads in flight are dropped by generation
+        let (lock, cvar, closed) = &*self.queue;
+        let _queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+        closed.store(true, Ordering::SeqCst);
         cvar.notify_all();
     }
 }

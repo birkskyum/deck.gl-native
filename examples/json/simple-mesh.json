@@ -1,0 +1,22 @@
+{
+  "initialViewState": {"longitude": -122.41, "latitude": 37.79, "zoom": 13.8, "pitch": 50, "bearing": 20},
+  "layers": [
+    {
+      "@@type": "SimpleMeshLayer",
+      "id": "cubes",
+      "mesh": "cube.obj",
+      "data": [
+        {"position": [-122.42, 37.79], "size": 120, "yaw": 0, "color": [255, 120, 40]},
+        {"position": [-122.41, 37.795], "size": 80, "yaw": 30, "color": [40, 160, 255]},
+        {"position": [-122.405, 37.785], "size": 160, "yaw": 60, "color": [80, 220, 120]},
+        {"position": [-122.4, 37.79], "size": 100, "yaw": 90, "color": [240, 80, 200]}
+      ],
+      "getPosition": "@@=position",
+      "getColor": "@@=color",
+      "getOrientation": "@@=[0, yaw, 0]",
+      "getScale": "@@=[size, size, size]",
+      "getTranslation": "@@=[0, 0, size / 2]",
+      "pickable": true
+    }
+  ]
+}

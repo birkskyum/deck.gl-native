@@ -12,9 +12,9 @@ use deck_gl_layers::{
     HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps,
     LineLayer, LineLayerProps, MvtLayer, MvtLayerProps, PathLayer, PathLayerProps, PointCloudLayer,
     PointCloudLayerProps, PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer,
-    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps,
-    TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer,
-    WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
+    ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SimpleMeshLayer, SimpleMeshLayerProps,
+    SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer,
+    TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -519,6 +519,10 @@ pub fn convert_layer(
             Box::new(TextLayer::new(text(&props, data, options)?))
         }
         "BitmapLayer" => Box::new(BitmapLayer::new(bitmap(&props, options)?)),
+        "SimpleMeshLayer" => {
+            let data = load_rows(&mut props, options)?;
+            Box::new(SimpleMeshLayer::new(simple_mesh(&props, data, options)?))
+        }
         _ => {
             warnings.push(format!(
                 "layer `{}`: layer type `{layer_type}` is not available yet and was skipped",
@@ -779,6 +783,112 @@ fn column(p: &Props, data: LayerData) -> Result<ColumnLayerProps> {
         get_line_color: p.accessor("getLineColor", &d.get_line_color, convert::color)?,
         get_line_width: p.accessor("getLineWidth", &d.get_line_width, convert::f32)?,
         get_elevation: p.accessor("getElevation", &d.get_elevation, convert::f32)?,
+    })
+}
+
+/// deck.gl's `mesh` prop: a path or URL of an OBJ file, or an object with `positions` and
+/// optional `normals`, `colors`, `texCoords` and `indices` arrays (flat or nested).
+fn mesh_prop(p: &Props, options: &ConvertOptions) -> Result<Option<Arc<deck_gl_layers::Mesh>>> {
+    let Some(value) = p.get("mesh").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let mesh = match value {
+        Value::String(source) => {
+            let text = data::load_text(source, options).map_err(|e| in_layer(p, e))?;
+            deck_gl_layers::Mesh::from_obj(&text).map_err(|e| p.error("mesh", format!("{source}: {e}")))?
+        }
+        Value::Object(map) => {
+            let triples = |key: &str| -> Result<Option<Vec<[f32; 3]>>> {
+                match map.get(key) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(v) => {
+                        let flat = flat_numbers(v).map_err(|e| p.error("mesh", format!("{key}: {e}")))?;
+                        if !flat.len().is_multiple_of(3) {
+                            return Err(p.error("mesh", format!("{key} needs three values per vertex")));
+                        }
+                        Ok(Some(flat.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()))
+                    }
+                }
+            };
+            let positions = triples("positions")?.ok_or_else(|| p.error("mesh", "needs positions"))?;
+            let mut mesh = deck_gl_layers::Mesh::new(positions);
+            mesh.normals = triples("normals")?;
+            mesh.colors = triples("colors")?;
+            if let Some(v) = map.get("texCoords").filter(|v| !v.is_null()) {
+                let flat = flat_numbers(v).map_err(|e| p.error("mesh", format!("texCoords: {e}")))?;
+                if !flat.len().is_multiple_of(2) {
+                    return Err(p.error("mesh", "texCoords needs two values per vertex"));
+                }
+                mesh.tex_coords = Some(flat.chunks_exact(2).map(|c| [c[0], c[1]]).collect());
+            }
+            if let Some(v) = map.get("indices").filter(|v| !v.is_null()) {
+                let flat = flat_numbers(v).map_err(|e| p.error("mesh", format!("indices: {e}")))?;
+                mesh.indices = Some(flat.iter().map(|i| *i as u32).collect());
+            }
+            mesh.validate().map_err(|e| p.error("mesh", e))?;
+            mesh
+        }
+        other => {
+            return Err(p.error(
+                "mesh",
+                format!(
+                    "expected an OBJ path or a mesh object, got {}",
+                    crate::props::describe(other)
+                ),
+            ))
+        }
+    };
+    Ok(Some(Arc::new(mesh)))
+}
+
+/// The numbers of a flat or nested array, in order.
+fn flat_numbers(value: &Value) -> std::result::Result<Vec<f32>, String> {
+    fn walk(value: &Value, out: &mut Vec<f32>) -> std::result::Result<(), String> {
+        match value {
+            Value::Array(items) => items.iter().try_for_each(|item| walk(item, out)),
+            other => {
+                out.push(convert::f32(other)?);
+                Ok(())
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(value, &mut out)?;
+    Ok(out)
+}
+
+fn simple_mesh(p: &Props, data: LayerData, options: &ConvertOptions) -> Result<SimpleMeshLayerProps> {
+    let d = SimpleMeshLayerProps::default();
+    let texture = match p.string("texture")? {
+        Some(source) => Some(data::load_image(&source, options).map_err(|e| in_layer(p, e))?),
+        None => None,
+    };
+    let matrix_of = |value: &Value| -> std::result::Result<[f32; 16], String> {
+        let flat = convert::f32_list(value)?;
+        <[f32; 16]>::try_from(flat).map_err(|v| format!("expected 16 numbers, got {}", v.len()))
+    };
+    let identity = Accessor::Constant([
+        1.0f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    let get_transform_matrix = match p.get("getTransformMatrix") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) if items.is_empty() => None,
+        Some(_) => Some(p.accessor("getTransformMatrix", &identity, matrix_of)?),
+    };
+    Ok(SimpleMeshLayerProps {
+        base: p.base()?,
+        data,
+        mesh: mesh_prop(p, options)?,
+        texture,
+        size_scale: p.f32("sizeScale", d.size_scale)?,
+        wireframe: p.bool("wireframe", d.wireframe)?,
+        instanced: p.bool("_instanced", d.instanced)?,
+        get_position: p.accessor("getPosition", "position", convert::position)?,
+        get_color: p.accessor("getColor", &d.get_color, convert::color)?,
+        get_orientation: p.accessor("getOrientation", &d.get_orientation, convert::vec3)?,
+        get_scale: p.accessor("getScale", &d.get_scale, convert::vec3)?,
+        get_translation: p.accessor("getTranslation", &d.get_translation, convert::vec3)?,
+        get_transform_matrix,
     })
 }
 
