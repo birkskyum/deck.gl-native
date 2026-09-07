@@ -114,7 +114,10 @@ a `FirstPersonView` (`fovy`, `near`, `far`, `focalDistance`). `initialViewState`
 chosen view: `target`, `zoom`, `zoomX`, `zoomY` for the orthographic view; `target`, `zoom`,
 `rotationOrbit`, `rotationX` for the orbit view; `longitude`, `latitude`, `position`, `bearing`,
 `pitch` for the first person view. Layers in the non map views use cartesian coordinates.
-Multiple views produce a warning; only the last one is used.
+Several views render into their own rectangles: each view takes `id`, `x`, `y`, `width`,
+`height` (pixels or `"30%"`) and `padding` (`left`, `right`, `top`, `bottom`), and
+`initialViewState` may then be an object keyed by view id. `examples/json/minimap.json` shows a
+map with a minimap in the corner.
 
 ## Effects
 

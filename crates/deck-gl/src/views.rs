@@ -3,10 +3,12 @@
 
 use glam::DVec3;
 
-use crate::deck::ViewState;
+use std::sync::Arc;
+
+use crate::deck::{PickingInfo, ViewState};
 use crate::viewport::{
     FirstPersonViewportOptions, GlobeViewportOptions, OrbitViewportOptions, OrthographicViewportOptions,
-    Viewport,
+    Padding, Viewport,
 };
 
 /// Axis an `OrbitView` rotates around freely.
@@ -313,4 +315,211 @@ pub fn map_viewport(view_state: &ViewState, width: f64, height: f64) -> Viewport
         bearing: view_state.bearing,
         ..Default::default()
     })
+}
+
+/// A position or size of a view: absolute pixels or a percentage of the canvas.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Extent {
+    Pixels(f64),
+    Percent(f64),
+}
+
+impl Extent {
+    /// `"50%"` or a number of pixels.
+    pub fn parse(text: &str) -> Option<Extent> {
+        let text = text.trim();
+        if let Some(percent) = text.strip_suffix('%') {
+            percent.trim().parse().ok().map(Extent::Percent)
+        } else {
+            text.parse().ok().map(Extent::Pixels)
+        }
+    }
+
+    pub fn resolve(&self, total: f64) -> f64 {
+        match self {
+            Extent::Pixels(px) => *px,
+            Extent::Percent(pct) => total * pct / 100.0,
+        }
+    }
+}
+
+/// Padding of a view, each side as pixels or a percentage of the canvas.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewPadding {
+    pub left: Extent,
+    pub right: Extent,
+    pub top: Extent,
+    pub bottom: Extent,
+}
+
+impl ViewPadding {
+    pub fn pixels(left: f64, right: f64, top: f64, bottom: f64) -> Self {
+        Self {
+            left: Extent::Pixels(left),
+            right: Extent::Pixels(right),
+            top: Extent::Pixels(top),
+            bottom: Extent::Pixels(bottom),
+        }
+    }
+}
+
+/// The rectangle of a view on the canvas, in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub padding: Option<Padding>,
+}
+
+impl ViewRect {
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+}
+
+/// One of a deck's views: a camera kind placed in a rectangle of the canvas, deck.gl's `View`
+/// props `id`, `x`, `y`, `width`, `height` and `padding`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeckView {
+    pub id: String,
+    pub view: View,
+    pub x: Extent,
+    pub y: Extent,
+    pub width: Extent,
+    pub height: Extent,
+    pub padding: Option<ViewPadding>,
+}
+
+impl DeckView {
+    /// A view filling the canvas.
+    pub fn new(id: impl Into<String>, view: View) -> Self {
+        Self {
+            id: id.into(),
+            view,
+            x: Extent::Pixels(0.0),
+            y: Extent::Pixels(0.0),
+            width: Extent::Percent(100.0),
+            height: Extent::Percent(100.0),
+            padding: None,
+        }
+    }
+
+    pub fn with_rect(mut self, x: Extent, y: Extent, width: Extent, height: Extent) -> Self {
+        self.x = x;
+        self.y = y;
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    pub fn with_padding(mut self, padding: ViewPadding) -> Self {
+        self.padding = Some(padding);
+        self
+    }
+
+    /// Resolve the rectangle on a canvas of `width` x `height` logical pixels.
+    pub fn rect(&self, width: f64, height: f64) -> ViewRect {
+        ViewRect {
+            x: self.x.resolve(width),
+            y: self.y.resolve(height),
+            width: self.width.resolve(width),
+            height: self.height.resolve(height),
+            padding: self.padding.map(|p| Padding {
+                left: p.left.resolve(width),
+                right: p.right.resolve(width),
+                top: p.top.resolve(height),
+                bottom: p.bottom.resolve(height),
+            }),
+        }
+    }
+
+    /// The viewport of this view for `state` on a canvas of `width` x `height`; `None` when
+    /// the rectangle has no area.
+    pub fn make_viewport(&self, state: &AnyViewState, width: f64, height: f64) -> Option<Viewport> {
+        let rect = self.rect(width, height);
+        if rect.width < 1.0 || rect.height < 1.0 {
+            return None;
+        }
+        let mut viewport = self.view.make_viewport(state, rect.width, rect.height);
+        viewport.id = self.id.clone();
+        viewport.x = rect.x;
+        viewport.y = rect.y;
+        if let Some(padding) = rect.padding {
+            viewport = viewport.with_padding(padding);
+        }
+        Some(viewport)
+    }
+}
+
+/// The function behind a [`LayerFilter`]: layer id and view id in, whether to draw.
+pub type LayerFilterFn = dyn Fn(&str, &str) -> bool + Send + Sync;
+
+/// Decides which layers a view draws, deck.gl's `layerFilter`: called with the layer's id
+/// and the view's id.
+#[derive(Clone)]
+pub struct LayerFilter(pub Arc<LayerFilterFn>);
+
+impl LayerFilter {
+    pub fn new(f: impl Fn(&str, &str) -> bool + Send + Sync + 'static) -> Self {
+        Self(Arc::new(f))
+    }
+
+    pub fn allows(&self, layer_id: &str, view_id: &str) -> bool {
+        (self.0)(layer_id, view_id)
+    }
+}
+
+impl std::fmt::Debug for LayerFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LayerFilter")
+    }
+}
+
+/// Silence an unused import when picking info is only referenced in docs.
+#[allow(dead_code)]
+fn _picking_info_link(_: &PickingInfo) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extents_resolve_against_the_canvas() {
+        assert_eq!(Extent::parse("50%"), Some(Extent::Percent(50.0)));
+        assert_eq!(Extent::parse(" 120 "), Some(Extent::Pixels(120.0)));
+        assert_eq!(Extent::parse("wide"), None);
+        let view = DeckView::new("mini", View::Map)
+            .with_rect(
+                Extent::Percent(70.0),
+                Extent::Pixels(10.0),
+                Extent::Percent(30.0),
+                Extent::Pixels(150.0),
+            )
+            .with_padding(ViewPadding::pixels(5.0, 0.0, 0.0, 10.0));
+        let rect = view.rect(1000.0, 500.0);
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (700.0, 10.0, 300.0, 150.0)
+        );
+        assert_eq!(rect.padding.unwrap().left, 5.0);
+        assert!(rect.contains(701.0, 20.0) && !rect.contains(699.0, 20.0));
+        let viewport = view
+            .make_viewport(&AnyViewState::Map(ViewState::default()), 1000.0, 500.0)
+            .unwrap();
+        assert_eq!(
+            (viewport.x, viewport.y, viewport.width, viewport.height),
+            (700.0, 10.0, 300.0, 150.0)
+        );
+        assert!(DeckView::new("none", View::Map)
+            .with_rect(
+                Extent::Pixels(0.0),
+                Extent::Pixels(0.0),
+                Extent::Pixels(0.0),
+                Extent::Percent(100.0)
+            )
+            .make_viewport(&AnyViewState::Map(ViewState::default()), 100.0, 100.0)
+            .is_none());
+    }
 }

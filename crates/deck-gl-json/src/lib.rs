@@ -26,9 +26,9 @@ use std::path::{Path, PathBuf};
 
 use arrow_array::RecordBatch;
 use deck_gl::{
-    AnyViewState, DeckError, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps, Layer,
-    LightingEffect, OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState,
-    View, ViewState,
+    AnyViewState, DeckError, DeckView, Extent, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps,
+    Layer, LightingEffect, OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps,
+    OrthographicViewState, View, ViewPadding, ViewState,
 };
 use serde_json::Value;
 
@@ -85,6 +85,11 @@ pub struct JsonDeck {
     pub view: View,
     /// `initialViewState` read for `view`, of any kind; `view_state` is its map form.
     pub camera: Option<AnyViewState>,
+    /// All views of `views` with their rectangles, for decks with several views (empty when
+    /// the description has at most one full size view).
+    pub views: Vec<DeckView>,
+    /// `initialViewState` per view id when it is keyed by view ids, else the shared state.
+    pub cameras: HashMap<String, AnyViewState>,
     /// Layer types and props that were ignored, mirroring deck.gl's console warnings.
     pub warnings: Vec<String>,
 }
@@ -156,6 +161,8 @@ impl JsonConverter {
         let mut repeat = false;
         let mut view = View::Map;
         let mut camera = None;
+        let mut deck_views: Vec<DeckView> = Vec::new();
+        let mut cameras = HashMap::new();
         let (view_state, layers) = match value {
             Value::Array(_) => (None, self.convert_layers(value, &mut warnings)?),
             Value::Object(map) => {
@@ -165,8 +172,10 @@ impl JsonConverter {
                             repeat |= item.get("repeat").and_then(Value::as_bool).unwrap_or(false);
                         }
                         match view_from_value(item) {
-                            Ok(Some(v)) => view = v,
-                            Ok(None) => {}
+                            Ok(kind) => match deck_view_from_value(item, kind.unwrap_or(View::Map)) {
+                                Ok(deck_view) => deck_views.push(deck_view),
+                                Err(warning) => warnings.push(warning),
+                            },
                             Err(warning) => warnings.push(warning),
                         }
                     }
@@ -175,9 +184,37 @@ impl JsonConverter {
                     .get("initialViewState")
                     .or_else(|| map.get("viewState"))
                     .filter(|v| !v.is_null());
-                camera = state_value
-                    .map(|v| any_view_state_from_value(v, &view))
-                    .transpose()?;
+                if let Some(first) = deck_views.first() {
+                    view = first.view;
+                }
+                if let Some(state) = state_value {
+                    let keyed = !deck_views.is_empty()
+                        && state.as_object().is_some_and(|map| {
+                            !map.is_empty()
+                                && map
+                                    .iter()
+                                    .all(|(k, v)| v.is_object() && deck_views.iter().any(|d| &d.id == k))
+                        });
+                    if keyed {
+                        for deck_view in &deck_views {
+                            if let Some(v) = state.get(&deck_view.id) {
+                                cameras.insert(
+                                    deck_view.id.clone(),
+                                    any_view_state_from_value(v, &deck_view.view)?,
+                                );
+                            }
+                        }
+                        camera = deck_views.first().and_then(|d| cameras.get(&d.id).copied());
+                    } else {
+                        let shared = any_view_state_from_value(state, &view)?;
+                        camera = Some(shared);
+                        for deck_view in &deck_views {
+                            if same_view_kind(&deck_view.view, &view) {
+                                cameras.insert(deck_view.id.clone(), shared);
+                            }
+                        }
+                    }
+                }
                 let view_state = camera.and_then(|c| c.map());
                 let layers = match map.get("layers") {
                     Some(layers) => self.convert_layers(layers, &mut warnings)?,
@@ -209,6 +246,12 @@ impl JsonConverter {
             repeat,
             view,
             camera,
+            views: if deck_views.len() > 1 || deck_views.first().is_some_and(|d| !is_full_size(d)) {
+                deck_views
+            } else {
+                Vec::new()
+            },
+            cameras,
             warnings,
         })
     }
@@ -375,6 +418,72 @@ pub fn view_from_value(value: &Value) -> std::result::Result<Option<View>, Strin
         Some(other) => Err(format!("view `{other}` is not available yet and was skipped")),
         None => Err("view without @@type was skipped".to_string()),
     }
+}
+
+/// The placement props of a view: `id`, `x`, `y`, `width`, `height` (pixels or `"NN%"`) and
+/// `padding`.
+pub fn deck_view_from_value(value: &Value, kind: View) -> std::result::Result<DeckView, String> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| "view must be an object".to_string())?;
+    let extent = |key: &str, default: Extent| -> std::result::Result<Extent, String> {
+        match map.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(Value::String(text)) => Extent::parse(text)
+                .ok_or_else(|| format!("view `{key}`: expected pixels or a percentage, got `{text}`")),
+            Some(v) => props::convert::number(v)
+                .map(Extent::Pixels)
+                .map_err(|m| format!("view `{key}`: {m}")),
+        }
+    };
+    let id = map
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            map.get(props::TYPE_KEY)
+                .and_then(Value::as_str)
+                .unwrap_or("view")
+                .to_string()
+        });
+    let mut view = DeckView::new(id, kind).with_rect(
+        extent("x", Extent::Pixels(0.0))?,
+        extent("y", Extent::Pixels(0.0))?,
+        extent("width", Extent::Percent(100.0))?,
+        extent("height", Extent::Percent(100.0))?,
+    );
+    if let Some(Value::Object(padding)) = map.get("padding") {
+        let side = |key: &str| -> std::result::Result<Extent, String> {
+            match padding.get(key) {
+                None | Some(Value::Null) => Ok(Extent::Pixels(0.0)),
+                Some(Value::String(text)) => {
+                    Extent::parse(text).ok_or_else(|| format!("view padding `{key}`: got `{text}`"))
+                }
+                Some(v) => props::convert::number(v)
+                    .map(Extent::Pixels)
+                    .map_err(|m| format!("view padding `{key}`: {m}")),
+            }
+        };
+        view = view.with_padding(ViewPadding {
+            left: side("left")?,
+            right: side("right")?,
+            top: side("top")?,
+            bottom: side("bottom")?,
+        });
+    }
+    Ok(view)
+}
+
+fn is_full_size(view: &DeckView) -> bool {
+    view.x == Extent::Pixels(0.0)
+        && view.y == Extent::Pixels(0.0)
+        && view.width == Extent::Percent(100.0)
+        && view.height == Extent::Percent(100.0)
+        && view.padding.is_none()
+}
+
+fn same_view_kind(a: &View, b: &View) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
 /// Read the `initialViewState` of a view of any kind.

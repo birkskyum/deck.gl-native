@@ -121,6 +121,7 @@ impl State {
         if let Some(camera) = loaded.camera {
             deck.set_any_view_state(camera);
         }
+        spec::apply_views(&mut deck, &loaded.views, &loaded.cameras);
         let map_view = matches!(loaded.view, deck_gl::View::Map);
         let orbit = match loaded.view {
             deck_gl::View::Orbit(_) | deck_gl::View::Orthographic(_) => Some(OrbitController::new(

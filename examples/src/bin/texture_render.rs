@@ -42,6 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(camera) = loaded.camera {
         deck.set_any_view_state(camera);
     }
+    spec::apply_views(&mut deck, &loaded.views, &loaded.cameras);
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");

@@ -61,6 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(camera) = json.camera {
         deck.set_any_view_state(camera);
     }
+    spec::apply_views(&mut deck, &json.views, &json.cameras);
 
     deck.snapshot(Some(scene::CLEAR_COLOR))?.save_png(&output)?;
     println!("wrote {output}");

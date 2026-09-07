@@ -1231,6 +1231,95 @@ fn globe_view_draws_points_on_the_sphere() {
 }
 
 #[test]
+fn several_views_draw_in_their_rectangles_with_a_layer_filter() {
+    use deck_gl::{
+        AnyViewState, DeckView, Extent, LayerFilter, OrthographicViewProps, OrthographicViewState, View,
+    };
+    let Some(ctx) = context() else { return };
+    let point = |id: &str, position: [f64; 3], color: [u8; 4]| {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                pickable: true,
+                ..LayerProps::new(id)
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant(color),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let ortho = View::Orthographic(OrthographicViewProps::default());
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            layers: vec![
+                point("red", [0.0, 0.0, 0.0], [255, 0, 0, 255]),
+                point("blue", [0.0, 0.0, 0.0], [0, 0, 255, 255]),
+            ],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    // Left half and right half, both looking at the origin
+    deck.set_views(vec![
+        DeckView::new("left", ortho).with_rect(
+            Extent::Pixels(0.0),
+            Extent::Pixels(0.0),
+            Extent::Percent(50.0),
+            Extent::Percent(100.0),
+        ),
+        DeckView::new("right", ortho).with_rect(
+            Extent::Percent(50.0),
+            Extent::Pixels(0.0),
+            Extent::Percent(50.0),
+            Extent::Percent(100.0),
+        ),
+    ]);
+    deck.set_view_state_for(
+        "left",
+        AnyViewState::Orthographic(OrthographicViewState::default()),
+    );
+    deck.set_view_state_for(
+        "right",
+        AnyViewState::Orthographic(OrthographicViewState::default()),
+    );
+    // The blue point only shows on the right
+    deck.set_layer_filter(Some(LayerFilter::new(|layer, view| {
+        layer != "blue" || view == "right"
+    })));
+    let shot = deck.snapshot(None).unwrap();
+    let (q, c) = (SIZE / 4, SIZE / 2);
+    assert_eq!(shot.pixel(q, c), [255, 0, 0, 255], "left view shows red");
+    assert_eq!(
+        shot.pixel(q + c, c),
+        [0, 0, 255, 255],
+        "right view shows blue on top"
+    );
+    assert_eq!(shot.pixel(c - 1, 2), [0, 0, 0, 0]);
+    // Picking reports the view and unprojects with its viewport
+    let hit = deck.pick(q as f64 + c as f64, c as f64).unwrap().expect("hit");
+    assert_eq!((hit.layer_id.as_str(), hit.view_id.as_str()), ("blue", "right"));
+    assert!(
+        hit.coordinate[0].abs() < 1.0 && hit.coordinate[1].abs() < 1.0,
+        "{:?}",
+        hit.coordinate
+    );
+    let hit = deck.pick(q as f64, c as f64).unwrap().expect("hit");
+    assert_eq!((hit.layer_id.as_str(), hit.view_id.as_str()), ("red", "left"));
+    // Back to a single view
+    deck.set_views(Vec::new());
+    deck.set_layer_filter(None);
+    assert_eq!(deck.viewports().len(), 1);
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

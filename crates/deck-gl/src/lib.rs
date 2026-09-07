@@ -38,12 +38,13 @@ pub use transition::{
     TransitionDuration, TransitionInterpolator, TransitionInterruption, TransitionProps, ViewStateTransition,
 };
 pub use viewport::{
-    FirstPersonViewportOptions, OrbitViewportOptions, OrthographicViewportOptions, Viewport, ViewportOptions,
-    WebMercatorViewportOptions,
+    FirstPersonViewportOptions, GlobeViewportOptions, OrbitViewportOptions, OrthographicViewportOptions,
+    Padding, Viewport, ViewportOptions, WebMercatorViewportOptions,
 };
 pub use views::{
-    AnyViewState, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps, OrbitAxis, OrbitViewProps,
-    OrbitViewState, OrthographicViewProps, OrthographicViewState, View,
+    AnyViewState, DeckView, Extent, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps, LayerFilter,
+    OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState, View,
+    ViewPadding, ViewRect,
 };
 
 pub use glam;

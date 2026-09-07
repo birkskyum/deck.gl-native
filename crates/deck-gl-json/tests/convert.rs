@@ -5,7 +5,7 @@ use std::sync::Arc;
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_polygons, resolve_positions};
 use deck_gl::wgpu;
 use deck_gl::{
-    Accessor, AnyViewState, CoordinateSystem, CullMode, LayerData, Material, OrbitAxis,
+    Accessor, AnyViewState, CoordinateSystem, CullMode, Extent, LayerData, Material, OrbitAxis,
     OrthographicViewProps, OrthographicViewState, View,
 };
 use deck_gl_json::props::{convert, Props};
@@ -646,4 +646,36 @@ fn non_map_views_and_their_view_states() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn several_views_with_rectangles_and_their_own_view_states() {
+    let spec = json!({
+        "views": [
+            {"@@type": "MapView", "id": "main", "controller": true},
+            {"@@type": "OrthographicView", "id": "inset", "x": "70%", "y": 10, "width": "30%", "height": "25%", "padding": {"left": 4, "bottom": "2%"}}
+        ],
+        "initialViewState": {
+            "main": {"longitude": 1, "latitude": 2, "zoom": 3},
+            "inset": {"target": [5, 6], "zoom": 1}
+        },
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    assert_eq!(deck.views.len(), 2);
+    assert_eq!(deck.views[1].id, "inset");
+    assert_eq!(deck.views[1].x, Extent::Percent(70.0));
+    assert_eq!(deck.views[1].y, Extent::Pixels(10.0));
+    assert_eq!(deck.views[1].padding.unwrap().bottom, Extent::Percent(2.0));
+    assert_eq!(deck.view, View::Map);
+    assert_eq!(deck.view_state.map(|v| v.zoom), Some(3.0));
+    assert!(
+        matches!(deck.cameras.get("inset"), Some(AnyViewState::Orthographic(s)) if s.target == [5.0, 6.0, 0.0])
+    );
+    // One full size view stays a plain deck
+    let spec = json!({"views": [{"@@type": "MapView", "id": "main"}], "initialViewState": {"zoom": 2}, "layers": []});
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert!(deck.views.is_empty());
+    assert_eq!(deck.view_state.map(|v| v.zoom), Some(2.0));
 }

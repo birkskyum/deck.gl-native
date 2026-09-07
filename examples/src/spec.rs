@@ -5,7 +5,7 @@
 
 use std::error::Error;
 
-use deck_gl::{AnyViewState, Layer, LightingEffect, View, ViewState};
+use deck_gl::{AnyViewState, DeckView, Layer, LightingEffect, View, ViewState};
 use deck_gl_json::JsonConverter;
 
 use crate::scene;
@@ -41,6 +41,9 @@ pub struct Scene {
     /// The kind of view, and its camera when the description is not a map
     pub view: View,
     pub camera: Option<AnyViewState>,
+    /// Several views with their rectangles and cameras, when the description has them
+    pub views: Vec<DeckView>,
+    pub cameras: std::collections::HashMap<String, AnyViewState>,
 }
 
 /// The built-in scene, or the description named by `DECKGL_JSON`.
@@ -59,6 +62,8 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
                 repeat: json.repeat,
                 view: json.view,
                 camera: json.camera,
+                views: json.views,
+                cameras: json.cameras,
             })
         }
         _ => Ok(Scene {
@@ -68,6 +73,23 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
             repeat: true,
             view: View::Map,
             camera: None,
+            views: Vec::new(),
+            cameras: Default::default(),
         }),
+    }
+}
+
+/// Apply a scene's views and cameras to a deck (single view decks need nothing).
+pub fn apply_views(
+    deck: &mut deck_gl::Deck,
+    views: &[DeckView],
+    cameras: &std::collections::HashMap<String, AnyViewState>,
+) {
+    if views.is_empty() {
+        return;
+    }
+    deck.set_views(views.to_vec());
+    for (id, camera) in cameras {
+        deck.set_view_state_for(id, *camera);
     }
 }

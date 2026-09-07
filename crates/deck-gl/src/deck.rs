@@ -11,7 +11,9 @@ use crate::layer::{
 use crate::lighting::LightingEffect;
 use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::Viewport;
-use crate::views::{AnyViewState, View};
+use std::collections::HashMap;
+
+use crate::views::{AnyViewState, DeckView, LayerFilter, View, ViewRect};
 use crate::{DeckError, Result};
 
 /// Camera state for the default map view. Mirrors deck.gl's `MapViewState`.
@@ -90,6 +92,8 @@ pub struct PickingInfo {
     pub pixel: [f64; 2],
     /// The pixel unprojected onto the ground plane, as lng, lat, 0
     pub coordinate: [f64; 3],
+    /// Id of the view the pixel is in (`"default"` with a single view)
+    pub view_id: String,
 }
 
 /// Offscreen attachments for the picking pass.
@@ -121,6 +125,15 @@ pub struct Deck {
     /// The view state of the current view; mirrors `view_state` for a map view
     camera: AnyViewState,
     viewport: Viewport,
+    /// Several views in sub rectangles of the canvas; empty for the single full size view
+    views: Vec<DeckView>,
+    /// Cameras of `views` by view id
+    cameras: HashMap<String, AnyViewState>,
+    layer_filter: Option<LayerFilter>,
+    /// Size of the attachments of the last render, to clamp view rectangles
+    attachment_size: Option<(u32, u32)>,
+    /// Viewport of the view picked last, for the unprojection of the hit
+    pick_viewport: Option<Viewport>,
     external_viewport: bool,
     picking: Option<PickingTarget>,
     repeat: bool,
@@ -167,6 +180,11 @@ impl Deck {
             view_state: props.view_state,
             camera,
             viewport,
+            views: Vec::new(),
+            cameras: HashMap::new(),
+            layer_filter: None,
+            attachment_size: None,
+            pick_viewport: None,
             external_viewport: false,
             picking: None,
             repeat: props.repeat,
@@ -200,7 +218,7 @@ impl Deck {
         self.width = width;
         self.height = height;
         if !self.external_viewport {
-            self.viewport = self.view.make_viewport(&self.camera, width as f64, height as f64);
+            self.refresh_viewport();
         }
     }
 
@@ -218,31 +236,20 @@ impl Deck {
             View::Globe(_) => self.camera = AnyViewState::Globe(view_state),
             _ => {}
         }
+        self.sync_first_view_camera();
         self.external_viewport = false;
-        self.viewport = self
-            .view
-            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+        self.refresh_viewport();
     }
 
     /// Switch the kind of camera (map, orthographic, orbit or first person). The camera keeps
     /// its state when it matches the new view, otherwise the view's default state is used.
     pub fn set_view(&mut self, view: View) {
         self.view = view;
-        let matches = matches!(
-            (&view, &self.camera),
-            (View::Map, AnyViewState::Map(_))
-                | (View::Globe(_), AnyViewState::Globe(_))
-                | (View::Orthographic(_), AnyViewState::Orthographic(_))
-                | (View::Orbit(_), AnyViewState::Orbit(_))
-                | (View::FirstPerson(_), AnyViewState::FirstPerson(_))
-        );
-        if !matches {
+        if !same_kind(&view, &self.camera) {
             self.camera = view.default_view_state();
         }
         self.external_viewport = false;
-        self.viewport = self
-            .view
-            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+        self.refresh_viewport();
     }
 
     pub fn view(&self) -> View {
@@ -256,15 +263,127 @@ impl Deck {
             self.view_state = view_state;
         }
         self.camera = state;
+        self.sync_first_view_camera();
         self.external_viewport = false;
-        self.viewport = self
-            .view
-            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+        self.refresh_viewport();
     }
 
     /// The camera state of the current view.
     pub fn any_view_state(&self) -> AnyViewState {
         self.camera
+    }
+
+    /// Render into several views, each in its own rectangle of the canvas (deck.gl's `views`).
+    /// Views draw in order, later ones over earlier ones. The first view becomes the deck's
+    /// main view, so [`Deck::set_view_state`] and picking without a view keep working. An
+    /// empty list returns to the single full size view.
+    pub fn set_views(&mut self, views: Vec<DeckView>) {
+        for view in &views {
+            let camera = self
+                .cameras
+                .entry(view.id.clone())
+                .or_insert_with(|| view.view.default_view_state());
+            let matches = same_kind(&view.view, camera);
+            if !matches {
+                *camera = view.view.default_view_state();
+            }
+        }
+        self.cameras.retain(|id, _| views.iter().any(|v| &v.id == id));
+        self.views = views;
+        if let Some(first) = self.views.first() {
+            self.view = first.view;
+            self.camera = self.cameras[&first.id];
+            if let AnyViewState::Map(vs) | AnyViewState::Globe(vs) = self.camera {
+                self.view_state = vs;
+            }
+        }
+        self.external_viewport = false;
+        self.refresh_viewport();
+    }
+
+    pub fn views(&self) -> &[DeckView] {
+        &self.views
+    }
+
+    /// Move the camera of the view with `id`; ignored for unknown views or states of another
+    /// kind than the view.
+    pub fn set_view_state_for(&mut self, id: &str, state: AnyViewState) {
+        let Some(view) = self.views.iter().find(|v| v.id == id) else {
+            return;
+        };
+        if !same_kind(&view.view, &state) {
+            return;
+        }
+        self.cameras.insert(id.to_string(), state);
+        if self.views.first().is_some_and(|v| v.id == id) {
+            self.camera = state;
+            if let AnyViewState::Map(vs) | AnyViewState::Globe(vs) = state {
+                self.view_state = vs;
+            }
+            self.transition = None;
+        }
+        self.external_viewport = false;
+        self.refresh_viewport();
+    }
+
+    fn sync_first_view_camera(&mut self) {
+        if let Some(first) = self.views.first() {
+            if same_kind(&first.view, &self.camera) {
+                self.cameras.insert(first.id.clone(), self.camera);
+            }
+        }
+    }
+
+    pub fn view_state_for(&self, id: &str) -> Option<AnyViewState> {
+        self.cameras.get(id).copied()
+    }
+
+    /// Restrict which layers each view draws, deck.gl's `layerFilter`.
+    pub fn set_layer_filter(&mut self, filter: Option<LayerFilter>) {
+        self.layer_filter = filter;
+    }
+
+    /// Every view's rectangle and viewport, in drawing order. A single entry for the plain
+    /// deck; views whose rectangle has no area are left out.
+    pub fn viewports(&self) -> Vec<(ViewRect, Viewport)> {
+        if self.views.is_empty() {
+            let rect = ViewRect {
+                x: 0.0,
+                y: 0.0,
+                width: self.width as f64,
+                height: self.height as f64,
+                padding: None,
+            };
+            return vec![(rect, self.viewport.clone())];
+        }
+        let (w, h) = (self.width as f64, self.height as f64);
+        self.views
+            .iter()
+            .filter_map(|view| {
+                let camera = self.cameras.get(&view.id)?;
+                view.make_viewport(camera, w, h)
+                    .map(|viewport| (view.rect(w, h), viewport))
+            })
+            .collect()
+    }
+
+    /// The view containing a canvas pixel, topmost first.
+    fn view_at(&self, x: f64, y: f64) -> Option<(ViewRect, Viewport)> {
+        self.viewports()
+            .into_iter()
+            .rev()
+            .find(|(rect, _)| rect.contains(x, y))
+    }
+
+    /// Recompute the main viewport from the view kind, camera and size (or the first view).
+    fn refresh_viewport(&mut self) {
+        let (w, h) = (self.width as f64, self.height as f64);
+        self.viewport = match self.views.first() {
+            Some(first) => first
+                .make_viewport(&self.camera, w, h)
+                .unwrap_or_else(|| self.view.make_viewport(&self.camera, w, h)),
+            None => self.view.make_viewport(&self.camera, w, h),
+        };
     }
 
     /// Animate the map camera to `end` with deck.gl's transition props, for decks driven
@@ -307,10 +426,9 @@ impl Deck {
             View::Globe(_) => AnyViewState::Globe(view),
             _ => AnyViewState::Map(view),
         };
+        self.sync_first_view_camera();
         self.external_viewport = false;
-        self.viewport = self
-            .view
-            .make_viewport(&self.camera, self.width as f64, self.height as f64);
+        self.refresh_viewport();
         if transition.is_done(now) {
             self.transition = None;
         }
@@ -527,6 +645,23 @@ impl Deck {
             return Ok(None);
         }
         self.update()?;
+        // With several views, pick in the topmost view under the pixel with its own viewport
+        let (view_rect, view_id) = match (self.views.is_empty(), self.view_at(x, y)) {
+            (false, Some((rect, viewport))) => {
+                let id = viewport.id.clone();
+                self.ctx.uniform_slot = 0;
+                for (index, entry) in self.layers.iter_mut().enumerate() {
+                    self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
+                    if entry.initialized && entry.layer.props().visible {
+                        entry.layer.update(&self.ctx, &viewport)?;
+                    }
+                }
+                self.pick_viewport = Some(viewport);
+                (Some(rect), id)
+            }
+            (false, None) => return Ok(None),
+            (true, _) => (None, "default".to_string()),
+        };
         self.ensure_picking_target(width, height);
 
         let pickable: Vec<usize> = self
@@ -534,6 +669,11 @@ impl Deck {
             .iter()
             .enumerate()
             .filter(|(_, e)| e.initialized && e.layer.props().visible && e.layer.props().pickable)
+            .filter(|(_, e)| {
+                self.layer_filter
+                    .as_ref()
+                    .is_none_or(|f| f.allows(e.layer.id(), &view_id))
+            })
             .map(|(i, _)| i)
             .collect();
         if pickable.is_empty() {
@@ -578,6 +718,14 @@ impl Deck {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            if let Some(rect) = view_rect {
+                let vx = ((rect.x * dpr).round() as u32).min(width);
+                let vy = ((rect.y * dpr).round() as u32).min(height);
+                let vw = ((rect.width * dpr).round() as u32).min(width - vx);
+                let vh = ((rect.height * dpr).round() as u32).min(height - vy);
+                pass.set_viewport(vx as f32, vy as f32, vw.max(1) as f32, vh.max(1) as f32, 0.0, 1.0);
+                pass.set_scissor_rect(vx, vy, vw.max(1), vh.max(1));
+            }
             // Alpha carries the layer: slot 1 for the first pickable layer, and so on.
             for (slot, &i) in pickable.iter().enumerate() {
                 let alpha = (slot + 1) as f64 / 255.0;
@@ -652,12 +800,17 @@ impl Deck {
         let Some(index) = decode_picking_color([pixel[0], pixel[1], pixel[2]]) else {
             return Ok(None);
         };
-        let coordinate = self.viewport.unproject(glam::DVec2::new(x, y), None, true, None);
+        let (viewport, local) = match (&self.pick_viewport, view_rect) {
+            (Some(viewport), Some(rect)) => (viewport, glam::DVec2::new(x - rect.x, y - rect.y)),
+            _ => (&self.viewport, glam::DVec2::new(x, y)),
+        };
+        let coordinate = viewport.unproject(local, None, true, None);
         Ok(Some(PickingInfo {
             layer_id: self.layers[layer_index].layer.id().to_string(),
             index,
             pixel: [x, y],
             coordinate: [coordinate.x, coordinate.y, coordinate.z],
+            view_id,
         }))
     }
 
@@ -733,28 +886,68 @@ impl Deck {
     /// Encode all visible layers into a render pass whose attachments match the deck's
     /// [`RenderTarget`]. The pass viewport is expected to cover the full deck size.
     pub fn draw(&mut self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        self.ctx.uniform_slot = 0;
-        for (index, entry) in self.layers.iter_mut().enumerate() {
-            self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
-            if entry.initialized && entry.layer.props().visible {
-                entry.layer.draw(&self.ctx, pass)?;
+        let dpr = self.ctx.device_pixel_ratio as f64;
+        let (target_w, target_h) = self.attachment_size.unwrap_or((
+            ((self.width as f64 * dpr).round() as u32).max(1),
+            ((self.height as f64 * dpr).round() as u32).max(1),
+        ));
+        let views = self.viewports();
+        let multi_view = !self.views.is_empty();
+        let mut slot = 0usize;
+        for (view_index, (rect, viewport)) in views.iter().enumerate() {
+            let view_id = if multi_view {
+                self.views[view_index].id.clone()
+            } else {
+                "default".to_string()
+            };
+            if multi_view {
+                // Restrict drawing to the view's rectangle, in physical pixels
+                let x = ((rect.x * dpr).round() as u32).min(target_w);
+                let y = ((rect.y * dpr).round() as u32).min(target_h);
+                let w = ((rect.width * dpr).round() as u32).min(target_w - x);
+                let h = ((rect.height * dpr).round() as u32).min(target_h - y);
+                if w == 0 || h == 0 {
+                    continue;
+                }
+                pass.set_viewport(x as f32, y as f32, w as f32, h as f32, 0.0, 1.0);
+                pass.set_scissor_rect(x, y, w, h);
             }
-        }
-        if self.repeat {
-            // Extra world copies: every layer updates its uniforms for the shifted viewport
-            // in its own uniform slot, so the copies do not overwrite each other's uniforms.
-            let copies = self.viewport.sub_viewports();
-            for (slot, viewport) in copies.iter().filter(|v| v.world_offset != 0).enumerate() {
-                self.ctx.uniform_slot = slot + 1;
+            // The first view was updated by `update`; every other view (and world copy) gets
+            // its own uniform slot so the draws do not overwrite each other's uniforms
+            let mut copies = vec![viewport.clone()];
+            if self.repeat {
+                copies.extend(
+                    viewport
+                        .sub_viewports()
+                        .into_iter()
+                        .filter(|v| v.world_offset != 0),
+                );
+            }
+            for copy in &copies {
+                let needs_update = slot != 0;
+                self.ctx.uniform_slot = slot;
                 for (index, entry) in self.layers.iter_mut().enumerate() {
                     self.ctx.layer_index = index as u32 * LAYER_INDEX_STRIDE;
-                    if entry.initialized && entry.layer.props().visible {
-                        entry.layer.update(&self.ctx, viewport)?;
-                        entry.layer.draw(&self.ctx, pass)?;
+                    if !entry.initialized || !entry.layer.props().visible {
+                        continue;
                     }
+                    if let Some(filter) = &self.layer_filter {
+                        if !filter.allows(entry.layer.id(), &view_id) {
+                            continue;
+                        }
+                    }
+                    if needs_update {
+                        entry.layer.update(&self.ctx, copy)?;
+                    }
+                    entry.layer.draw(&self.ctx, pass)?;
                 }
+                slot += 1;
             }
-            self.ctx.uniform_slot = 0;
+        }
+        self.ctx.uniform_slot = 0;
+        if multi_view {
+            pass.set_viewport(0.0, 0.0, target_w as f32, target_h as f32, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, target_w, target_h);
         }
         Ok(())
     }
@@ -844,6 +1037,8 @@ impl Deck {
         depth_load: wgpu::LoadOp<f32>,
     ) -> Result<()> {
         self.update()?;
+        let size = color_view.texture().size();
+        self.attachment_size = Some((size.width, size.height));
         let sample_count = self.ctx.target.sample_count;
         let (msaa_color_view, msaa_depth_view) = if sample_count > 1 {
             if matches!(color_load, wgpu::LoadOp::Load) {
@@ -961,6 +1156,18 @@ impl Snapshot {
         image::save_buffer(path, &self.rgba, self.width, self.height, image::ColorType::Rgba8)
             .map_err(|e| DeckError::Render(format!("cannot write {}: {e}", path.display())))
     }
+}
+
+/// Whether a view kind and a camera state belong together.
+fn same_kind(view: &View, state: &AnyViewState) -> bool {
+    matches!(
+        (view, state),
+        (View::Map, AnyViewState::Map(_))
+            | (View::Globe(_), AnyViewState::Globe(_))
+            | (View::Orthographic(_), AnyViewState::Orthographic(_))
+            | (View::Orbit(_), AnyViewState::Orbit(_))
+            | (View::FirstPerson(_), AnyViewState::FirstPerson(_))
+    )
 }
 
 /// Whether an initialized layer can keep its models when it takes over these props. Picking

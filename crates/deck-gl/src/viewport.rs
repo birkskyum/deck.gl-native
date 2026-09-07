@@ -113,10 +113,22 @@ pub struct Viewport {
     /// Depth of the viewport centre in pixel space, the default depth `unproject` uses when
     /// none is given (orbit viewports, deck.gl's `projectedCenter`)
     pub projected_center_depth: Option<f64>,
+    /// Padding in pixels that shifted the projection centre, see [`Viewport::with_padding`]
+    pub padding: Option<Padding>,
     /// A globe viewport: positions project onto a sphere of [`GLOBE_RADIUS`] common units
     pub globe: bool,
     /// Degrees per mesh segment when flat geometry is turned into 3D on the globe
     pub resolution: f64,
+}
+
+/// Padding around a viewport in pixels: the projection centre moves to the centre of the
+/// unpadded area, deck.gl's view `padding`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Padding {
+    pub left: f64,
+    pub right: f64,
+    pub top: f64,
+    pub bottom: f64,
 }
 
 /// Radius of the globe in common units.
@@ -543,6 +555,7 @@ impl Viewport {
             far: projection_parameters.far,
             world_offset: 0,
             projected_center_depth: None,
+            padding: None,
             globe: false,
             resolution: 0.0,
         }
@@ -622,6 +635,7 @@ impl Viewport {
             far: opts.far,
             world_offset: 0,
             projected_center_depth: None,
+            padding: None,
             globe: false,
             resolution: 0.0,
         }
@@ -696,6 +710,25 @@ impl Viewport {
         viewport.pixel_projection_matrix = viewport_matrix * viewport.view_projection_matrix;
         viewport.pixel_unprojection_matrix = viewport.pixel_projection_matrix.inverse();
         viewport
+    }
+
+    /// Shift the projection centre for a padded view: the centre of the remaining area becomes
+    /// the centre of projection, as deck.gl's `createProjectionMatrix` does with `padding`.
+    pub fn with_padding(mut self, padding: Padding) -> Self {
+        let offset_x =
+            ((padding.left + self.width - padding.right) / 2.0).clamp(0.0, self.width) - self.width / 2.0;
+        let offset_y =
+            ((padding.top + self.height - padding.bottom) / 2.0).clamp(0.0, self.height) - self.height / 2.0;
+        // Clip space shift: the third column of the projection matrix
+        self.projection_matrix.z_axis.x -= offset_x * 2.0 / self.width;
+        self.projection_matrix.z_axis.y += offset_y * 2.0 / self.height;
+        self.padding = Some(padding);
+        self.view_projection_matrix = self.projection_matrix * self.view_matrix;
+        let viewport_matrix = DMat4::from_scale(DVec3::new(self.width / 2.0, -self.height / 2.0, 1.0))
+            * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0));
+        self.pixel_projection_matrix = viewport_matrix * self.view_projection_matrix;
+        self.pixel_unprojection_matrix = self.pixel_projection_matrix.inverse();
+        self
     }
 
     /// The longitude, latitude and zoom that keep the globe under a dragged pointer: port of
@@ -1300,6 +1333,26 @@ mod tests {
             lat2 < 50.0 && zoom2 > 1.0,
             "moving south towards the equator raises the zoom: {lat2} {zoom2}"
         );
+    }
+
+    #[test]
+    fn padding_moves_the_projection_centre() {
+        let v = sf().with_padding(Padding {
+            left: 200.0,
+            right: 0.0,
+            top: 0.0,
+            bottom: 0.0,
+        });
+        // The map centre now sits in the middle of the unpadded right part
+        let c = v.project(DVec3::new(v.longitude, v.latitude, 0.0), true);
+        assert!(
+            (c.x - (200.0 + (v.width - 200.0) / 2.0)).abs() < 1e-6,
+            "{c:?} of width {}",
+            v.width
+        );
+        assert!((c.y - v.height / 2.0).abs() < 1e-6, "{c:?}");
+        let back = v.unproject(DVec2::new(c.x, c.y), None, true, None);
+        assert!((back.x - v.longitude).abs() < 1e-9 && (back.y - v.latitude).abs() < 1e-9);
     }
 
     fn sf() -> Viewport {
