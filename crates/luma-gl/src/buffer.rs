@@ -27,9 +27,9 @@ pub fn create_vertex_buffer(device: &wgpu::Device, label: &str, contents: &[u8])
     })
 }
 
-/// Upload vertex data into `existing` when it has exactly the size the data needs, and
-/// create a buffer otherwise. Writing into a buffer in use by an earlier frame is safe: the
-/// queue orders the write after that work.
+/// Upload vertex data into `existing` when it is large enough, and create a buffer
+/// otherwise. Writing into a buffer in use by an earlier frame is safe: the queue orders the
+/// write after that work.
 pub fn write_or_create_vertex_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -37,15 +37,53 @@ pub fn write_or_create_vertex_buffer(
     label: &str,
     contents: &[u8],
 ) -> wgpu::Buffer {
+    write_or_grow_vertex_buffer(device, queue, existing, label, contents, 0)
+}
+
+/// Like [`write_or_create_vertex_buffer`], but a buffer created here gets at least
+/// `capacity` bytes, so later writes of more rows can go into the same buffer.
+pub fn write_or_grow_vertex_buffer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    existing: Option<&wgpu::Buffer>,
+    label: &str,
+    contents: &[u8],
+    capacity: u64,
+) -> wgpu::Buffer {
     let bytes = padded(contents);
     if let Some(buffer) = existing {
-        if buffer.size() == bytes.len() as u64 {
+        if buffer.size() >= bytes.len() as u64 {
             crate::stats::count_upload(contents.len());
             queue.write_buffer(buffer, 0, &bytes);
             return buffer.clone();
         }
     }
-    create_vertex_buffer(device, label, contents)
+    if capacity <= bytes.len() as u64 {
+        return create_vertex_buffer(device, label, contents);
+    }
+    crate::stats::count_upload(contents.len());
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: capacity.div_ceil(4) * 4,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, &bytes);
+    buffer
+}
+
+/// Write `contents` at a byte `offset` of a vertex buffer. The offset and the length must be
+/// multiples of 4, as wgpu requires; nothing is written otherwise.
+pub fn write_vertex_buffer_range(queue: &wgpu::Queue, buffer: &wgpu::Buffer, offset: u64, contents: &[u8]) {
+    if contents.is_empty()
+        || !offset.is_multiple_of(4)
+        || !contents.len().is_multiple_of(4)
+        || offset + contents.len() as u64 > buffer.size()
+    {
+        return;
+    }
+    crate::stats::count_upload(contents.len());
+    queue.write_buffer(buffer, offset, contents);
 }
 
 /// Contents padded to what wgpu accepts: at least 16 bytes and a multiple of 4.

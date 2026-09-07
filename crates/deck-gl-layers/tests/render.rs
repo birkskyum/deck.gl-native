@@ -1621,6 +1621,134 @@ fn frame_stats_count_layers_draws_and_uploads() {
 }
 
 #[test]
+fn changed_rows_are_written_in_place_and_appends_grow_buffers() {
+    use std::sync::Mutex;
+    let Some(ctx) = context() else { return };
+    // Ten points in a row, 6 pixels apart, read through function accessors over shared state
+    let spacing = 0.0007 / 16.0 * 6.0;
+    // A degree of latitude spans more pixels than one of longitude at this latitude
+    let spacing_y = spacing * CENTER[1].to_radians().cos();
+    let positions: Arc<Mutex<Vec<[f64; 3]>>> = Arc::new(Mutex::new(
+        (0..10)
+            .map(|i| [CENTER[0] + (i as f64 - 4.5) * spacing, CENTER[1], 0.0])
+            .collect(),
+    ));
+    let colors: Arc<Mutex<Vec<[u8; 4]>>> = Arc::new(Mutex::new(vec![[255, 0, 0, 255]; 10]));
+    let get_position = {
+        let positions = positions.clone();
+        Accessor::func(move |i| positions.lock().unwrap()[i])
+    };
+    let get_fill_color = {
+        let colors = colors.clone();
+        Accessor::func(move |i| colors.lock().unwrap()[i])
+    };
+    let props = |data: LayerData| ScatterplotLayerProps {
+        base: LayerProps::new("points"),
+        data,
+        get_position: get_position.clone(),
+        get_fill_color: get_fill_color.clone(),
+        get_radius: Accessor::Constant(2.0),
+        radius_units: Unit::Pixels,
+        ..Default::default()
+    };
+    let pixel_x = |i: usize| (SIZE as f64 / 2.0 + (i as f64 - 4.5) * 6.0).round() as u32;
+    // Appended rows go on a line below, centred
+    let appended_x = |i: usize| (SIZE as f64 / 2.0 + (i as f64 - 12.0) * 6.0).round() as u32;
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(ScatterplotLayer::new(props(LayerData::with_length(10))))],
+    );
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(pixel_x(0), SIZE / 2), [255, 0, 0, 255]);
+    // Recolour the first five rows: only those rows are uploaded, for every attribute
+    for c in colors.lock().unwrap().iter_mut().take(5) {
+        *c = [0, 0, 255, 255];
+    }
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(10).with_changed_rows(0..5),
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    let five_rows = deck.stats().uploaded_bytes;
+    assert!(five_rows > 0);
+    assert_eq!(shot.pixel(pixel_x(0), SIZE / 2), [0, 0, 255, 255]);
+    assert_eq!(shot.pixel(pixel_x(4), SIZE / 2), [0, 0, 255, 255]);
+    assert_eq!(shot.pixel(pixel_x(5), SIZE / 2), [255, 0, 0, 255]);
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(10).with_changed_rows(0..10),
+    )))]);
+    deck.snapshot(None).unwrap();
+    assert_eq!(
+        deck.stats().uploaded_bytes,
+        five_rows * 2,
+        "all rows cost twice five rows"
+    );
+    // Move a point in place
+    positions.lock().unwrap()[9][1] = CENTER[1] + spacing_y;
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(10).with_changed_rows(9..10),
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, five_rows / 5);
+    assert_eq!(
+        shot.pixel(pixel_x(9), SIZE / 2),
+        [0, 0, 0, 0],
+        "the point moved up"
+    );
+    assert_eq!(shot.pixel(pixel_x(9), SIZE / 2 - 6), [255, 0, 0, 255]);
+    // Append two rows: the buffers are too small, so they are rebuilt with headroom
+    {
+        let mut positions = positions.lock().unwrap();
+        let mut colors = colors.lock().unwrap();
+        for i in 10..12 {
+            positions.push([
+                CENTER[0] + (i as f64 - 12.0) * spacing,
+                CENTER[1] - spacing_y,
+                0.0,
+            ]);
+            colors.push([0, 255, 0, 255]);
+        }
+    }
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(12).with_changed_rows(10..12),
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, five_rows / 5 * 12);
+    assert_eq!(shot.pixel(appended_x(10), SIZE / 2 + 6), [0, 255, 0, 255]);
+    // The next appends fit into the grown buffers
+    {
+        let mut positions = positions.lock().unwrap();
+        let mut colors = colors.lock().unwrap();
+        for i in 12..14 {
+            positions.push([
+                CENTER[0] + (i as f64 - 12.0) * spacing,
+                CENTER[1] - spacing_y,
+                0.0,
+            ]);
+            colors.push([0, 255, 0, 255]);
+        }
+    }
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(14).with_changed_rows(12..14),
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, five_rows / 5 * 2);
+    assert_eq!(shot.pixel(appended_x(13), SIZE / 2 + 6), [0, 255, 0, 255]);
+    assert_eq!(
+        shot.pixel(pixel_x(0), SIZE / 2),
+        [0, 0, 255, 255],
+        "earlier rows kept"
+    );
+    // Removing rows from the end needs no upload
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
+        LayerData::with_length(12).with_changed_rows(12..12),
+    )))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(deck.stats().uploaded_bytes, 0);
+    assert_eq!(shot.pixel(appended_x(13), SIZE / 2 + 6), [0, 0, 0, 0]);
+    assert_eq!(shot.pixel(appended_x(11), SIZE / 2 + 6), [0, 255, 0, 255]);
+}
+
+#[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };
     let props = |radius_scale: f32, color: [u8; 4]| ScatterplotLayerProps {

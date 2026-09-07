@@ -6,6 +6,7 @@
 //! batch, or a function of the row index. Column accessors read Arrow buffers directly,
 //! which is the path GeoArrow data takes with no per-row callbacks.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use arrow_array::cast::AsArray;
@@ -77,6 +78,11 @@ impl<T: Clone + std::fmt::Debug> std::fmt::Debug for Accessor<T> {
 }
 
 /// The data a layer renders: an optional Arrow record batch and the number of objects.
+///
+/// Data is compared by column identity, so sending the same batch again costs nothing.
+/// When only some rows changed, [`LayerData::with_changed_rows`] tells the layer to rewrite
+/// those rows in place instead of rebuilding every attribute; appended rows grow the buffers
+/// with headroom so streams of appends stay cheap.
 #[derive(Clone, Debug, Default)]
 pub struct LayerData {
     pub batch: Option<RecordBatch>,
@@ -84,13 +90,24 @@ pub struct LayerData {
     /// For sub layers of a composite layer: the source row of each item, so picking and
     /// highlighting report the parent's rows. Mirrors deck.gl's `__source.index`.
     pub source_rows: Option<Arc<Vec<u32>>>,
+    /// The rows that differ from the data the layer had before, when known. Rows outside the
+    /// range are unchanged, so attributes are only rewritten for these rows. Mirrors deck.gl's
+    /// `_dataDiff`.
+    pub changed_rows: Option<Range<usize>>,
+    /// The row of the original data that row 0 of a slice maps to, so function accessors and
+    /// row indices see the original row numbers.
+    pub row_offset: usize,
 }
 
 /// Batches compare by column identity first, so re-sending the same data is cheap, and by
-/// value otherwise.
+/// value otherwise. Data that names changed rows never compares equal: the rows are meant to
+/// be written.
 impl PartialEq for LayerData {
     fn eq(&self, other: &Self) -> bool {
-        if self.length != other.length {
+        if self.changed_rows.is_some() || other.changed_rows.is_some() {
+            return false;
+        }
+        if self.length != other.length || self.row_offset != other.row_offset {
             return false;
         }
         let rows_equal = match (&self.source_rows, &other.source_rows) {
@@ -123,6 +140,8 @@ impl LayerData {
             length: batch.num_rows(),
             batch: Some(batch),
             source_rows: None,
+            changed_rows: None,
+            row_offset: 0,
         }
     }
 
@@ -132,6 +151,33 @@ impl LayerData {
             batch: None,
             length,
             source_rows: None,
+            changed_rows: None,
+            row_offset: 0,
+        }
+    }
+
+    /// Mark `rows` as the only rows that differ from the data the layer rendered before.
+    /// The range may extend past the previous length to append rows. Function accessors are
+    /// called for the changed rows only, so they must still be the same functions.
+    pub fn with_changed_rows(mut self, rows: Range<usize>) -> Self {
+        self.changed_rows = Some(rows);
+        self
+    }
+
+    /// The rows in `range`, clamped to the data. Arrow columns are sliced without copying and
+    /// function accessors keep seeing the original row numbers.
+    pub fn slice(&self, range: Range<usize>) -> Self {
+        let end = range.end.min(self.length);
+        let start = range.start.min(end);
+        Self {
+            batch: self.batch.as_ref().map(|b| b.slice(start, end - start)),
+            length: end - start,
+            source_rows: self
+                .source_rows
+                .as_ref()
+                .map(|rows| Arc::new(rows.get(start..end).map(<[u32]>::to_vec).unwrap_or_default())),
+            changed_rows: None,
+            row_offset: self.row_offset + start,
         }
     }
 
@@ -144,8 +190,11 @@ impl LayerData {
     /// The row reported by picking for item `index`.
     pub fn source_row(&self, index: usize) -> u32 {
         match &self.source_rows {
-            Some(rows) => rows.get(index).copied().unwrap_or(index as u32),
-            None => index as u32,
+            Some(rows) => rows
+                .get(index)
+                .copied()
+                .unwrap_or((self.row_offset + index) as u32),
+            None => (self.row_offset + index) as u32,
         }
     }
 
@@ -219,7 +268,7 @@ pub fn resolve_with<T: Clone + Send>(
 ) -> Result<Vec<T>> {
     match accessor {
         Accessor::Constant(v) => Ok(vec![v.clone(); data.len()]),
-        Accessor::Func(f) => Ok(resolve_function(f.as_ref(), data.len())),
+        Accessor::Func(f) => Ok(resolve_function(f.as_ref(), data.row_offset, data.len())),
         Accessor::Column(name) => {
             let column = data.column(name)?;
             let values = from_column(column)?;
@@ -261,12 +310,16 @@ pub fn resolve_positions(data: &LayerData, accessor: &Accessor<Position>) -> Res
 const PARALLEL_ROWS: usize = 16_384;
 
 /// Evaluate a function accessor for every row, in parallel for large data.
-fn resolve_function<T: Clone + Send>(f: &(dyn Fn(usize) -> T + Send + Sync), len: usize) -> Vec<T> {
+fn resolve_function<T: Clone + Send>(
+    f: &(dyn Fn(usize) -> T + Send + Sync),
+    offset: usize,
+    len: usize,
+) -> Vec<T> {
     if len < PARALLEL_ROWS {
-        return (0..len).map(f).collect();
+        return (offset..offset + len).map(f).collect();
     }
     use rayon::prelude::*;
-    (0..len).into_par_iter().map(f).collect()
+    (offset..offset + len).into_par_iter().map(f).collect()
 }
 
 /// The WKB bytes of every row of a binary column, when the column is one.
@@ -596,6 +649,36 @@ mod tests {
             vec![0.0, 1.0]
         );
         assert!(resolve_f32(&data, &Accessor::column("missing")).is_err());
+    }
+
+    #[test]
+    fn slices_keep_original_row_numbers() {
+        let data = LayerData::from_batch(batch());
+        let slice = data.slice(1..5);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice.row_offset, 1);
+        assert_eq!(slice.source_row(0), 1);
+        assert_eq!(
+            resolve_positions(&slice, &Accessor::column("pos")).unwrap(),
+            vec![[3.0, 4.0, 0.0]]
+        );
+        assert_eq!(
+            resolve_colors(&slice, &Accessor::column("color")).unwrap(),
+            vec![[0, 255, 0, 255]]
+        );
+        assert_eq!(
+            resolve_f32(&slice, &Accessor::func(|i| i as f32 * 10.0)).unwrap(),
+            vec![10.0]
+        );
+        let mapped = LayerData {
+            source_rows: Some(Arc::new(vec![7, 9])),
+            ..data.clone()
+        };
+        assert_eq!(mapped.slice(1..2).source_row(0), 9);
+        assert!(data.slice(3..9).is_empty());
+        // A hint always counts as a change, so layers apply it
+        assert_ne!(data.clone().with_changed_rows(0..1), data);
+        assert_eq!(data.clone(), data);
     }
 
     #[test]

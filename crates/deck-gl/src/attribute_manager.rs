@@ -2,13 +2,17 @@
 //! attribute feeds which field, at which shader location and byte offset) and the manager
 //! builds the buffers, uploads only those whose accessor or data changed, packs interleaved
 //! buffers and uploads Arrow columns that already have the GPU layout without conversion.
+//! Data that names its changed rows ([`LayerData::changed_rows`]) is written in place for
+//! those rows only, and buffers grow with headroom when rows are appended.
 
 use std::collections::HashMap;
 
 use arrow_array::cast::AsArray;
 use arrow_array::types::{Float32Type, UInt8Type};
 use arrow_array::Array;
-use luma_gl::buffer::write_or_create_vertex_buffer;
+use luma_gl::buffer::{
+    write_or_create_vertex_buffer, write_or_grow_vertex_buffer, write_vertex_buffer_range,
+};
 use luma_gl::{Model, VertexBufferLayout};
 use wgpu::VertexFormat;
 
@@ -468,6 +472,33 @@ impl AttributeManager {
         self.update_impl(device, queue, models, data, sources, Some(expand))
     }
 
+    /// The rows to write in place, when the data names its changed rows and everything else
+    /// allows it: the same row mapping as before, no expansion, no transitions and a length
+    /// that did not shrink below the start of the range.
+    fn incremental_rows(&self, data: &LayerData, expand: Option<&[u32]>) -> Option<std::ops::Range<usize>> {
+        let rows = data.changed_rows.clone()?;
+        let previous = self.previous_data.as_ref()?;
+        if self.force || expand.is_some() || !self.transitions.is_empty() || self.gpu.is_empty() {
+            return None;
+        }
+        let same_mapping = match (&previous.source_rows, &data.source_rows) {
+            (None, None) => true,
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            _ => false,
+        };
+        if !same_mapping || previous.row_offset != data.row_offset {
+            return None;
+        }
+        // Rows before the range must exist in both, appended rows must be in the range
+        if rows.start > previous.len() || rows.start > data.len() {
+            return None;
+        }
+        if data.len() > previous.len() && rows.end < data.len() {
+            return None;
+        }
+        Some(rows.start..rows.end.min(data.len()))
+    }
+
     fn update_impl(
         &mut self,
         device: &wgpu::Device,
@@ -477,7 +508,8 @@ impl AttributeManager {
         sources: &[(&'static str, AttributeSource)],
         expand: Option<&[u32]>,
     ) -> Result<usize> {
-        let data_changed = self.force || self.previous_data.as_ref() != Some(data);
+        let incremental = self.incremental_rows(data, expand);
+        let data_changed = self.force || incremental.is_none() && self.previous_data.as_ref() != Some(data);
         let changed = |attribute: &str| -> bool {
             let now = sources
                 .iter()
@@ -543,19 +575,55 @@ impl AttributeManager {
                 self.animations.insert(name, animation);
             }
         }
+        let mut partial: HashMap<&'static str, Resolved> = HashMap::new();
         for buffer in &self.buffers {
-            if !data_changed && !buffer.fields.iter().any(|f| changed(f.attribute)) {
+            let fields_changed = buffer.fields.iter().any(|f| changed(f.attribute));
+            let existing = self.gpu.get(buffer.name);
+            let needed = data.len() as u64 * buffer.stride;
+            // Changed rows go into the buffer the model already has when they fit
+            if let (Some(rows), Some(existing), false) = (&incremental, existing, fields_changed) {
+                if existing.size() < needed {
+                    // Appends past the capacity: rebuild below with room for more
+                } else {
+                    if !rows.is_empty() {
+                        let slice = data.slice(rows.clone());
+                        let offset = rows.start as u64 * buffer.stride;
+                        let upload = |bytes: &[u8]| {
+                            write_vertex_buffer_range(queue, existing, offset, bytes);
+                            existing.clone()
+                        };
+                        build_buffer(&upload, buffer, &slice, sources, &mut partial, None)?;
+                        uploaded += 1;
+                    }
+                    continue;
+                }
+            }
+            if !data_changed && !fields_changed && incremental.is_none() {
                 continue;
             }
-            let existing = self.gpu.get(buffer.name);
-            let upload =
-                |bytes: &[u8]| write_or_create_vertex_buffer(device, queue, existing, buffer.name, bytes);
+            let capacity = match (&incremental, existing) {
+                (Some(_), Some(existing)) => needed.max(existing.size() * 2),
+                _ => 0,
+            };
+            let upload = |bytes: &[u8]| {
+                write_or_grow_vertex_buffer(device, queue, existing, buffer.name, bytes, capacity)
+            };
             let gpu_buffer = build_buffer(&upload, buffer, data, sources, &mut resolved, expand)?;
             for model in models.iter_mut() {
                 model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
             }
             self.gpu.insert(buffer.name, gpu_buffer);
             uploaded += 1;
+        }
+        // Rows written in place widen the bounds; a full resolve replaces them below
+        for (name, values) in &partial {
+            if let Resolved::Positions(positions) = values {
+                let bounds = union_bounds(
+                    self.position_bounds.get(name).copied().flatten(),
+                    parallel_bounds(positions),
+                );
+                self.position_bounds.insert(name, bounds);
+            }
         }
         for (name, values) in &resolved {
             if let Resolved::Positions(positions) = values {
@@ -577,7 +645,11 @@ impl AttributeManager {
             .iter()
             .map(|(name, source)| (*name, source.clone()))
             .collect();
-        self.previous_data = Some(data.clone());
+        // Without the hint, so the same data sent again without one changes nothing
+        self.previous_data = Some(LayerData {
+            changed_rows: None,
+            ..data.clone()
+        });
         self.force = false;
         Ok(uploaded)
     }

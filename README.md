@@ -25,7 +25,8 @@ Working today, headless and verified pixel by pixel in tests:
 - Several views per deck in sub rectangles of the canvas (`Deck::set_views`, pixel or percentage extents, padding, per view cameras, a `layerFilter`, view aware picking)
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it, with repeated world copies across the antimeridian (`DeckProps::repeat`) and `wrapLongitude` shortest paths
 - deck.gl's `project` and `project32` shader modules, picking uniforms, `LightingEffect` with ambient, directional and point lights, and a per-layer `material`
-- Arrow record batches as layer data, with column, constant and function accessors
+- Arrow record batches as layer data, with column, constant and function accessors, and
+  incremental updates that rewrite only the rows marked as changed (`LayerData::with_changed_rows`)
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`

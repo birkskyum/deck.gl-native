@@ -35,6 +35,10 @@ naga, so there are no hand-maintained `#[repr(C)]` mirrors to drift out of sync.
 **Arrow first.** `LayerData` wraps an Arrow `RecordBatch`; an `Accessor` is a constant, a
 column name, or a function of the row index. Column accessors read Arrow buffers directly,
 including GeoArrow polygon layouts. Function accessors exist for convenience and small data.
+Data compares by column identity, so sending the same batch again costs nothing, and
+`LayerData::with_changed_rows` names the rows that differ from the last update: the
+`AttributeManager` writes those rows in place and grows its buffers with headroom when rows
+are appended, so streaming appends and per row edits do not rebuild every attribute.
 
 **fp64 as hi/lo f32 pairs.** Positions are split the way deck.gl does for `fp64` attributes,
 and the viewport switches to auto-offset mode above zoom 12, so precision matches deck.gl JS on
