@@ -65,7 +65,7 @@ impl State {
         let target = RenderTarget {
             color_format: format,
             depth_format: Some(wgpu::TextureFormat::Depth24Plus),
-            sample_count: 1,
+            sample_count: spec::msaa_samples(),
         };
         let depth = create_render_texture(
             &device,

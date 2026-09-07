@@ -288,58 +288,66 @@ impl Model {
             wgpu::PrimitiveTopology::TriangleList | wgpu::PrimitiveTopology::TriangleStrip => desc.depth_bias,
             _ => wgpu::DepthBiasState::default(),
         };
-        let make_pipeline = |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
-            let color_target = wgpu::ColorTargetState {
-                format,
-                blend,
-                write_mask: wgpu::ColorWrites::ALL,
-            };
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("vertexMain"),
-                    compilation_options: Default::default(),
-                    buffers: &buffers,
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: desc.topology,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: desc.cull_mode,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+        let make_pipeline =
+            |label: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>, sample_count: u32| {
+                let color_target = wgpu::ColorTargetState {
                     format,
-                    depth_write_enabled: Some(desc.depth_write_enabled),
-                    depth_compare: Some(desc.depth_compare),
-                    stencil: wgpu::StencilState::default(),
-                    bias: depth_bias,
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: desc.target.sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some("fragmentMain"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(color_target)],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
-        let pipeline = make_pipeline(desc.label, desc.target.color_format, desc.blend);
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                };
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vertexMain"),
+                        compilation_options: Default::default(),
+                        buffers: &buffers,
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: desc.topology,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: desc.cull_mode,
+                        unclipped_depth: false,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        conservative: false,
+                    },
+                    depth_stencil: desc.target.depth_format.map(|format| wgpu::DepthStencilState {
+                        format,
+                        depth_write_enabled: Some(desc.depth_write_enabled),
+                        depth_compare: Some(desc.depth_compare),
+                        stencil: wgpu::StencilState::default(),
+                        bias: depth_bias,
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fragmentMain"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(color_target)],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+        let pipeline = make_pipeline(
+            desc.label,
+            desc.target.color_format,
+            desc.blend,
+            desc.target.sample_count,
+        );
+        // The picking pass always renders into single sample textures.
         let picking_pipeline = desc.pickable.then(|| {
             make_pipeline(
                 &format!("{}:picking", desc.label),
                 PICKING_FORMAT,
                 Some(picking_blend()),
+                1,
             )
         });
 

@@ -40,6 +40,8 @@ pub enum DeckError {
     Data(String),
     #[error("layer `{layer}`: {message}")]
     Layer { layer: String, message: String },
+    #[error("render error: {0}")]
+    Render(String),
 }
 
 pub type Result<T> = std::result::Result<T, DeckError>;

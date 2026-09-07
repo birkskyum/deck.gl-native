@@ -6,7 +6,7 @@ use crate::constants::ClipDepthRange;
 use crate::layer::{decode_picking_color, Layer, LayerContext, LAYER_INDEX_STRIDE};
 use crate::lighting::LightingEffect;
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
-use crate::Result;
+use crate::{DeckError, Result};
 
 /// Camera state for the default map view. Mirrors deck.gl's `MapViewState`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,9 +90,16 @@ struct PickingTarget {
 /// A `Deck` does not own the render target. Either call [`Deck::draw`] from inside a render
 /// pass you own (interleaved with a basemap), or use [`Deck::render`] to have the deck begin
 /// its own pass on textures you provide.
+/// Multisampled attachments the deck renders into before resolving to the caller's texture.
+struct MsaaTextures {
+    color: wgpu::Texture,
+    depth: Option<wgpu::Texture>,
+}
+
 pub struct Deck {
     ctx: LayerContext,
     layers: Vec<LayerEntry>,
+    msaa: Option<MsaaTextures>,
     width: u32,
     height: u32,
     view_state: ViewState,
@@ -122,6 +129,7 @@ impl Deck {
         let mut deck = Self {
             ctx,
             layers: Vec::new(),
+            msaa: None,
             width: props.width,
             height: props.height,
             view_state: props.view_state,
@@ -502,6 +510,11 @@ impl Deck {
     }
 
     /// Like [`Deck::render`] with explicit load operations for the color and depth attachments.
+    /// With a multisampled [`RenderTarget`] (`sample_count > 1`) the layers are drawn into
+    /// deck owned multisampled attachments and resolved into `color_view`; `depth_view` is
+    /// then unused, and `color_load` must clear, since a host's single sample contents cannot
+    /// be loaded into the multisampled buffer. Sharing a host's depth buffer therefore needs
+    /// `sample_count: 1`.
     pub fn render_with(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -511,14 +524,46 @@ impl Deck {
         depth_load: wgpu::LoadOp<f32>,
     ) -> Result<()> {
         self.update()?;
-        let color_attachment = wgpu::RenderPassColorAttachment {
-            view: color_view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: color_load,
-                store: wgpu::StoreOp::Store,
+        let sample_count = self.ctx.target.sample_count;
+        let (msaa_color_view, msaa_depth_view) = if sample_count > 1 {
+            if matches!(color_load, wgpu::LoadOp::Load) {
+                return Err(DeckError::Render(
+                    "a multisampled deck cannot load the target's contents; clear it or use sample_count 1"
+                        .into(),
+                ));
+            }
+            let msaa = self.msaa_textures(color_view.texture().size());
+            (
+                Some(msaa.color.create_view(&Default::default())),
+                msaa.depth.as_ref().map(|t| t.create_view(&Default::default())),
+            )
+        } else {
+            (None, None)
+        };
+        let color_attachment = match &msaa_color_view {
+            Some(view) => wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: Some(color_view),
+                ops: wgpu::Operations {
+                    load: color_load,
+                    store: wgpu::StoreOp::Discard,
+                },
             },
+            None => wgpu::RenderPassColorAttachment {
+                view: color_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: color_load,
+                    store: wgpu::StoreOp::Store,
+                },
+            },
+        };
+        let depth_view = if msaa_color_view.is_some() {
+            msaa_depth_view.as_ref()
+        } else {
+            depth_view
         };
         let depth_attachment = depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
             view,
@@ -537,6 +582,34 @@ impl Deck {
             multiview_mask: None,
         });
         self.draw(&mut pass)
+    }
+
+    /// Multisampled attachments matching the target's size and formats.
+    fn msaa_textures(&mut self, size: wgpu::Extent3d) -> &MsaaTextures {
+        let fresh = self
+            .msaa
+            .as_ref()
+            .is_some_and(|m| m.color.size() == size && m.color.format() == self.ctx.target.color_format);
+        if !fresh {
+            let target = self.ctx.target;
+            let make = |label: &str, format: wgpu::TextureFormat| {
+                self.ctx.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: target.sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+            };
+            self.msaa = Some(MsaaTextures {
+                color: make("deck.gl msaa color", target.color_format),
+                depth: target.depth_format.map(|f| make("deck.gl msaa depth", f)),
+            });
+        }
+        self.msaa.as_ref().expect("msaa textures")
     }
 }
 

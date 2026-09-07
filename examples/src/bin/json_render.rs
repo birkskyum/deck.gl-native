@@ -7,7 +7,7 @@ use std::error::Error;
 use deck_gl::luma_gl::device::{create_headless_context, create_render_texture, read_texture_rgba8};
 use deck_gl::luma_gl::RenderTarget;
 use deck_gl::{Deck, DeckProps};
-use deck_gl_examples::scene;
+use deck_gl_examples::{scene, spec};
 use deck_gl_json::JsonConverter;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -36,7 +36,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("the description has no initialViewState, so there is nothing to look at")?;
 
     let ctx = create_headless_context()?;
-    let target = RenderTarget::default();
+    let target = RenderTarget {
+        sample_count: spec::msaa_samples(),
+        ..RenderTarget::default()
+    };
     let color = create_render_texture(&ctx.device, "color", width, height, target.color_format);
     let depth = create_render_texture(&ctx.device, "depth", width, height, target.depth_format.unwrap());
     let mut deck = Deck::new(

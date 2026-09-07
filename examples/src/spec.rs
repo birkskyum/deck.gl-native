@@ -11,6 +11,15 @@ use deck_gl_json::JsonConverter;
 use crate::scene;
 
 pub const ENV_VAR: &str = "DECKGL_JSON";
+/// Multisample count for the examples' render targets (`DECKGL_MSAA`, default 4).
+pub fn msaa_samples() -> u32 {
+    std::env::var("DECKGL_MSAA")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| [1, 2, 4, 8].contains(n))
+        .unwrap_or(4)
+}
+
 /// Comma separated layer ids to keep, for looking at one layer at a time.
 pub const ONLY_VAR: &str = "DECKGL_ONLY";
 

@@ -895,3 +895,82 @@ fn trips_layer_shows_only_the_travelled_part() {
         "recent {recent:?} is more opaque than old {old:?}"
     );
 }
+
+/// Render into a 4x multisampled target: edges get intermediate coverage and picking still
+/// works through its single sample pass.
+#[test]
+fn multisampled_target_antialiases_and_picks() {
+    let Some(ctx) = context() else { return };
+    let target = RenderTarget {
+        sample_count: 4,
+        ..RenderTarget::default()
+    };
+    let make_layer = || -> Box<dyn Layer> {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps {
+                pickable: true,
+                ..LayerProps::new("points")
+            },
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(CENTER),
+            get_radius: Accessor::Constant(20.0),
+            radius_units: Unit::Pixels,
+            get_fill_color: Accessor::Constant([255, 0, 0, 255]),
+            antialiasing: false,
+            ..Default::default()
+        }))
+    };
+    let color = create_render_texture(&ctx.device, "color", SIZE, SIZE, target.color_format);
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        target,
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: ViewState {
+                longitude: CENTER[0],
+                latitude: CENTER[1],
+                zoom: 14.0,
+                pitch: 0.0,
+                bearing: 0.0,
+            },
+            layers: vec![make_layer()],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    deck.render(
+        &mut encoder,
+        &color.create_view(&Default::default()),
+        None,
+        Some(wgpu::Color::TRANSPARENT),
+    )
+    .expect("render");
+    ctx.queue.submit([encoder.finish()]);
+    let pixels = read_texture_rgba8(&ctx.device, &ctx.queue, &color).expect("readback");
+    let c = SIZE / 2;
+    assert_pixel(&pixels, c, c, [255, 0, 0, 255], 1);
+    // Along the circle's edge some pixels are partially covered
+    let partial = (0..SIZE * SIZE)
+        .map(|i| pixel(&pixels, i % SIZE, i / SIZE)[3])
+        .filter(|a| *a > 20 && *a < 235)
+        .count();
+    assert!(partial > 20, "partially covered edge pixels: {partial}");
+    let hit = deck.pick(c as f64, c as f64).unwrap();
+    assert_eq!(hit.map(|h| h.index), Some(0));
+
+    // Loading a multisampled target's contents is refused
+    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    let error = deck
+        .render_with(
+            &mut encoder,
+            &color.create_view(&Default::default()),
+            None,
+            wgpu::LoadOp::Load,
+            wgpu::LoadOp::Clear(1.0),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("multisampled"), "{error}");
+}
