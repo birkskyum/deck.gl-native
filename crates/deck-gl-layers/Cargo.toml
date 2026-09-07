@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["fetch"]
+# Load raster tiles from http(s) URLs (`TileLayer::raster`).
+fetch = ["dep:ureq"]
+
 [dependencies]
 math-gl = { workspace = true }
 luma-gl = { workspace = true }
@@ -19,3 +24,5 @@ earcutr = { workspace = true }
 fontdue = { workspace = true }
 arrow-array = { workspace = true }
 serde_json = { workspace = true }
+image = { workspace = true, features = ["jpeg"] }
+ureq = { version = "3", optional = true }

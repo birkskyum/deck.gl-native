@@ -1,0 +1,61 @@
+{
+  "views": [
+    {
+      "@@type": "MapView",
+      "controller": true
+    }
+  ],
+  "initialViewState": {
+    "longitude": 12.57,
+    "latitude": 55.68,
+    "zoom": 11,
+    "pitch": 30
+  },
+  "layers": [
+    {
+      "@@type": "TileLayer",
+      "id": "osm",
+      "data": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "minZoom": 0,
+      "maxZoom": 19,
+      "tileSize": 256,
+      "opacity": 0.9
+    },
+    {
+      "@@type": "ScatterplotLayer",
+      "id": "landmarks",
+      "data": [
+        {
+          "name": "Christiansborg",
+          "position": [
+            12.5794,
+            55.6761
+          ]
+        },
+        {
+          "name": "Tivoli",
+          "position": [
+            12.5681,
+            55.6737
+          ]
+        },
+        {
+          "name": "Nyhavn",
+          "position": [
+            12.591,
+            55.6798
+          ]
+        }
+      ],
+      "getPosition": "@@=position",
+      "getFillColor": [
+        220,
+        40,
+        40
+      ],
+      "getRadius": 60,
+      "pickable": true,
+      "autoHighlight": true
+    }
+  ]
+}

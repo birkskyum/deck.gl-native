@@ -10,9 +10,10 @@ use deck_gl_layers::{
     ContourThreshold, FontSettings, FontSource, GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps,
     GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer,
     HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer,
-    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps, ScaleType,
-    ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer,
-    SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps, TripsLayer, TripsLayerProps, WordBreak,
+    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps,
+    RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
+    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
+    TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -162,6 +163,81 @@ pub fn convert_layer(
                 z_offset: props.f32("zOffset", d.z_offset as f32)? as f64,
                 get_position: props.accessor("getPosition", "position", convert::position)?,
                 get_weight: props.accessor("getWeight", &d.get_weight, convert::f32)?,
+            }))
+        }
+        "TileLayer" => {
+            let d = TileLayerProps::default();
+            let templates: Vec<String> = match props.get("data") {
+                Some(Value::String(url)) => vec![url.clone()],
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| props.error("data", "expected URL templates"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                Some(other) => {
+                    return Err(props.error(
+                        "data",
+                        format!(
+                            "expected a tile URL template, got {}",
+                            crate::props::describe(other)
+                        ),
+                    ))
+                }
+                None => Vec::new(),
+            };
+            if !templates.iter().all(|t| deck_gl_layers::is_url_template(t)) {
+                return Err(props.error("data", "expected URL templates with {z}, {x} and {y} (or {-y})"));
+            }
+            props.get("renderSubLayers");
+            props.get("onViewportLoad");
+            let refinement_strategy = match props.get("refinementStrategy") {
+                None | Some(Value::Null) => d.refinement_strategy,
+                Some(Value::String(name)) => RefinementStrategy::parse(name)
+                    .ok_or_else(|| props.error("refinementStrategy", format!("unknown strategy `{name}`")))?,
+                Some(other) => {
+                    return Err(props.error(
+                        "refinementStrategy",
+                        format!("expected a string, got {}", crate::props::describe(other)),
+                    ))
+                }
+            };
+            let optional_zoom = |key: &str| -> Result<Option<u32>> {
+                match props.get(key) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(v) => convert::f32(v)
+                        .map(|z| Some(z as u32))
+                        .map_err(|m| props.error(key, m)),
+                }
+            };
+            let extent = match props.get("extent") {
+                None | Some(Value::Null) => None,
+                Some(v) => {
+                    let n = convert::numbers(v, 4, 4).map_err(|m| props.error("extent", m))?;
+                    Some([n[0], n[1], n[2], n[3]])
+                }
+            };
+            let get_tile_data = if templates.is_empty() {
+                None
+            } else {
+                Some(tile_loader(templates))
+            };
+            Box::new(TileLayer::new(TileLayerProps {
+                base: props.base()?,
+                get_tile_data,
+                render_sub_layers: deck_gl_layers::raster_renderer(),
+                tile_size: props.f32("tileSize", d.tile_size as f32)? as f64,
+                min_zoom: optional_zoom("minZoom")?.or(d.min_zoom),
+                max_zoom: optional_zoom("maxZoom")?,
+                zoom_offset: props.f32("zoomOffset", d.zoom_offset as f32)? as f64,
+                extent,
+                refinement_strategy,
+                max_cache_size: props
+                    .f32("maxCacheSize", 0.0)
+                    .map(|n| (n > 0.0).then_some(n as usize))?,
+                max_requests: props.f32("maxRequests", d.max_requests as f32)? as usize,
             }))
         }
         "HeatmapLayer" => {
@@ -857,4 +933,14 @@ fn contour_from_value(value: &Value) -> std::result::Result<Contour, String> {
         contour.z_index = Some(convert::f32(z)? as i32);
     }
     Ok(contour)
+}
+
+#[cfg(feature = "fetch")]
+fn tile_loader(templates: Vec<String>) -> deck_gl_layers::TileLoader {
+    deck_gl_layers::tile_layer::raster_loader(templates)
+}
+
+#[cfg(not(feature = "fetch"))]
+fn tile_loader(_templates: Vec<String>) -> deck_gl_layers::TileLoader {
+    deck_gl_layers::TileLoader::new(|_, _| Err("built without the fetch feature".to_string()))
 }

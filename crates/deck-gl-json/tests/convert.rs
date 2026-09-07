@@ -679,3 +679,23 @@ fn several_views_with_rectangles_and_their_own_view_states() {
     assert!(deck.views.is_empty());
     assert_eq!(deck.view_state.map(|v| v.zoom), Some(2.0));
 }
+
+#[test]
+fn tile_layer_from_a_url_template() {
+    let spec = json!([{
+        "@@type": "TileLayer",
+        "id": "osm",
+        "data": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "minZoom": 0,
+        "maxZoom": 19,
+        "tileSize": 256,
+        "refinementStrategy": "no-overlap",
+        "renderSubLayers": "ignored"
+    }]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 1);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let bad = json!([{"@@type": "TileLayer", "data": "tiles/{z}.png"}]);
+    let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
+    assert!(error.contains("{x}"), "{error}");
+}

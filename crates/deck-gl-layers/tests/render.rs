@@ -1320,6 +1320,79 @@ fn several_views_draw_in_their_rectangles_with_a_layer_filter() {
 }
 
 #[test]
+fn tile_layer_loads_tiles_in_the_background_and_draws_them() {
+    use deck_gl_layers::{TileData, TileIndex, TileLayer, TileLayerProps, TileLoader};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let Some(ctx) = context() else { return };
+    // Each tile is a solid colour telling its index
+    let loads = Arc::new(AtomicUsize::new(0));
+    let counter = loads.clone();
+    let loader = TileLoader::new(move |index, _bounds| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let color = [
+            (index.x as u8 + 1) * 40,
+            (index.y as u8 + 1) * 40,
+            index.z as u8 * 60,
+            255,
+        ];
+        let rgba: Vec<u8> = color.iter().copied().cycle().take(4 * 4).collect();
+        Ok(Some(Arc::new(BitmapImage {
+            width: 2,
+            height: 2,
+            rgba: Arc::new(rgba),
+        }) as TileData))
+    });
+    let layer = TileLayer::new(TileLayerProps {
+        base: LayerProps::new("tiles"),
+        get_tile_data: Some(loader),
+        max_requests: 2,
+        ..Default::default()
+    });
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view_state: ViewState {
+                longitude: 90.0,
+                latitude: 45.0,
+                zoom: 1.0,
+                pitch: 0.0,
+                bearing: 0.0,
+            },
+            layers: vec![Box::new(layer)],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    // The first frame starts the loads; nothing is drawn yet
+    let first = deck.snapshot(None).unwrap();
+    assert_eq!(first.pixel(SIZE / 2, SIZE / 2), [0, 0, 0, 0]);
+    // Wait for the loads to finish, then the tile under the centre appears
+    let mut shot = first;
+    for _ in 0..100 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        shot = deck.snapshot(None).unwrap();
+        if shot.pixel(SIZE / 2, SIZE / 2)[3] > 0 {
+            break;
+        }
+    }
+    // Longitude 90, latitude 45 lies in tile x 1, y 0 of zoom 1
+    let index = TileIndex::new(1, 0, 1);
+    let expected = [(index.x as u8 + 1) * 40, (index.y as u8 + 1) * 40, 60, 255];
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), expected);
+    let tile_layer = deck
+        .layer_mut("tiles")
+        .and_then(|l| l.as_any_mut().downcast_mut::<TileLayer>())
+        .unwrap();
+    assert!(tile_layer.is_loaded());
+    assert!(loads.load(Ordering::SeqCst) >= 1);
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

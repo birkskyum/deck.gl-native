@@ -26,6 +26,8 @@ pub mod screen_grid_layer;
 pub mod solid_polygon_layer;
 pub mod text;
 pub mod text_layer;
+pub mod tile_layer;
+pub mod tileset;
 pub mod trips_layer;
 
 pub use aggregation::{
@@ -51,4 +53,11 @@ pub use screen_grid_layer::{ScreenGridBin, ScreenGridLayer, ScreenGridLayerProps
 pub use solid_polygon_layer::{SolidPolygonLayer, SolidPolygonLayerProps};
 pub use text::{CharacterSet, FontAtlas, FontSettings, FontSource, WordBreak};
 pub use text_layer::{AlignmentBaseline, TextAnchor, TextLayer, TextLayerProps};
+pub use tile_layer::{
+    raster_renderer, LoadedTile, TileData, TileLayer, TileLayerProps, TileLoader, TileRenderer,
+};
+pub use tileset::{
+    get_tile_indices, is_url_template, tile_bounds, url_from_template, RefinementStrategy, TileBounds,
+    TileHeader, TileIndex, TileStatus, Tileset, TilesetOptions, TILE_SIZE,
+};
 pub use trips_layer::{TripsLayer, TripsLayerProps};

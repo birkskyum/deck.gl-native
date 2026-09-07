@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = ["fetch"]
 # Load `data`, `image` and `iconAtlas` props from http(s) URLs.
-fetch = ["dep:ureq"]
+fetch = ["dep:ureq", "deck-gl-layers/fetch"]
 
 [dependencies]
 deck-gl = { workspace = true }
