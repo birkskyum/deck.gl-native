@@ -1393,6 +1393,89 @@ fn tile_layer_loads_tiles_in_the_background_and_draws_them() {
 }
 
 #[test]
+fn geo_cell_layers_fill_their_cells() {
+    use deck_gl_layers::{geohash_bounds, GeoCellLayer, GeoCellLayerProps};
+    let Some(ctx) = context() else { return };
+    // The geohash of the view centre at 7 characters is about 150 m wide: it fills the middle
+    let cell = geohash_encode(CENTER[0], CENTER[1], 7);
+    let bounds = geohash_bounds(&cell).unwrap();
+    assert!(bounds[1] < CENTER[0] && bounds[3] > CENTER[0]);
+    let mut props = GeoCellLayerProps::geohash();
+    props.polygon.data = LayerData::with_length(1);
+    props.polygon.get_fill_color = Accessor::Constant([0, 200, 0, 255]);
+    props.get_cell = Accessor::Constant(cell.clone());
+    let layer = GeoCellLayer::new(props);
+    let shot = make_deck(&ctx, vec![Box::new(layer)]).snapshot(None).unwrap();
+    let c = SIZE / 2;
+    assert_eq!(shot.pixel(c, c), [0, 200, 0, 255], "cell {cell} fills the centre");
+    // An H3 cell of resolution 9 around the centre, extruded by default
+    let mut props = GeoCellLayerProps::h3();
+    props.polygon.data = LayerData::with_length(1);
+    props.polygon.get_fill_color = Accessor::Constant([200, 0, 0, 255]);
+    props.polygon.get_elevation = Accessor::Constant(10.0);
+    props.polygon.base.material = Material::unlit();
+    props.get_cell = Accessor::Constant("8928308280fffff".to_string());
+    let layer = GeoCellLayer::new(props);
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    // Look at the cell's own centre
+    let centre = deck_gl_layers::h3_polygon("8928308280fffff", 1.0).unwrap();
+    let (lng, lat) = (
+        centre.iter().map(|p| p[0]).sum::<f64>() / centre.len() as f64,
+        centre.iter().map(|p| p[1]).sum::<f64>() / centre.len() as f64,
+    );
+    deck.set_view_state(ViewState {
+        longitude: lng,
+        latitude: lat,
+        zoom: 14.0,
+        pitch: 0.0,
+        bearing: 0.0,
+    });
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(c, c), [200, 0, 0, 255]);
+}
+
+/// Encode a geohash (the inverse of the layer's decoder), for the test above.
+fn geohash_encode(lng: f64, lat: f64, length: usize) -> String {
+    const BASE32: &[u8; 32] = b"0123456789bcdefghjkmnpqrstuvwxyz";
+    let (mut min_lat, mut max_lat, mut min_lng, mut max_lng) = (-90.0f64, 90.0f64, -180.0f64, 180.0f64);
+    let mut is_lng = true;
+    let mut out = String::new();
+    let mut value = 0u32;
+    let mut bits = 0;
+    while out.len() < length {
+        if is_lng {
+            let mid = (min_lng + max_lng) / 2.0;
+            value = value * 2
+                + if lng >= mid {
+                    min_lng = mid;
+                    1
+                } else {
+                    max_lng = mid;
+                    0
+                };
+        } else {
+            let mid = (min_lat + max_lat) / 2.0;
+            value = value * 2
+                + if lat >= mid {
+                    min_lat = mid;
+                    1
+                } else {
+                    max_lat = mid;
+                    0
+                };
+        }
+        is_lng = !is_lng;
+        bits += 1;
+        if bits == 5 {
+            out.push(BASE32[value as usize] as char);
+            value = 0;
+            bits = 0;
+        }
+    }
+    out
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

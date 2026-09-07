@@ -167,13 +167,13 @@ fn reports_row_conversion_errors() {
 #[test]
 fn warns_about_unknown_layers_and_props() {
     let spec = json!([
-        {"@@type": "H3HexagonLayer", "id": "hexes"},
+        {"@@type": "A5Layer", "id": "pentagons"},
         {"@@type": "ScatterplotLayer", "id": "p", "data": [], "bogusProp": 1, "onHover": "ignored"}
     ]);
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert_eq!(deck.layers.len(), 1);
     assert_eq!(deck.warnings.len(), 2, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("H3HexagonLayer"));
+    assert!(deck.warnings[0].contains("A5Layer"));
     assert!(deck.warnings[1].contains("bogusProp"));
 }
 
@@ -736,4 +736,19 @@ fn csv_and_ndjson_files_load_as_rows() {
     assert_eq!(radii(&mut deck.layers[0]), [20.0, 40.0]);
     assert_eq!(radii(&mut deck.layers[1]), [3.0, 6.0]);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn geo_cell_layers() {
+    let spec = json!([
+        {"@@type": "H3HexagonLayer", "id": "h3", "data": [{"hexagon": "8928308280fffff", "n": 2}], "getElevation": "@@=n * 100", "coverage": 0.9},
+        {"@@type": "S2Layer", "id": "s2", "data": [{"token": "80858004"}], "extruded": true},
+        {"@@type": "GeohashLayer", "id": "geohash", "data": [{"geohash": "9q8yy"}]},
+        {"@@type": "QuadkeyLayer", "id": "quadkey", "data": [{"quadkey": "0230"}], "getFillColor": [1, 2, 3]}
+    ]);
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    assert_eq!(deck.layers.len(), 4);
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let ids: Vec<&str> = deck.layers.iter().map(|l| l.id()).collect();
+    assert_eq!(ids, ["h3", "s2", "geohash", "quadkey"]);
 }

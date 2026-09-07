@@ -7,6 +7,7 @@ pub mod arc_layer;
 pub mod bitmap_layer;
 pub mod column_layer;
 pub mod contour_layer;
+pub mod geo_cell_layer;
 pub mod geojson_layer;
 pub mod grid_cell_layer;
 pub mod grid_layer;
@@ -37,6 +38,10 @@ pub use arc_layer::{ArcLayer, ArcLayerProps};
 pub use bitmap_layer::{BitmapImage, BitmapLayer, BitmapLayerProps};
 pub use column_layer::{ColumnLayer, ColumnLayerProps};
 pub use contour_layer::{Contour, ContourGrid, ContourLayer, ContourLayerProps, DEFAULT_CONTOUR_COLOR};
+pub use geo_cell_layer::{
+    geohash_bounds, geohash_polygon, h3_polygon, quadkey_polygon, s2_polygon, CellKind, GeoCellLayer,
+    GeoCellLayerProps,
+};
 pub use geojson_layer::{GeoJsonLayer, GeoJsonLayerProps};
 pub use grid_cell_layer::{GridCellLayer, GridCellLayerProps};
 pub use grid_layer::{GridLayer, GridLayerProps};

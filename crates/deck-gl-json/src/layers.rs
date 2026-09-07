@@ -3,17 +3,17 @@
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
-use deck_gl::{FeatureCollection, Layer, LayerData};
+use deck_gl::{FeatureCollection, Layer, LayerData, Polygon};
 use deck_gl_layers::{
     AggregationOperation, AggregationProps, AlignmentBaseline, ArcLayer, ArcLayerProps, BitmapLayer,
-    BitmapLayerProps, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer, ContourLayerProps,
-    ContourThreshold, FontSettings, FontSource, GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps,
-    GridLayer, GridLayerProps, HeatmapAggregation, HeatmapLayer, HeatmapLayerProps, HexagonLayer,
-    HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps, LineLayer, LineLayerProps, PathLayer,
-    PathLayerProps, PointCloudLayer, PointCloudLayerProps, PolygonLayer, PolygonLayerProps,
-    RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps, ScreenGridLayer,
-    ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer, TextLayerProps,
-    TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
+    BitmapLayerProps, CellKind, CharacterSet, ColumnLayer, ColumnLayerProps, Contour, ContourLayer,
+    ContourLayerProps, ContourThreshold, FontSettings, FontSource, GeoCellLayer, GeoCellLayerProps,
+    GeoJsonLayer, GeoJsonLayerProps, GridCellLayerProps, GridLayer, GridLayerProps, HeatmapAggregation,
+    HeatmapLayer, HeatmapLayerProps, HexagonLayer, HexagonLayerProps, IconAtlas, IconLayer, IconLayerProps,
+    LineLayer, LineLayerProps, PathLayer, PathLayerProps, PointCloudLayer, PointCloudLayerProps,
+    PolygonLayer, PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps,
+    ScreenGridLayer, ScreenGridLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TextAnchor, TextLayer,
+    TextLayerProps, TileLayer, TileLayerProps, TripsLayer, TripsLayerProps, WordBreak,
 };
 use serde_json::Value;
 
@@ -110,6 +110,30 @@ pub fn convert_layer(
                 data,
                 cell_size: props.f64("cellSize", d.cell_size)?,
                 aggregation: aggregation(&props)?,
+            }))
+        }
+        "H3HexagonLayer" | "S2Layer" | "GeohashLayer" | "QuadkeyLayer" => {
+            let data = load_rows(&mut props, options)?;
+            props.get("highPrecision");
+            props.get("centerHexagon");
+            let (mut defaults, accessor, field) = match props.layer_type.as_str() {
+                "H3HexagonLayer" => (GeoCellLayerProps::h3(), "getHexagon", "hexagon"),
+                "S2Layer" => (GeoCellLayerProps::s2(), "getS2Token", "token"),
+                "GeohashLayer" => (GeoCellLayerProps::geohash(), "getGeohash", "geohash"),
+                _ => (GeoCellLayerProps::quadkey(), "getQuadkey", "quadkey"),
+            };
+            let coverage = props.f64("coverage", 1.0)?;
+            defaults.kind = match defaults.kind {
+                CellKind::H3 { .. } => CellKind::H3 { coverage },
+                CellKind::Quadkey { .. } => CellKind::Quadkey { coverage },
+                other => other,
+            };
+            let mut polygon = polygon_with(&props, data, Accessor::Constant(Vec::new()))?;
+            polygon.extruded = props.bool("extruded", defaults.polygon.extruded)?;
+            Box::new(GeoCellLayer::new(GeoCellLayerProps {
+                polygon,
+                get_cell: props.accessor(accessor, field, convert::string)?,
+                kind: defaults.kind,
             }))
         }
         "ContourLayer" => {
@@ -505,7 +529,7 @@ fn solid_polygon(p: &Props, data: LayerData) -> Result<SolidPolygonLayerProps> {
         extruded: p.bool("extruded", d.extruded)?,
         wireframe: p.bool("wireframe", d.wireframe)?,
         elevation_scale: p.f32("elevationScale", d.elevation_scale)?,
-        get_polygon: p.accessor("getPolygon", "polygon", convert::polygon)?,
+        get_polygon,
         get_elevation: p.accessor("getElevation", &d.get_elevation, convert::f32)?,
         get_fill_color: p.accessor("getFillColor", &d.get_fill_color, convert::color)?,
         get_line_color: p.accessor("getLineColor", &d.get_line_color, convert::color)?,
@@ -513,6 +537,12 @@ fn solid_polygon(p: &Props, data: LayerData) -> Result<SolidPolygonLayerProps> {
 }
 
 fn polygon(p: &Props, data: LayerData) -> Result<PolygonLayerProps> {
+    let get_polygon = p.accessor("getPolygon", "polygon", convert::polygon)?;
+    polygon_with(p, data, get_polygon)
+}
+
+/// PolygonLayer props with a geometry accessor supplied by the caller (cell layers).
+fn polygon_with(p: &Props, data: LayerData, get_polygon: Accessor<Polygon>) -> Result<PolygonLayerProps> {
     let d = PolygonLayerProps::default();
     Ok(PolygonLayerProps {
         base: p.base()?,
