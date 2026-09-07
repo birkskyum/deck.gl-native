@@ -1,19 +1,22 @@
 //! The example scene in a window, with the camera orbiting the scene.
 //!
 //! Run with `cargo run --release --bin window`. Set `DECKGL_JSON` to show a JSON description
-//! instead of the built-in scene.
+//! instead of the built-in scene. The camera orbits until you touch it: drag to pan, right
+//! drag (or Ctrl or Cmd drag) to rotate and pitch, scroll to zoom, arrows to move, `+`/`-` to
+//! zoom, `q`/`e` to rotate, `r`/`f` to pitch and `0` to return to the start.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, ViewState};
+use deck_gl::{Deck, DeckProps, MapController, ViewState};
 use deck_gl_examples::{scene, spec};
 use deck_gl_layers::TripsLayer;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 struct State {
@@ -25,9 +28,13 @@ struct State {
     depth: wgpu::Texture,
     deck: Deck,
     base_view: ViewState,
+    controller: MapController,
     start: Instant,
     cursor: Option<(f64, f64)>,
+    last_cursor: (f64, f64),
     hovered: Option<(String, u32)>,
+    dragging: Option<MouseButton>,
+    modifiers: winit::keyboard::ModifiersState,
 }
 
 impl State {
@@ -77,6 +84,11 @@ impl State {
         let scale = window.scale_factor() as f32;
         let loaded = spec::load(-25.0).expect("scene");
         let base_view = loaded.view_state;
+        let controller = MapController::new(
+            base_view,
+            config.width as f64 / scale as f64,
+            config.height as f64 / scale as f64,
+        );
         let deck = Deck::new(
             &device,
             &queue,
@@ -101,9 +113,13 @@ impl State {
             depth,
             deck,
             base_view,
+            controller,
             start: Instant::now(),
             cursor: None,
+            last_cursor: (0.0, 0.0),
             hovered: None,
+            dragging: None,
+            modifiers: Default::default(),
         }
     }
 
@@ -148,13 +164,71 @@ impl State {
             (self.config.width as f32 / scale) as u32,
             (self.config.height as f32 / scale) as u32,
         );
+        self.controller.set_size(
+            self.config.width as f64 / scale as f64,
+            self.config.height as f64 / scale as f64,
+        );
+    }
+
+    fn now_ms(&self) -> f64 {
+        self.start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// Pointer buttons: left drags pan, right (or a modifier with left) rotates.
+    fn mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        let pixel = [self.last_cursor.0, self.last_cursor.1];
+        let rotate = button == MouseButton::Right
+            || (button == MouseButton::Left && (self.modifiers.control_key() || self.modifiers.super_key()));
+        if pressed {
+            if self.dragging.is_some() {
+                return;
+            }
+            self.dragging = Some(button);
+            if rotate {
+                self.controller.rotate_start(pixel);
+            } else if button == MouseButton::Left {
+                self.controller.pan_start(pixel, self.now_ms());
+            }
+        } else if self.dragging == Some(button) {
+            self.dragging = None;
+            self.controller.rotate_end();
+            self.controller.pan_end(self.now_ms());
+        }
+    }
+
+    fn key(&mut self, key: &Key) {
+        let step = 60.0;
+        match key {
+            Key::Named(NamedKey::ArrowLeft) => self.controller.move_by([step, 0.0]),
+            Key::Named(NamedKey::ArrowRight) => self.controller.move_by([-step, 0.0]),
+            Key::Named(NamedKey::ArrowUp) => self.controller.move_by([0.0, step]),
+            Key::Named(NamedKey::ArrowDown) => self.controller.move_by([0.0, -step]),
+            Key::Character(c) => match c.as_str() {
+                "+" | "=" => self.controller.zoom_in(),
+                "-" => self.controller.zoom_out(),
+                "q" => self.controller.rotate_by(-15.0, 0.0),
+                "e" => self.controller.rotate_by(15.0, 0.0),
+                "r" => self.controller.rotate_by(0.0, 10.0),
+                "f" => self.controller.rotate_by(0.0, -10.0),
+                "0" => self.controller.set_view_state(self.base_view),
+                _ => {}
+            },
+            _ => {}
+        }
     }
 
     fn render(&mut self) {
         let elapsed = self.start.elapsed().as_secs_f64();
-        let mut view = self.base_view;
-        view.bearing += elapsed * 8.0;
-        self.deck.set_view_state(view);
+        let now = elapsed * 1000.0;
+        self.controller.tick(now);
+        if self.controller.interacted() {
+            self.deck.set_view_state(self.controller.view_state());
+        } else {
+            let mut view = self.base_view;
+            view.bearing += elapsed * 8.0;
+            self.controller.set_view_state(view);
+            self.deck.set_view_state(view);
+        }
         if let Some(trips) = self
             .deck
             .layer_mut("trips")
@@ -229,12 +303,41 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = state.window.scale_factor();
-                state.cursor = Some((position.x / scale, position.y / scale));
+                let pixel = (position.x / scale, position.y / scale);
+                state.last_cursor = pixel;
+                if state.dragging.is_some() {
+                    let now = state.now_ms();
+                    state.controller.pan([pixel.0, pixel.1], now);
+                    state.controller.rotate([pixel.0, pixel.1]);
+                } else {
+                    state.cursor = Some(pixel);
+                }
             }
             WindowEvent::CursorLeft { .. } => {
                 state.cursor = None;
                 state.hovered = None;
                 state.deck.clear_highlights();
+            }
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
+                state.mouse_button(button, button_state == ElementState::Pressed);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y as f64,
+                    MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
+                };
+                let pixel = [state.last_cursor.0, state.last_cursor.1];
+                state.controller.zoom_by(pixel, lines * 0.25);
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                state.modifiers = modifiers.state();
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                state.key(&event.logical_key);
             }
             _ => {}
         }

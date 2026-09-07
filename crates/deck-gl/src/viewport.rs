@@ -260,6 +260,20 @@ impl Viewport {
     }
 
     /// Unproject world point [x, y] on map onto [lng, lat] on sphere.
+    /// The longitude and latitude that put the geographic point `lng_lat` under `pixel`
+    /// (logical pixels from the top left), keeping zoom, pitch and bearing. Port of
+    /// `WebMercatorViewport.panByPosition`.
+    pub fn pan_by_position(&self, lng_lat: [f64; 2], pixel: [f64; 2]) -> [f64; 2] {
+        let from = self.unproject(DVec2::new(pixel[0], pixel[1]), None, true, None);
+        let from_world = self.project_flat([from.x, from.y]);
+        let to_world = self.project_flat(lng_lat);
+        let center = [
+            self.center.x + to_world[0] - from_world[0],
+            self.center.y + to_world[1] - from_world[1],
+        ];
+        self.unproject_flat(center)
+    }
+
     pub fn unproject_flat(&self, xy: [f64; 2]) -> [f64; 2] {
         if self.is_geospatial {
             world_to_lng_lat(xy)

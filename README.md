@@ -27,6 +27,9 @@ Working today, headless and verified pixel by pixel in tests:
 - Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
   multisampling when the render target asks for it (the examples default to 4x)
 - Picking (`Deck::pick` returns layer, object index and coordinate) and per-object highlighting
+- A `MapController` with deck.gl's gestures: drag to pan with inertia, rotate and pitch, zoom
+  around the cursor, keyboard moves, zoom and pitch limits. Independent of the windowing
+  library; the window example wires it to winit.
 - `Deck::set_layers` reconciles by id: a layer re-sent with the same id and type keeps its GPU
   resources, and attributes are only rebuilt when its props changed
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks

@@ -10,6 +10,7 @@
 //! layers draw into the same pass with the same depth buffer.
 
 pub mod constants;
+pub mod controller;
 pub mod data;
 pub mod deck;
 pub mod geojson;
@@ -19,6 +20,7 @@ pub mod shaderlib;
 pub mod viewport;
 
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
+pub use controller::{Constraints, MapController};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, PickingInfo, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
