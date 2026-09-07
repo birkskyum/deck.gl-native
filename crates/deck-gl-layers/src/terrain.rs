@@ -281,46 +281,16 @@ pub fn terrain_mesh(
         .iter()
         .map(|[x, y]| [*x as f32 / size as f32, *y as f32 / size as f32])
         .collect();
-    let normals = vertex_normals(&positions, &indices);
+    // No normals: x and y are common space units while the elevation is in meters, so a
+    // normal computed here would be meaningless. The mesh layer shades the surface from the
+    // screen space derivatives of the common position instead, as deck.gl does for terrain.
     Ok(Mesh {
         positions,
-        normals: Some(normals),
+        normals: None,
         colors: None,
         tex_coords: Some(tex_coords),
         indices: Some(indices),
     })
-}
-
-/// Area weighted vertex normals of a triangle mesh.
-fn vertex_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
-    let mut normals = vec![[0.0f32; 3]; positions.len()];
-    for triangle in indices.chunks_exact(3) {
-        let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
-        let (pa, pb, pc) = (positions[a], positions[b], positions[c]);
-        let u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-        let v = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
-        let n = [
-            u[1] * v[2] - u[2] * v[1],
-            u[2] * v[0] - u[0] * v[2],
-            u[0] * v[1] - u[1] * v[0],
-        ];
-        for index in [a, b, c] {
-            for (out, value) in normals[index].iter_mut().zip(n) {
-                *out += value;
-            }
-        }
-    }
-    for normal in &mut normals {
-        let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if length > 0.0 {
-            for v in normal.iter_mut() {
-                *v /= length;
-            }
-        } else {
-            *normal = [0.0, 0.0, 1.0];
-        }
-    }
-    normals
 }
 
 #[cfg(test)]
@@ -424,7 +394,8 @@ mod tests {
         )
         .unwrap();
         mesh.validate().unwrap();
-        assert!(mesh.has_normals());
+        // Terrain is flat shaded from the common space derivatives, so it carries no normals
+        assert!(!mesh.has_normals());
         let bounds = mesh.bounds().unwrap();
         assert_eq!(
             [bounds[0][0], bounds[0][1]],

@@ -1,15 +1,26 @@
 {
-  "initialViewState": {"longitude": -119.55, "latitude": 37.74, "zoom": 11.5, "pitch": 60, "bearing": 140},
+  "initialViewState": {"longitude": -112.12, "latitude": 36.06, "zoom": 11.5, "pitch": 65, "bearing": 25},
+  "effects": [
+    {
+      "@@type": "LightingEffect",
+      "ambient": {"@@type": "AmbientLight", "color": [255, 250, 240], "intensity": 0.3},
+      "sun": {
+        "@@type": "DirectionalLight",
+        "color": [255, 245, 220],
+        "intensity": 1.4,
+        "direction": [-1, -0.5, -1.1]
+      }
+    }
+  ],
   "layers": [
     {
       "@@type": "TerrainLayer",
-      "id": "yosemite",
+      "id": "grand-canyon",
       "elevationData": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
-      "texture": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       "elevationDecoder": "terrarium",
-      "meshMaxError": 6,
+      "meshMaxError": 4,
       "maxZoom": 12,
-      "color": [190, 190, 180]
+      "color": [222, 196, 160]
     }
   ]
 }

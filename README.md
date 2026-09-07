@@ -4,6 +4,10 @@ A native implementation of [deck.gl](https://deck.gl) for native hardware: Rust 
 [wgpu](https://wgpu.rs), rendering with deck.gl's own WGSL shaders and taking Apache Arrow
 and GeoArrow data directly.
 
+![The example scene: extruded polygons, arcs, paths, hexagons, icons, text and a heatmap](docs/images/texture-render.png)
+
+*The built-in example scene, rendered headless by `cargo run --release --bin texture_render`.*
+
 This is an independent project by [Birk Skyum](https://github.com/birkskyum). It is not
 affiliated with Unfolded, vis.gl or the deck.gl maintainers, although it builds on their work:
 the layer designs, the WGSL shaders and the projection math are ports of
@@ -16,11 +20,35 @@ The Rust port in `crates/` is a fresh port of deck.gl 9 and is the active code b
 Planned work is tracked in the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
 and the [issue list](https://github.com/birkskyum/deck.gl-native/issues).
 
+## Gallery
+
+Every picture below is a JSON description in `examples/json/`, rendered with
+`cargo run --release --bin json_render -- examples/json/<name>.json out.png`.
+
+| | |
+| --- | --- |
+| ![glTF aircraft over raster tiles](docs/images/scenegraph.png) | ![Terrain from elevation tiles](docs/images/terrain.png) |
+| `ScenegraphLayer`: glTF models with a heading each, over a `TileLayer` basemap | `TerrainLayer`: elevation tiles triangulated with Martini, lit by a directional light |
+| ![Extruded blocks casting shadows](docs/images/shadows.png) | ![Hexagon aggregation with a vignette](docs/images/post-process.png) |
+| Shadow maps from a low sun over Vancouver's extruded blocks | `HexagonLayer` under two `PostProcessEffect` passes, a vignette and a saturation boost |
+| ![Raster tiles of Copenhagen](docs/images/osm-tiles.png) | ![Vancouver blocks from GeoJSON](docs/images/geojson-vancouver.png) |
+| `TileLayer`: a frustum culled quadtree loading raster tiles in the background | `GeoJsonLayer`: 4,600 extruded blocks read from GeoJSON |
+
 ## Status
 
-Working today, headless and verified pixel by pixel in tests:
+**Layers.** Ports of `@deck.gl/layers`, `@deck.gl/aggregation-layers`, `@deck.gl/geo-layers`
+and `@deck.gl/mesh-layers`, all verified pixel by pixel in headless GPU tests:
 
-- `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer`, the composite `PolygonLayer` and `GeoJsonLayer`, the aggregation layers `HexagonLayer`, `GridLayer` and `ScreenGridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs) and `HeatmapLayer` (GPU weights texture with additive and max blending, colour ramp texture), `ContourLayer` (marching squares isolines and isobands over the grid aggregation), `H3HexagonLayer`, `S2Layer`, `GeohashLayer` and `QuadkeyLayer` (spatial index cells as polygons), and `TileLayer` (deck.gl's tileset: frustum culled OSM quadtree, best available refinement, cache, background loading on a thread pool; raster tiles from URL templates or any loader and sub layer renderer) with `MVTLayer` (a Mapbox Vector Tile decoder drawing each tile as GeoJSON) and `WMSLayer` (a GetMap or template image per view, requested on a thread when the view settles), and `TripsLayer` and `GreatCircleLayer` from `@deck.gl/geo-layers`, `TerrainLayer` (elevation tiles triangulated with Martini into meshes with a draped texture, Mapbox Terrain-RGB and Terrarium decoders), and `SimpleMeshLayer` and `ScenegraphLayer` from `@deck.gl/mesh-layers` (instanced triangle meshes and glTF scenes with orientation, scale, translation or a transform matrix per instance, vertex colours, materials and textures, lighting and flat shading, size limits in pixels; OBJ and glTF readers and a cube helper)
+| Group | Layers |
+| --- | --- |
+| Core | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer` |
+| Composite | `PolygonLayer`, `GeoJsonLayer` |
+| Aggregation | `HexagonLayer`, `GridLayer`, `ScreenGridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs), `HeatmapLayer` (GPU weights texture, colour ramp), `ContourLayer` (marching squares isolines and isobands) |
+| Geo | `TileLayer` (frustum culled quadtree, best available refinement, cache, background loading), `MVTLayer` (a dependency free Mapbox Vector Tile decoder), `WMSLayer`, `TerrainLayer` (Martini meshes from elevation tiles, Mapbox Terrain-RGB and Terrarium decoders), `TripsLayer`, `GreatCircleLayer`, `H3HexagonLayer`, `S2Layer`, `GeohashLayer`, `QuadkeyLayer` |
+| Mesh | `SimpleMeshLayer` (OBJ files, a cube helper), `ScenegraphLayer` (glTF scenes with node transforms, materials and textures); both with orientation, scale, translation or a transform matrix per instance, and size limits in pixels |
+
+Everything else that works today:
+
 - `GlobeView`, `OrthographicView`, `OrbitView` and `FirstPersonView` next to the map view, with their viewports and view states, plus a `GlobeController` and an `OrbitController` (also for the orthographic view) with deck.gl's gestures
 - Several views per deck in sub rectangles of the canvas (`Deck::set_views`, pixel or percentage extents, padding, per view cameras, a `layerFilter`, view aware picking)
 - Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it, with repeated world copies across the antimeridian (`DeckProps::repeat`) and `wrapLongitude` shortest paths
@@ -71,20 +99,40 @@ Working today, headless and verified pixel by pixel in tests:
   NDJSON, GeoParquet, Parquet and FlatGeobuf files. See [docs/json.md](docs/json.md).
 - A C API that takes JSON layers and Arrow tables through the Arrow C Data Interface, so a host
   in any language can feed columnar data without copying it.
-
-![GeoJsonLayer rendering deck.gl's Vancouver blocks example](docs/images/geojson-vancouver.png)
-
 - Rendering into a maplibre-native map, depth interleaved with its 3D buildings, either inside
   maplibre-native's own Metal backend through a C API, or from an all-Rust host through
   maplibre-native-ffi. See [docs/maplibre-native.md](docs/maplibre-native.md).
 - The C API library cross-compiles for iOS (`cargo build --target aarch64-apple-ios -p deck-gl-ffi`).
 
-Not yet: transitions, controllers, and the wider layer catalog. See
-[docs/rust-port.md](docs/rust-port.md) for the design and the open decisions.
+Not yet: `Tile3DLayer` and the `TerrainExtension` that drapes layers over terrain, GeoArrow
+columns of multi geometries, Python, Swift and Kotlin bindings, golden image comparisons
+against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port.md) for the
+design and the open decisions, and the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
+for what is planned.
 
 ![maplibre-native with the deck.gl-native overlay](docs/images/maplibre-overlay.png)
 
 *maplibre-native's GLFW app on Metal with deck.gl-native layers drawn into the same frame.*
+
+## Performance
+
+Measured on an Apple M series laptop, release build, including reading the 1024 x 1024 frame
+back to the CPU; `cargo bench -p deck-gl-layers --bench layers` and
+[docs/benchmarks.md](docs/benchmarks.md) have the full table and the method.
+
+| | Upload | Frame |
+| --- | ---: | ---: |
+| 1,000,000 points, Arrow columns | 14.3 ms | 2.9 ms |
+| 1,000,000 points, function accessors | 20.8 ms | 2.9 ms |
+| 100,000 extruded polygons | 33.7 ms | 2.0 ms |
+| 10,000 paths of 20 vertices | 12.8 ms | 1.8 ms |
+
+The upload path is where the work went: Arrow columns already in the GPU layout are handed
+over without conversion, constant accessors upload a single element with a zero vertex stride
+rather than one value per object, a `Float32` position column skips its 64 bit low half
+entirely, polygons are tessellated on all cores, and attribute updates write into the buffers
+that are already there. Layers of one type share a pipeline through the deck's cache, so two
+hundred small layers initialize in 165 ms rather than 384 ms.
 
 ## Crates
 
@@ -120,6 +168,13 @@ DECKGL_JSON=examples/json/vancouver-blocks.json cargo run --release --bin window
 DECKGL_ONLY=trips,labels cargo run --release --bin texture_render   # only the listed layer ids
 cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a maplibre-native basemap
 ```
+
+`examples/json/` holds the descriptions behind the gallery and a few more: `scenegraph.json`,
+`terrain.json`, `shadows.json`, `post-process.json`, `osm-tiles.json`, `vancouver-blocks.json`,
+`san-francisco.json`, `heathrow-flights.json`, `simple-mesh.json`, `minimap.json` and
+`data-filter.json`. Any of them runs in the window (`DECKGL_JSON=...`) or renders to a PNG
+(`json_render`), and the ones that load tiles or remote data keep rendering until the loads
+settle.
 
 ## Using the library
 
