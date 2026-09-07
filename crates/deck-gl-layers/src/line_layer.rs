@@ -1,7 +1,6 @@
 //! Port of `@deck.gl/layers/src/line-layer/line-layer.ts`.
 
-use deck_gl::attributes::{color_buffer, position_buffers};
-use deck_gl::data::resolve_f32;
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
@@ -55,35 +54,23 @@ fn shortest_path_variants(wrap_longitude: bool) -> &'static [f32] {
     }
 }
 
-/// Which attribute buffers must be uploaded again.
-#[derive(Clone, Copy, Debug, Default)]
-struct DirtyAttributes {
-    sources: bool,
-    targets: bool,
-    colors: bool,
-    widths: bool,
-}
-
-impl DirtyAttributes {
-    fn all() -> Self {
-        Self {
-            sources: true,
-            targets: true,
-            colors: true,
-            widths: true,
-        }
-    }
-
-    fn any(&self) -> bool {
-        self.sources || self.targets || self.colors || self.widths
-    }
+/// The line's instance buffers: both end points with their low parts, colours and widths.
+fn line_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::instance("instanceSourcePositions", "source", 1, VertexFormat::Float32x3),
+        BufferSpec::instance("instanceTargetPositions", "target", 2, VertexFormat::Float32x3),
+        BufferSpec::instance_low("instanceSourcePositions64Low", "source", 3),
+        BufferSpec::instance_low("instanceTargetPositions64Low", "target", 4),
+        BufferSpec::instance("instanceColors", "color", 5, VertexFormat::Unorm8x4),
+        BufferSpec::instance("instanceWidths", "width", 6, VertexFormat::Float32),
+    ])
 }
 
 pub struct LineLayer {
     props: LineLayerProps,
     model: Option<Model>,
     data_dirty: bool,
-    dirty: DirtyAttributes,
+    attributes: AttributeManager,
 }
 
 impl LineLayer {
@@ -92,7 +79,7 @@ impl LineLayer {
             props,
             model: None,
             data_dirty: true,
-            dirty: DirtyAttributes::all(),
+            attributes: line_attributes(),
         }
     }
 
@@ -102,59 +89,33 @@ impl LineLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: LineLayerProps) {
-        if self.props == props {
-            return;
+        if self.props != props {
+            self.props = props;
+            self.data_dirty = true;
         }
-        let old = &self.props;
-        let data_changed = old.data != props.data;
-        self.dirty.sources |= data_changed || old.get_source_position != props.get_source_position;
-        self.dirty.targets |= data_changed || old.get_target_position != props.get_target_position;
-        self.dirty.colors |= data_changed || old.get_color != props.get_color;
-        self.dirty.widths |= data_changed || old.get_width != props.get_width;
-        self.data_dirty = self.dirty.any();
-        self.props = props;
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
-        let data = &props.data;
-        let device = &ctx.device;
-        let dirty = self.dirty;
-        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-
-        if dirty.sources {
-            let (hi, lo) = position_buffers(
-                device,
-                data,
-                &props.get_source_position,
-                "instanceSourcePositions",
-            )?;
-            model.set_vertex_buffer("instanceSourcePositions", hi)?;
-            model.set_vertex_buffer("instanceSourcePositions64Low", lo)?;
-        }
-        if dirty.targets {
-            let (hi, lo) = position_buffers(
-                device,
-                data,
-                &props.get_target_position,
-                "instanceTargetPositions",
-            )?;
-            model.set_vertex_buffer("instanceTargetPositions", hi)?;
-            model.set_vertex_buffer("instanceTargetPositions64Low", lo)?;
-        }
-        if dirty.colors {
-            let buffer = color_buffer(device, data, &props.get_color, "instanceColors")?;
-            model.set_vertex_buffer("instanceColors", buffer)?;
-        }
-        if dirty.widths {
-            let widths = resolve_f32(data, &props.get_width)?;
-            model.set_vertex_buffer(
-                "instanceWidths",
-                create_vertex_buffer_from(device, "instanceWidths", &widths),
-            )?;
-        }
-        model.set_instance_count(data.len() as u32);
-        self.dirty = DirtyAttributes::default();
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
+        self.attributes.update(
+            &ctx.device,
+            model,
+            &props.data,
+            &[
+                (
+                    "source",
+                    AttributeSource::Positions(props.get_source_position.clone()),
+                ),
+                (
+                    "target",
+                    AttributeSource::Positions(props.get_target_position.clone()),
+                ),
+                ("color", AttributeSource::Colors(props.get_color.clone())),
+                ("width", AttributeSource::Floats(props.get_width.clone())),
+            ],
+        )?;
+        model.set_instance_count(props.data.len() as u32);
         Ok(())
     }
 }
@@ -166,15 +127,12 @@ impl Layer for LineLayer {
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceSourcePositions", 1, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceTargetPositions", 2, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceSourcePositions64Low", 3, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceTargetPositions64Low", 4, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceColors", 5, VertexFormat::Unorm8x4),
-            VertexBufferLayout::instance("instanceWidths", 6, VertexFormat::Float32),
-        ];
+        let mut layouts = vec![VertexBufferLayout::vertex(
+            "positions",
+            0,
+            VertexFormat::Float32x3,
+        )];
+        layouts.extend(self.attributes.layouts());
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
             &shader,
@@ -199,7 +157,7 @@ impl Layer for LineLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
-        self.dirty = DirtyAttributes::all();
+        self.attributes.invalidate_all();
         Ok(())
     }
 

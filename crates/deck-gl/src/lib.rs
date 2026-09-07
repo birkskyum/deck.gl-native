@@ -13,6 +13,7 @@
     not(test),
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
 )]
+pub mod attribute_manager;
 pub mod attributes;
 pub mod constants;
 pub mod controller;
@@ -29,6 +30,7 @@ pub mod transition;
 pub mod viewport;
 pub mod views;
 
+pub use attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field, Part};
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
 pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};

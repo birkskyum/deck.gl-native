@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/point-cloud-layer/point-cloud-layer.ts`: lit points with
 //! normals.
 
-use deck_gl::data::{resolve_colors, resolve_positions};
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
@@ -12,20 +12,6 @@ use luma_gl::{assemble_shader, Model, ModelDescriptor, ShaderModuleSource, Verte
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/point_cloud_layer.wgsl");
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstancePositions {
-    position: [f32; 3],
-    position_low: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceData {
-    normal: [f32; 3],
-    color: [u8; 4],
-}
 
 /// Properties of a [`PointCloudLayer`]. Defaults match deck.gl.
 #[derive(Clone, Debug, PartialEq)]
@@ -55,10 +41,33 @@ impl Default for PointCloudLayerProps {
 }
 
 /// Renders a point cloud with 3D positions, normals and colors.
+/// The point cloud's instance buffers: position with its low part, then normal and colour.
+fn point_cloud_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::interleaved(
+            "instancePositions",
+            24,
+            vec![
+                Field::new("position", 1, VertexFormat::Float32x3, 0),
+                Field::low("position", 2, 12),
+            ],
+        ),
+        BufferSpec::interleaved(
+            "instanceData",
+            16,
+            vec![
+                Field::new("normal", 3, VertexFormat::Float32x3, 0),
+                Field::new("color", 4, VertexFormat::Unorm8x4, 12),
+            ],
+        ),
+    ])
+}
+
 pub struct PointCloudLayer {
     props: PointCloudLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    attributes: AttributeManager,
 }
 
 impl PointCloudLayer {
@@ -67,6 +76,7 @@ impl PointCloudLayer {
             props,
             model: None,
             data_dirty: true,
+            attributes: point_cloud_attributes(),
         }
     }
 
@@ -98,43 +108,16 @@ impl PointCloudLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
-        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-
-        let positions = resolve_positions(data, &props.get_position)?;
-        let normals = deck_gl::data::resolve_with(data, &props.get_normal, |_| {
-            Err(deck_gl::DeckError::Data(
-                "normal columns are not supported yet".into(),
-            ))
-        })?;
-        let colors = resolve_colors(data, &props.get_color)?;
-
-        let instance_positions: Vec<InstancePositions> = positions
-            .iter()
-            .map(|p| {
-                let hi = [p[0] as f32, p[1] as f32, p[2] as f32];
-                InstancePositions {
-                    position: hi,
-                    position_low: [
-                        (p[0] - hi[0] as f64) as f32,
-                        (p[1] - hi[1] as f64) as f32,
-                        (p[2] - hi[2] as f64) as f32,
-                    ],
-                }
-            })
-            .collect();
-        let instance_data: Vec<InstanceData> = (0..data.len())
-            .map(|i| InstanceData {
-                normal: normals[i],
-                color: colors[i],
-            })
-            .collect();
-        model.set_vertex_buffer(
-            "instancePositions",
-            create_vertex_buffer_from(&ctx.device, "instancePositions", &instance_positions),
-        )?;
-        model.set_vertex_buffer(
-            "instanceData",
-            create_vertex_buffer_from(&ctx.device, "instanceData", &instance_data),
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
+        self.attributes.update(
+            &ctx.device,
+            model,
+            data,
+            &[
+                ("position", AttributeSource::Positions(props.get_position.clone())),
+                ("normal", AttributeSource::Vec3(props.get_normal.clone())),
+                ("color", AttributeSource::Colors(props.get_color.clone())),
+            ],
         )?;
         model.set_instance_count(data.len() as u32);
         Ok(())
@@ -153,21 +136,12 @@ impl Layer for PointCloudLayer {
             .copied()
             .collect();
         let shader = assemble_shader(&self.props.base.id, &modules, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x3),
-            VertexBufferLayout::interleaved(
-                "instancePositions",
-                std::mem::size_of::<InstancePositions>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[(1, VertexFormat::Float32x3, 0), (2, VertexFormat::Float32x3, 12)],
-            ),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[(3, VertexFormat::Float32x3, 0), (4, VertexFormat::Unorm8x4, 12)],
-            ),
-        ];
+        let mut layouts = vec![VertexBufferLayout::vertex(
+            "positions",
+            0,
+            VertexFormat::Float32x3,
+        )];
+        layouts.extend(self.attributes.layouts());
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
             &shader,
@@ -192,6 +166,7 @@ impl Layer for PointCloudLayer {
         model.set_vertex_count(3);
         self.model = Some(model);
         self.data_dirty = true;
+        self.attributes.invalidate_all();
         Ok(())
     }
 

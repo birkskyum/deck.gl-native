@@ -1,37 +1,15 @@
 //! Port of `@deck.gl/layers/src/arc-layer/arc-layer.ts`.
 
-use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions};
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
 };
-use luma_gl::buffer::create_vertex_buffer_from;
-use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
+use luma_gl::{assemble_shader, Model, ModelDescriptor};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/arc_layer.wgsl");
-
-/// Source and target positions as high and low f32 parts, interleaved.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstancePositions {
-    source: [f32; 3],
-    source_low: [f32; 3],
-    target: [f32; 3],
-    target_low: [f32; 3],
-}
-
-/// Colors, width, height and tilt, interleaved.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceData {
-    source_color: [u8; 4],
-    target_color: [u8; 4],
-    width: f32,
-    height: f32,
-    tilt: f32,
-}
 
 /// Properties of an [`ArcLayer`]. Defaults match deck.gl.
 #[derive(Clone, Debug, PartialEq)]
@@ -79,10 +57,39 @@ impl Default for ArcLayerProps {
 }
 
 /// Renders raised arcs joining pairs of source and target coordinates.
+/// The arc's instance buffers: both end points with their low parts interleaved, then colours,
+/// width, height and tilt.
+fn arc_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::interleaved(
+            "instancePositions",
+            48,
+            vec![
+                Field::new("source", 0, VertexFormat::Float32x3, 0),
+                Field::low("source", 1, 12),
+                Field::new("target", 2, VertexFormat::Float32x3, 24),
+                Field::low("target", 3, 36),
+            ],
+        ),
+        BufferSpec::interleaved(
+            "instanceData",
+            20,
+            vec![
+                Field::new("sourceColor", 4, VertexFormat::Unorm8x4, 0),
+                Field::new("targetColor", 5, VertexFormat::Unorm8x4, 4),
+                Field::new("width", 6, VertexFormat::Float32, 8),
+                Field::new("height", 7, VertexFormat::Float32, 12),
+                Field::new("tilt", 8, VertexFormat::Float32, 16),
+            ],
+        ),
+    ])
+}
+
 pub struct ArcLayer {
     props: ArcLayerProps,
     model: Option<Model>,
     data_dirty: bool,
+    attributes: AttributeManager,
 }
 
 impl ArcLayer {
@@ -91,6 +98,7 @@ impl ArcLayer {
             props,
             model: None,
             data_dirty: true,
+            attributes: arc_attributes(),
         }
     }
 
@@ -124,57 +132,32 @@ impl ArcLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
-        let device = &ctx.device;
-        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-
-        let sources = resolve_positions(data, &props.get_source_position)?;
-        let targets = resolve_positions(data, &props.get_target_position)?;
-        let source_colors = resolve_colors(data, &props.get_source_color)?;
-        let target_colors = resolve_colors(data, &props.get_target_color)?;
-        let widths = resolve_f32(data, &props.get_width)?;
-        let heights = resolve_f32(data, &props.get_height)?;
-        let tilts = resolve_f32(data, &props.get_tilt)?;
-
-        let split = |p: Position| -> ([f32; 3], [f32; 3]) {
-            let hi = [p[0] as f32, p[1] as f32, p[2] as f32];
-            let lo = [
-                (p[0] - hi[0] as f64) as f32,
-                (p[1] - hi[1] as f64) as f32,
-                (p[2] - hi[2] as f64) as f32,
-            ];
-            (hi, lo)
-        };
-        let positions: Vec<InstancePositions> = sources
-            .iter()
-            .zip(&targets)
-            .map(|(s, t)| {
-                let (source, source_low) = split(*s);
-                let (target, target_low) = split(*t);
-                InstancePositions {
-                    source,
-                    source_low,
-                    target,
-                    target_low,
-                }
-            })
-            .collect();
-        let instance_data: Vec<InstanceData> = (0..data.len())
-            .map(|i| InstanceData {
-                source_color: source_colors[i],
-                target_color: target_colors[i],
-                width: widths[i],
-                height: heights[i],
-                tilt: tilts[i],
-            })
-            .collect();
-
-        model.set_vertex_buffer(
-            "instancePositions",
-            create_vertex_buffer_from(device, "instancePositions", &positions),
-        )?;
-        model.set_vertex_buffer(
-            "instanceData",
-            create_vertex_buffer_from(device, "instanceData", &instance_data),
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
+        self.attributes.update(
+            &ctx.device,
+            model,
+            data,
+            &[
+                (
+                    "source",
+                    AttributeSource::Positions(props.get_source_position.clone()),
+                ),
+                (
+                    "target",
+                    AttributeSource::Positions(props.get_target_position.clone()),
+                ),
+                (
+                    "sourceColor",
+                    AttributeSource::Colors(props.get_source_color.clone()),
+                ),
+                (
+                    "targetColor",
+                    AttributeSource::Colors(props.get_target_color.clone()),
+                ),
+                ("width", AttributeSource::Floats(props.get_width.clone())),
+                ("height", AttributeSource::Floats(props.get_height.clone())),
+                ("tilt", AttributeSource::Floats(props.get_tilt.clone())),
+            ],
         )?;
         model.set_instance_count(data.len() as u32);
         Ok(())
@@ -200,31 +183,7 @@ impl Layer for ArcLayer {
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::interleaved(
-                "instancePositions",
-                std::mem::size_of::<InstancePositions>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (0, VertexFormat::Float32x3, 0),
-                    (1, VertexFormat::Float32x3, 12),
-                    (2, VertexFormat::Float32x3, 24),
-                    (3, VertexFormat::Float32x3, 36),
-                ],
-            ),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (4, VertexFormat::Unorm8x4, 0),
-                    (5, VertexFormat::Unorm8x4, 4),
-                    (6, VertexFormat::Float32, 8),
-                    (7, VertexFormat::Float32, 12),
-                    (8, VertexFormat::Float32, 16),
-                ],
-            ),
-        ];
+        let layouts = self.attributes.layouts();
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
             &shader,
@@ -239,6 +198,7 @@ impl Layer for ArcLayer {
         model.set_vertex_count(self.props.num_segments.max(1) * 2);
         self.model = Some(model);
         self.data_dirty = true;
+        self.attributes.invalidate_all();
         Ok(())
     }
 

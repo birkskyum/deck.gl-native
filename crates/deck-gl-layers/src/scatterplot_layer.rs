@@ -1,7 +1,6 @@
 //! Port of `@deck.gl/layers/src/scatterplot-layer/scatterplot-layer.ts`.
 
-use deck_gl::attributes::{color_buffer, position_buffers};
-use deck_gl::data::{resolve_f32, resolve_vec2};
+use deck_gl::attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field};
 use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
@@ -12,16 +11,6 @@ use luma_gl::{assemble_shader, Model, ModelDescriptor, VertexBufferLayout};
 use wgpu::VertexFormat;
 
 const SHADER: &str = include_str!("wgsl/scatterplot_layer.wgsl");
-
-/// Per-instance scalars interleaved in one buffer, to stay within the vertex buffer limit.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceData {
-    radius: f32,
-    line_width: f32,
-    pixel_offset: [f32; 2],
-    row_index: u32,
-}
 
 /// Properties of a [`ScatterplotLayer`]. Defaults match deck.gl.
 #[derive(Clone, Debug, PartialEq)]
@@ -76,35 +65,32 @@ impl Default for ScatterplotLayerProps {
 }
 
 /// Renders circles at given coordinates.
-/// Which attribute buffers must be uploaded again.
-#[derive(Clone, Copy, Debug, Default)]
-struct DirtyAttributes {
-    positions: bool,
-    instance: bool,
-    fill_colors: bool,
-    line_colors: bool,
-}
-
-impl DirtyAttributes {
-    fn all() -> Self {
-        Self {
-            positions: true,
-            instance: true,
-            fill_colors: true,
-            line_colors: true,
-        }
-    }
-
-    fn any(&self) -> bool {
-        self.positions || self.instance || self.fill_colors || self.line_colors
-    }
+/// The scatterplot's instance buffers: positions in two buffers, colours in their own, and
+/// the scalars interleaved to stay within the vertex buffer limit.
+fn scatterplot_attributes() -> AttributeManager {
+    AttributeManager::new(vec![
+        BufferSpec::instance("instancePositions", "position", 1, VertexFormat::Float32x3),
+        BufferSpec::instance_low("instancePositions64Low", "position", 2),
+        BufferSpec::instance("instanceFillColors", "fillColor", 5, VertexFormat::Unorm8x4),
+        BufferSpec::instance("instanceLineColors", "lineColor", 6, VertexFormat::Unorm8x4),
+        BufferSpec::interleaved(
+            "instanceData",
+            20,
+            vec![
+                Field::new("radius", 3, VertexFormat::Float32, 0),
+                Field::new("lineWidth", 4, VertexFormat::Float32, 4),
+                Field::new("pixelOffset", 7, VertexFormat::Float32x2, 8),
+                Field::new("rowIndex", 8, VertexFormat::Uint32, 16),
+            ],
+        ),
+    ])
 }
 
 pub struct ScatterplotLayer {
     props: ScatterplotLayerProps,
     model: Option<Model>,
     data_dirty: bool,
-    dirty: DirtyAttributes,
+    attributes: AttributeManager,
 }
 
 impl ScatterplotLayer {
@@ -113,7 +99,7 @@ impl ScatterplotLayer {
             props,
             model: None,
             data_dirty: true,
-            dirty: DirtyAttributes::all(),
+            attributes: scatterplot_attributes(),
         }
     }
 
@@ -123,61 +109,33 @@ impl ScatterplotLayer {
 
     /// Replace the props. Attributes are rebuilt on the next update when they changed.
     pub fn set_props(&mut self, props: ScatterplotLayerProps) {
-        if self.props == props {
-            return;
+        if self.props != props {
+            self.props = props;
+            self.data_dirty = true;
         }
-        let old = &self.props;
-        let data_changed = old.data != props.data;
-        self.dirty.positions |= data_changed || old.get_position != props.get_position;
-        self.dirty.instance |= data_changed
-            || old.get_radius != props.get_radius
-            || old.get_line_width != props.get_line_width
-            || old.get_pixel_offset != props.get_pixel_offset;
-        self.dirty.fill_colors |= data_changed || old.get_fill_color != props.get_fill_color;
-        self.dirty.line_colors |= data_changed || old.get_line_color != props.get_line_color;
-        self.data_dirty = self.dirty.any();
-        self.props = props;
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
-        let data = &props.data;
-        let device = &ctx.device;
-        let dirty = self.dirty;
-        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
-
-        if dirty.positions {
-            let (hi, lo) = position_buffers(device, data, &props.get_position, "instancePositions")?;
-            model.set_vertex_buffer("instancePositions", hi)?;
-            model.set_vertex_buffer("instancePositions64Low", lo)?;
-        }
-        if dirty.instance {
-            let radius = resolve_f32(data, &props.get_radius)?;
-            let line_widths = resolve_f32(data, &props.get_line_width)?;
-            let pixel_offsets = resolve_vec2(data, &props.get_pixel_offset)?;
-            let instance_data: Vec<InstanceData> = (0..data.len())
-                .map(|i| InstanceData {
-                    radius: radius[i],
-                    line_width: line_widths[i],
-                    pixel_offset: pixel_offsets[i],
-                    row_index: data.source_row(i),
-                })
-                .collect();
-            model.set_vertex_buffer(
-                "instanceData",
-                create_vertex_buffer_from(device, "instanceData", &instance_data),
-            )?;
-        }
-        if dirty.fill_colors {
-            let buffer = color_buffer(device, data, &props.get_fill_color, "instanceFillColors")?;
-            model.set_vertex_buffer("instanceFillColors", buffer)?;
-        }
-        if dirty.line_colors {
-            let buffer = color_buffer(device, data, &props.get_line_color, "instanceLineColors")?;
-            model.set_vertex_buffer("instanceLineColors", buffer)?;
-        }
-        model.set_instance_count(data.len() as u32);
-        self.dirty = DirtyAttributes::default();
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
+        self.attributes.update(
+            &ctx.device,
+            model,
+            &props.data,
+            &[
+                ("position", AttributeSource::Positions(props.get_position.clone())),
+                ("fillColor", AttributeSource::Colors(props.get_fill_color.clone())),
+                ("lineColor", AttributeSource::Colors(props.get_line_color.clone())),
+                ("radius", AttributeSource::Floats(props.get_radius.clone())),
+                ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
+                (
+                    "pixelOffset",
+                    AttributeSource::Vec2(props.get_pixel_offset.clone()),
+                ),
+                ("rowIndex", AttributeSource::RowIndex),
+            ],
+        )?;
+        model.set_instance_count(props.data.len() as u32);
         Ok(())
     }
 }
@@ -189,24 +147,12 @@ impl Layer for ScatterplotLayer {
 
     fn initialize(&mut self, ctx: &LayerContext) -> Result<()> {
         let shader = assemble_shader(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
-        let layouts = [
-            VertexBufferLayout::vertex("positions", 0, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instancePositions", 1, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instancePositions64Low", 2, VertexFormat::Float32x3),
-            VertexBufferLayout::instance("instanceFillColors", 5, VertexFormat::Unorm8x4),
-            VertexBufferLayout::instance("instanceLineColors", 6, VertexFormat::Unorm8x4),
-            VertexBufferLayout::interleaved(
-                "instanceData",
-                std::mem::size_of::<InstanceData>() as u64,
-                wgpu::VertexStepMode::Instance,
-                &[
-                    (3, VertexFormat::Float32, 0),
-                    (4, VertexFormat::Float32, 4),
-                    (7, VertexFormat::Float32x2, 8),
-                    (8, VertexFormat::Uint32, 16),
-                ],
-            ),
-        ];
+        let mut layouts = vec![VertexBufferLayout::vertex(
+            "positions",
+            0,
+            VertexFormat::Float32x3,
+        )];
+        layouts.extend(self.attributes.layouts());
         let mut desc = ModelDescriptor::new(
             &self.props.base.id,
             &shader,
@@ -227,7 +173,7 @@ impl Layer for ScatterplotLayer {
         model.set_vertex_count(4);
         self.model = Some(model);
         self.data_dirty = true;
-        self.dirty = DirtyAttributes::all();
+        self.attributes.invalidate_all();
         Ok(())
     }
 
