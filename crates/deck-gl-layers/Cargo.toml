@@ -9,9 +9,12 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["fetch"]
+default = ["fetch", "s2-cells"]
 # Load raster tiles from http(s) URLs (`TileLayer::raster`).
 fetch = ["dep:ureq"]
+# S2 cells in the geo cell layers. The `s2` crate does not build for wasm32, so a wasm build
+# turns this off; the other cell kinds (H3, geohash, quadkey) are unaffected.
+s2-cells = ["dep:s2"]
 
 [dependencies]
 tracing = { workspace = true }
@@ -29,7 +32,7 @@ serde_json = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 ureq = { version = "3", optional = true }
 h3o = "0.8"
-s2 = "0.0.12"
+s2 = { version = "0.0.12", optional = true }
 flate2 = "1"
 rayon = { workspace = true }
 gltf = { version = "1.4", default-features = false, features = ["utils", "names"] }

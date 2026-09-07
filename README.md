@@ -98,6 +98,12 @@ Not yet: transitions, controllers, and the wider layer catalog. See
 | `deck-gl-ffi` | `@deck.gl/mapbox` | C API (`libdeckgl.a`) for host renderers; Metal device and texture interop; JSON layers |
 | `deck-gl-examples` | | Example binaries |
 
+The core crates also build for `wasm32-unknown-unknown` against wgpu's WebGPU backend, which
+CI checks on every push: `cargo build --target wasm32-unknown-unknown -p deck-gl` and, for the
+layer and JSON crates, `--no-default-features` to leave out the parts with no wasm build
+(`fetch`, which pulls ring through ureq, and `s2-cells`). The browser is deck.gl JS's home,
+so this is a compile check rather than a supported target.
+
 Shader sources under `src/wgsl` in each crate are copied from deck.gl 9.4 and luma.gl (MIT).
 
 ## Building and running

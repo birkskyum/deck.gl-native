@@ -809,6 +809,7 @@ dependencies = [
  "image",
  "luma-gl",
  "math-gl",
+ "rayon",
  "s2",
  "serde_json",
  "thiserror 2.0.20",

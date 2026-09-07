@@ -18,3 +18,8 @@ glam = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
 pollster = { workspace = true }
+
+# On wasm32 the WebGPU backend's handles are not Send or Sync (they wrap `Rc`), which the
+# layer traits need. wgpu offers them anyway for single threaded wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, features = ["fragile-send-sync-non-atomic-wasm"] }

@@ -9,18 +9,20 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["fetch", "parquet", "flatgeobuf"]
+default = ["fetch", "parquet", "flatgeobuf", "s2-cells"]
 # Load `data`, `image` and `iconAtlas` props from http(s) URLs.
 fetch = ["dep:ureq", "deck-gl-layers/fetch"]
 # `data` from Parquet and GeoParquet files.
 parquet = ["dep:parquet", "dep:arrow-select", "dep:bytes", "dep:arrow-schema"]
 # `data` from FlatGeobuf files.
 flatgeobuf = ["dep:flatgeobuf", "dep:geozero"]
+# S2 cells in the geo cell layers; off in a wasm build, see `deck-gl-layers`.
+s2-cells = ["deck-gl-layers/s2-cells"]
 
 [dependencies]
 tracing = { workspace = true }
 deck-gl = { workspace = true }
-deck-gl-layers = { workspace = true }
+deck-gl-layers = { path = "../deck-gl-layers", default-features = false }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true, optional = true }
 glam = { workspace = true }

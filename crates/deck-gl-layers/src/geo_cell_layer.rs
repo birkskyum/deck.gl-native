@@ -64,7 +64,9 @@ pub fn h3_polygon(index: &str, coverage: f64) -> Option<Vec<Position>> {
     Some(ring)
 }
 
-/// The four corners of an S2 cell given by its token.
+/// The four corners of an S2 cell given by its token. Needs the `s2-cells` feature, which is
+/// on by default; without it S2 cells resolve to nothing (the `s2` crate has no wasm32 build).
+#[cfg(feature = "s2-cells")]
 pub fn s2_polygon(token: &str) -> Option<Vec<Position>> {
     let id = s2::cellid::CellID::from_token(token.trim());
     if !id.is_valid() {
@@ -79,6 +81,12 @@ pub fn s2_polygon(token: &str) -> Option<Vec<Position>> {
         .collect();
     ring.push(ring[0]);
     Some(ring)
+}
+
+/// Without the `s2-cells` feature there is no S2 support, so every token is unknown.
+#[cfg(not(feature = "s2-cells"))]
+pub fn s2_polygon(_token: &str) -> Option<Vec<Position>> {
+    None
 }
 
 const GEOHASH_BASE32: &[u8; 32] = b"0123456789bcdefghjkmnpqrstuvwxyz";

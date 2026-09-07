@@ -37,6 +37,22 @@ jobs:
           path: target/texture-render.png
           if-no-files-found: ignore
 
+  wasm:
+    name: wasm32 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # The core crates build for the web through wgpu's WebGPU backend. The layer and JSON
+      # crates need their native only features off: `fetch` (ureq pulls ring) and `s2-cells`
+      # (the s2 crate has no wasm build).
+      - run: cargo build --target wasm32-unknown-unknown -p math-gl -p luma-gl -p deck-gl
+      - run: cargo build --target wasm32-unknown-unknown -p deck-gl-layers --no-default-features
+      - run: cargo build --target wasm32-unknown-unknown -p deck-gl-json --no-default-features
+
   coverage:
     name: coverage (ubuntu)
     runs-on: ubuntu-latest
