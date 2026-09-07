@@ -1418,3 +1418,70 @@ fn tile_3d_layer_reads_its_tileset_url_and_props() {
         .to_string();
     assert!(error.contains("tileset"), "{error}");
 }
+
+#[test]
+fn multi_geometry_tables_become_one_row_per_part() {
+    use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, ListBuilder};
+    use arrow_array::{Array, Int32Array, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+    use deck_gl_layers::ScatterplotLayer;
+    use std::collections::HashMap;
+    // A GeoArrow multipoint table: two points in the first row, one in the second
+    let coords = FixedSizeListBuilder::new(Float64Builder::new(), 2);
+    let mut points = ListBuilder::new(coords);
+    for row in [vec![[1.0, 2.0], [3.0, 4.0]], vec![[5.0, 6.0]]] {
+        for [x, y] in row {
+            let coords = points.values();
+            coords.values().append_value(x);
+            coords.values().append_value(y);
+            coords.append(true);
+        }
+        points.append(true);
+    }
+    let array = points.finish();
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "ARROW:extension:name".to_string(),
+        "geoarrow.multipoint".to_string(),
+    );
+    let schema = Schema::new(vec![
+        Field::new("geometry", array.data_type().clone(), false).with_metadata(metadata),
+        Field::new("size", DataType::Int32, false),
+    ]);
+    let batch = RecordBatch::try_new(
+        Arc::new(schema),
+        vec![Arc::new(array), Arc::new(Int32Array::from(vec![7, 9]))],
+    )
+    .unwrap();
+    let mut deck = JsonConverter::new()
+        .with_table("places", batch)
+        .convert(&json!([{
+            "@@type": "ScatterplotLayer",
+            "id": "points",
+            "data": "@@table:places",
+            "getPosition": "@@column:geometry",
+            "getRadius": "@@column:size"
+        }]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let layer = deck.layers[0]
+        .as_any_mut()
+        .downcast_mut::<ScatterplotLayer>()
+        .expect("a scatterplot layer");
+    let props = layer.props();
+    // Three parts, each with the radius of the row it came from
+    assert_eq!(props.data.len(), 3);
+    assert_eq!(
+        deck_gl::data::resolve_positions(&props.data, &props.get_position).unwrap(),
+        vec![[1.0, 2.0, 0.0], [3.0, 4.0, 0.0], [5.0, 6.0, 0.0]]
+    );
+    assert_eq!(
+        deck_gl::data::resolve_f32(&props.data, &props.get_radius).unwrap(),
+        vec![7.0, 7.0, 9.0]
+    );
+    // Picking reports the rows of the table
+    assert_eq!(
+        (0..3).map(|i| props.data.source_row(i)).collect::<Vec<_>>(),
+        vec![0, 0, 1]
+    );
+}

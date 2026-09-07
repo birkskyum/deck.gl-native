@@ -44,7 +44,9 @@ pub fn convert_layer(
     let layer: Box<dyn Layer> = match layer_type {
         "ScatterplotLayer" => {
             let data = load_rows(&mut props, options)?;
-            Box::new(ScatterplotLayer::new(scatterplot(&props, data)?))
+            let mut layer = scatterplot(&props, data)?;
+            (layer.data, layer.get_position) = exploded_points(layer.data, layer.get_position)?;
+            Box::new(ScatterplotLayer::new(layer))
         }
         "LineLayer" => {
             let data = load_rows(&mut props, options)?;
@@ -56,7 +58,9 @@ pub fn convert_layer(
         }
         "PathLayer" => {
             let data = load_rows(&mut props, options)?;
-            Box::new(PathLayer::new(path(&props, data)?))
+            let mut layer = path(&props, data)?;
+            (layer.data, layer.get_path) = exploded_paths(layer.data, layer.get_path)?;
+            Box::new(PathLayer::new(layer))
         }
         "TripsLayer" => {
             let data = load_rows(&mut props, options)?;
@@ -75,11 +79,15 @@ pub fn convert_layer(
         }
         "SolidPolygonLayer" => {
             let data = load_rows(&mut props, options)?;
-            Box::new(SolidPolygonLayer::new(solid_polygon(&props, data)?))
+            let mut layer = solid_polygon(&props, data)?;
+            (layer.data, layer.get_polygon) = exploded_polygons(layer.data, layer.get_polygon)?;
+            Box::new(SolidPolygonLayer::new(layer))
         }
         "PolygonLayer" => {
             let data = load_rows(&mut props, options)?;
-            Box::new(PolygonLayer::new(polygon(&props, data)?))
+            let mut layer = polygon(&props, data)?;
+            (layer.data, layer.get_polygon) = exploded_polygons(layer.data, layer.get_polygon)?;
+            Box::new(PolygonLayer::new(layer))
         }
         "ColumnLayer" => {
             let data = load_rows(&mut props, options)?;
@@ -572,6 +580,29 @@ pub fn convert_layer(
     props.finish(warnings);
     Ok(Some(layer))
 }
+
+/// A column of multi geometries becomes one row per part, so a layer draws every part and
+/// picking still reports the row it came from. Columns of single geometries are left alone.
+macro_rules! exploded {
+    ($name:ident, $kind:ident, $value:ty) => {
+        fn $name(data: LayerData, accessor: Accessor<$value>) -> Result<(LayerData, Accessor<$value>)> {
+            let Accessor::Column(column) = &accessor else {
+                return Ok((data, accessor));
+            };
+            match deck_gl::explode_multi(&data, column)? {
+                Some((exploded, deck_gl::MultiParts::$kind(parts))) => {
+                    let parts = Arc::new(parts);
+                    Ok((exploded, Accessor::func(move |i| parts[i].clone())))
+                }
+                _ => Ok((data, accessor)),
+            }
+        }
+    };
+}
+
+exploded!(exploded_points, Points, deck_gl::Position);
+exploded!(exploded_paths, Paths, deck_gl::Path);
+exploded!(exploded_polygons, Polygons, deck_gl::Polygon);
 
 /// Attach the layer id to load and parse errors.
 fn in_layer(props: &Props, error: JsonError) -> JsonError {

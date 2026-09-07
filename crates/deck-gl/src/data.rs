@@ -164,6 +164,32 @@ impl LayerData {
         self
     }
 
+    /// The rows at `indices`, in that order: Arrow columns are gathered without copying the
+    /// values that are left out, and every row remembers where it came from, so picking and
+    /// the accessors of a composite layer still report the original rows.
+    pub fn gather(&self, indices: &[u32]) -> Result<Self> {
+        let batch = match &self.batch {
+            Some(batch) => {
+                let taken = arrow_select::take::take_record_batch(
+                    batch,
+                    &arrow_array::UInt32Array::from(indices.to_vec()),
+                )
+                .map_err(|e| DeckError::Data(format!("could not gather rows: {e}")))?;
+                Some(taken)
+            }
+            None => None,
+        };
+        Ok(Self {
+            batch,
+            length: indices.len(),
+            source_rows: Some(Arc::new(
+                indices.iter().map(|i| self.source_row(*i as usize)).collect(),
+            )),
+            changed_rows: None,
+            row_offset: 0,
+        })
+    }
+
     /// The rows in `range`, clamped to the data. Arrow columns are sliced without copying and
     /// function accessors keep seeing the original row numbers.
     pub fn slice(&self, range: Range<usize>) -> Self {
@@ -667,6 +693,165 @@ fn polygons_from_column(column: &ArrayRef) -> Result<Vec<Polygon>> {
     }
 }
 
+/// The parts of a column of multi geometries, one entry per part.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MultiParts {
+    Points(Vec<Position>),
+    Paths(Vec<Path>),
+    Polygons(Vec<Polygon>),
+}
+
+impl MultiParts {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Points(v) => v.len(),
+            Self::Paths(v) => v.len(),
+            Self::Polygons(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Split a column of multi geometries into one row per part, the way
+/// `@geoarrow/deck.gl-layers` does: a layer draws parts, and picking reports the row each
+/// part came from.
+///
+/// The column is recognised by its GeoArrow extension name (`geoarrow.multipoint`,
+/// `geoarrow.multilinestring`, `geoarrow.multipolygon`) or, for WKB, by the geometry in the
+/// bytes. `Ok(None)` means the column holds single geometries, which layers read as they are.
+///
+/// The data that comes back has one row per part, with every other column gathered to match,
+/// so the layer's other accessors keep working.
+pub fn explode_multi(data: &LayerData, column: &str) -> Result<Option<(LayerData, MultiParts)>> {
+    let array = data.column(column)?;
+    let extension = data.column_extension(column);
+    let mut rows: Vec<u32> = Vec::new();
+    let parts = match extension.as_deref() {
+        Some("geoarrow.multipoint") => {
+            let (offsets, coords) = list_parts(array.as_ref())?;
+            let (values, width) = fixed_size_list_to_f64(coords.as_ref())?;
+            let mut points = Vec::new();
+            for row in 0..offsets.len().saturating_sub(1) {
+                for point in values[offsets[row] * width..offsets[row + 1] * width].chunks(width) {
+                    points.push([point[0], point[1], if width == 3 { point[2] } else { 0.0 }]);
+                    rows.push(row as u32);
+                }
+            }
+            MultiParts::Points(points)
+        }
+        Some("geoarrow.multilinestring") => {
+            let (outer, lines) = list_parts(array.as_ref())?;
+            let (line_offsets, coords) = list_parts(lines.as_ref())?;
+            let (values, width) = fixed_size_list_to_f64(coords.as_ref())?;
+            let mut paths = Vec::new();
+            for row in 0..outer.len().saturating_sub(1) {
+                for line in outer[row]..outer[row + 1] {
+                    paths.push(
+                        values[line_offsets[line] * width..line_offsets[line + 1] * width]
+                            .chunks(width)
+                            .map(|c| [c[0], c[1], if width == 3 { c[2] } else { 0.0 }])
+                            .collect(),
+                    );
+                    rows.push(row as u32);
+                }
+            }
+            MultiParts::Paths(paths)
+        }
+        Some("geoarrow.multipolygon") => {
+            let (outer, polygons) = list_parts(array.as_ref())?;
+            let (polygon_offsets, rings) = list_parts(polygons.as_ref())?;
+            let (ring_offsets, coords) = list_parts(rings.as_ref())?;
+            let (values, width) = fixed_size_list_to_f64(coords.as_ref())?;
+            let mut out = Vec::new();
+            for row in 0..outer.len().saturating_sub(1) {
+                for polygon in outer[row]..outer[row + 1] {
+                    let mut ring_list = Vec::new();
+                    for ring in polygon_offsets[polygon]..polygon_offsets[polygon + 1] {
+                        ring_list.push(
+                            values[ring_offsets[ring] * width..ring_offsets[ring + 1] * width]
+                                .chunks(width)
+                                .map(|c| [c[0], c[1], if width == 3 { c[2] } else { 0.0 }])
+                                .collect(),
+                        );
+                    }
+                    out.push(ring_list);
+                    rows.push(row as u32);
+                }
+            }
+            MultiParts::Polygons(out)
+        }
+        _ => match explode_wkb(array, &mut rows)? {
+            Some(parts) => parts,
+            None => return Ok(None),
+        },
+    };
+    Ok(Some((data.gather(&rows)?, parts)))
+}
+
+/// The parts of a WKB column of multi geometries, or `None` when it holds single ones.
+fn explode_wkb(column: &ArrayRef, rows: &mut Vec<u32>) -> Result<Option<MultiParts>> {
+    let Some(bytes) = wkb_rows(column) else {
+        return Ok(None);
+    };
+    let geometries: Vec<Option<crate::geojson::Geometry>> = bytes
+        .iter()
+        .map(|row| row.and_then(|b| crate::wkb::wkb_geometry(b).ok()))
+        .collect();
+    // The first geometry that says what the column holds decides how it is split
+    let kind = geometries.iter().flatten().find_map(|g| match g {
+        crate::geojson::Geometry::MultiPoint(_) => Some(0),
+        crate::geojson::Geometry::MultiLineString(_) => Some(1),
+        crate::geojson::Geometry::MultiPolygon(_) => Some(2),
+        _ => None,
+    });
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+    let mut points = Vec::new();
+    let mut paths = Vec::new();
+    let mut polygons = Vec::new();
+    for (row, geometry) in geometries.iter().enumerate() {
+        let Some(geometry) = geometry else { continue };
+        let mut push = |count: usize| rows.extend(std::iter::repeat_n(row as u32, count));
+        match (kind, geometry) {
+            (0, crate::geojson::Geometry::MultiPoint(ps)) => {
+                push(ps.len());
+                points.extend(ps.iter().copied());
+            }
+            (0, crate::geojson::Geometry::Point(p)) => {
+                push(1);
+                points.push(*p);
+            }
+            (1, crate::geojson::Geometry::MultiLineString(ls)) => {
+                push(ls.len());
+                paths.extend(ls.iter().cloned());
+            }
+            (1, crate::geojson::Geometry::LineString(l)) => {
+                push(1);
+                paths.push(l.clone());
+            }
+            (2, crate::geojson::Geometry::MultiPolygon(ps)) => {
+                push(ps.len());
+                polygons.extend(ps.iter().cloned());
+            }
+            (2, crate::geojson::Geometry::Polygon(p)) => {
+                push(1);
+                polygons.push(p.clone());
+            }
+            // A row of another kind contributes nothing rather than a wrong shape
+            _ => {}
+        }
+    }
+    Ok(Some(match kind {
+        0 => MultiParts::Points(points),
+        1 => MultiParts::Paths(paths),
+        _ => MultiParts::Polygons(polygons),
+    }))
+}
+
 /// Offsets (as usize, relative to the child values) and child array of a list array.
 fn list_parts(array: &dyn Array) -> Result<(Vec<usize>, ArrayRef)> {
     if let Some(list) = array.as_list_opt::<i32>() {
@@ -837,6 +1022,121 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("geoarrow.multipolygon"), "{error}");
+    }
+
+    #[test]
+    fn multi_geometry_columns_explode_into_one_row_per_part() {
+        use arrow_array::builder::{FixedSizeListBuilder, Float64Builder, ListBuilder};
+        use arrow_array::{Int32Array, StringArray};
+        use std::collections::HashMap;
+        // A GeoArrow multipoint column: the first row has two points, the second one
+        let coords = FixedSizeListBuilder::new(Float64Builder::new(), 2);
+        let mut points = ListBuilder::new(coords);
+        for row in [vec![[1.0, 2.0], [3.0, 4.0]], vec![[5.0, 6.0]]] {
+            for [x, y] in row {
+                let coords = points.values();
+                coords.values().append_value(x);
+                coords.values().append_value(y);
+                coords.append(true);
+            }
+            points.append(true);
+        }
+        let array = points.finish();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "ARROW:extension:name".to_string(),
+            "geoarrow.multipoint".to_string(),
+        );
+        let schema = Schema::new(vec![
+            Field::new("geometry", array.data_type().clone(), false).with_metadata(metadata),
+            Field::new("id", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+        ]);
+        let batch = RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(array),
+                Arc::new(Int32Array::from(vec![10, 20])),
+                Arc::new(StringArray::from(vec!["a", "b"])),
+            ],
+        )
+        .unwrap();
+        let data = LayerData::from_batch(batch);
+        let (exploded, parts) = explode_multi(&data, "geometry").unwrap().expect("a multi column");
+        assert_eq!(
+            parts,
+            MultiParts::Points(vec![[1.0, 2.0, 0.0], [3.0, 4.0, 0.0], [5.0, 6.0, 0.0]])
+        );
+        // Three parts, and the other columns follow the rows they came from
+        assert_eq!(exploded.len(), 3);
+        assert_eq!(
+            resolve_f32(&exploded, &Accessor::column("id")).unwrap(),
+            vec![10.0, 10.0, 20.0]
+        );
+        assert_eq!(
+            resolve_strings(&exploded, &Accessor::column("name")).unwrap(),
+            vec!["a".to_string(), "a".to_string(), "b".to_string()]
+        );
+        // Picking reports the rows of the original data
+        assert_eq!(
+            (0..3).map(|i| exploded.source_row(i)).collect::<Vec<_>>(),
+            vec![0, 0, 1]
+        );
+        // A column of single geometries is left alone
+        assert!(explode_multi(&batch_data(), "pos").unwrap().is_none());
+    }
+
+    /// The plain batch of the other tests, as layer data.
+    fn batch_data() -> LayerData {
+        LayerData::from_batch(batch())
+    }
+
+    #[test]
+    fn wkb_columns_of_multi_geometries_explode_too() {
+        use arrow_array::BinaryArray;
+        // WKB multipolygon: two squares in the first row, one in the second
+        let square = |x: f64, y: f64| {
+            let mut ring = Vec::new();
+            for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)] {
+                ring.push([x + dx, y + dy]);
+            }
+            ring
+        };
+        let multi_polygon = |squares: Vec<Vec<[f64; 2]>>| {
+            let mut bytes = vec![1u8];
+            bytes.extend(6u32.to_le_bytes()); // MultiPolygon
+            bytes.extend((squares.len() as u32).to_le_bytes());
+            for ring in squares {
+                bytes.push(1);
+                bytes.extend(3u32.to_le_bytes()); // Polygon
+                bytes.extend(1u32.to_le_bytes()); // one ring
+                bytes.extend((ring.len() as u32).to_le_bytes());
+                for [x, y] in ring {
+                    bytes.extend(x.to_le_bytes());
+                    bytes.extend(y.to_le_bytes());
+                }
+            }
+            bytes
+        };
+        let first = multi_polygon(vec![square(0.0, 0.0), square(10.0, 0.0)]);
+        let second = multi_polygon(vec![square(20.0, 0.0)]);
+        let column = BinaryArray::from_vec(vec![first.as_slice(), second.as_slice()]);
+        let schema = Schema::new(vec![Field::new("geometry", DataType::Binary, false)]);
+        let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(column)]).unwrap();
+        let data = LayerData::from_batch(batch);
+        let (exploded, parts) = explode_multi(&data, "geometry").unwrap().expect("a multi column");
+        let MultiParts::Polygons(polygons) = parts else {
+            panic!("expected polygons");
+        };
+        assert_eq!(polygons.len(), 3);
+        assert_eq!(polygons[0][0][0], [0.0, 0.0, 0.0]);
+        assert_eq!(polygons[1][0][0], [10.0, 0.0, 0.0]);
+        assert_eq!(polygons[2][0][0], [20.0, 0.0, 0.0]);
+        assert_eq!(exploded.len(), 3);
+        assert_eq!(
+            (0..3).map(|i| exploded.source_row(i)).collect::<Vec<_>>(),
+            vec![0, 0, 1]
+        );
     }
 
     #[test]

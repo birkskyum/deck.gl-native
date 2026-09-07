@@ -57,7 +57,7 @@ The viewport math is ported from `@math.gl/web-mercator` and tested against it, 
 world copies across the antimeridian.
 
 **Data.** Arrow record batches with column, constant and function accessors; GeoArrow geometry
-columns in both coordinate layouts plus WKB; GeoJSON, CSV, NDJSON, GeoParquet, Parquet and
+columns in both coordinate layouts plus WKB, with multi geometries split into one row per part; GeoJSON, CSV, NDJSON, GeoParquet, Parquet and
 FlatGeobuf files. Constant accessors upload a single element, `with_changed_rows` rewrites only
 the rows that changed, and URLs load in the background through a shared fetcher with a cache,
 deduplication and cancellation.
@@ -82,8 +82,8 @@ PNG, logging goes through `tracing`, and criterion benchmarks cover the large la
 ([docs/benchmarks.md](docs/benchmarks.md)).
 
 Not yet: point cloud (`pnts`) tiles in `Tile3DLayer`, draping layers over terrain (the other
-half of `TerrainExtension`), GeoArrow columns of multi geometries, Python, Swift and Kotlin
-bindings, golden image comparisons against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port.md) for the
+half of `TerrainExtension`), Python, Swift and Kotlin bindings, golden image comparisons
+against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port.md) for the
 design and the open decisions, and the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
 for what is planned.
 

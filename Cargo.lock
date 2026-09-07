@@ -722,6 +722,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-schema",
+ "arrow-select",
  "bytemuck",
  "glam",
  "image",

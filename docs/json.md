@@ -85,6 +85,12 @@ WKB, with Z and M coordinates and EWKB SRIDs accepted. A Parquet file without Ge
 metadata is an Arrow table, read with `@@column:` accessors like the named tables below. The
 `parquet` and `flatgeobuf` cargo features of `deck-gl-json` (on by default) provide this.
 
+A geometry column of multi geometries (`geoarrow.multipoint`, `geoarrow.multilinestring`,
+`geoarrow.multipolygon`, or WKB holding them) becomes one row per part, as
+`@geoarrow/deck.gl-layers` does: the scatterplot, path, polygon and solid polygon layers draw
+every part, the other accessors follow the row each part came from, and picking reports that
+row.
+
 ## Arrow tables
 
 Large data should not go through JSON. A converter can carry named Arrow record batches, and

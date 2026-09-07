@@ -41,7 +41,7 @@ pub use attribute_manager::{AttributeManager, AttributeSource, BufferSpec, Field
 pub use collision::CollisionMaps;
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
 pub use controller::{Constraints, MapController};
-pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
+pub use data::{explode_multi, Accessor, Color, LayerData, MultiParts, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, FrameStats, PickingInfo, Snapshot, ViewState};
 pub use extension::{
     default_shaders, same_extension, set_default_shaders, ExtensionAttribute, ExtensionShaders, Extensions,
