@@ -2620,10 +2620,11 @@ fn arrow_columns_upload_without_conversion() {
         assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
         deck.stats().uploaded_bytes
     };
-    // Per row: positions high and low (12 bytes each), the fill colour (4) and the 20 byte
-    // instance data. The line colour is a constant accessor, so it is one element whatever
-    // the row count, and the quad geometry of the layer is the same for both
-    assert_eq!(uploaded(100) - uploaded(50), 50 * (12 + 12 + 4 + 20));
+    // Per row: the positions (12 bytes), the fill colour (4) and the 20 byte instance data.
+    // The low half of a `Float32` position column is all zeros and the line colour is a
+    // constant accessor, so both hold a single element whatever the row count, and the quad
+    // geometry of the layer is the same for both
+    assert_eq!(uploaded(100) - uploaded(50), 50 * (12 + 4 + 20));
 }
 
 #[test]

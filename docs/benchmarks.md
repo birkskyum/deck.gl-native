@@ -15,16 +15,20 @@ variation is around 10%, so treat these as orders of magnitude rather than exact
 | Layer | Objects | Upload | Frame |
 | --- | ---: | ---: | ---: |
 | `ScatterplotLayer` (function accessors) | 1,000,000 points | 20.8 ms | 2.9 ms |
-| `ScatterplotLayer` (Arrow `Float32` positions, `UInt8` colours) | 1,000,000 points | 16.8 ms | 2.9 ms |
-| `ScatterplotLayer` (Arrow positions, constant styling) | 1,000,000 points | 16.3 ms | 2.9 ms |
+| `ScatterplotLayer` (Arrow `Float32` positions, `UInt8` colours) | 1,000,000 points | 14.3 ms | 2.9 ms |
+| `ScatterplotLayer` (Arrow positions, constant styling) | 1,000,000 points | 14.5 ms | 2.9 ms |
 | `SolidPolygonLayer` (extruded) | 100,000 polygons | 54.7 ms | 1.6 ms |
 | `PathLayer` (20 vertices each) | 10,000 paths | 12.8 ms | 1.8 ms |
 
 Constant accessors upload a single element with a zero vertex stride instead of one value per
 object, so the colour buffer of that third row is four bytes rather than four megabytes. The
-upload time barely moves, since writing a buffer is cheap next to resolving the positions, but
-the memory and the buffer creation go away: a layer whose styling is all constants keeps only
-the buffers that vary per object.
+upload time barely moves between the last two rows, since writing a buffer is cheap next to
+resolving the positions, but the memory and the buffer creation go away: a layer whose styling
+is all constants keeps only the buffers that vary per object.
+
+The same applies to the low half of the positions. A `Float32` position column has no low
+half, so that buffer is a single zero element rather than twelve megabytes, which is most of
+the difference between the first Arrow row and the function accessors above it.
 
 Prop updates on the million points, drawn again through a snapshot: a `radius_scale` change
 (uniform only) costs 5.7 ms and a fill colour accessor change 8.5 ms, against the full upload

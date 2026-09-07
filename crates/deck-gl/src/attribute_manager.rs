@@ -439,15 +439,29 @@ impl AttributeManager {
     /// Which buffers can hold one element instead of one per row: deck.gl's constant
     /// attributes. A buffer qualifies when every field of it reads a constant accessor and
     /// no transition animates one of them.
-    fn constant_buffers(&self, sources: &[(&'static str, AttributeSource)]) -> HashSet<&'static str> {
+    fn constant_buffers(
+        &self,
+        sources: &[(&'static str, AttributeSource)],
+        data: &LayerData,
+    ) -> HashSet<&'static str> {
         let mut constant = HashSet::new();
         for buffer in &self.buffers {
             let all_constant = buffer.fields.iter().all(|field| {
-                self.transitions.for_attribute(field.attribute).is_none()
-                    && sources
-                        .iter()
-                        .find(|(name, _)| *name == field.attribute)
-                        .is_some_and(|(_, source)| source.is_constant())
+                if self.transitions.for_attribute(field.attribute).is_some() {
+                    return false;
+                }
+                let Some((_, source)) = sources.iter().find(|(name, _)| *name == field.attribute) else {
+                    return false;
+                };
+                // The low half of a position column that is already `Float32` is all zeros
+                if field.part == Part::Low {
+                    if let AttributeSource::Positions(accessor) = source {
+                        if f32x3_column(data, accessor).is_some() {
+                            return true;
+                        }
+                    }
+                }
+                source.is_constant()
             });
             if all_constant && !buffer.fields.is_empty() {
                 constant.insert(buffer.name);
@@ -458,8 +472,8 @@ impl AttributeManager {
 
     /// Work out which buffers are constant for `sources` and keep it; the layouts and the
     /// model must be built after this. Returns whether the answer changed.
-    pub fn plan(&mut self, sources: &[(&'static str, AttributeSource)]) -> bool {
-        let constant = self.constant_buffers(sources);
+    pub fn plan(&mut self, sources: &[(&'static str, AttributeSource)], data: &LayerData) -> bool {
+        let constant = self.constant_buffers(sources, data);
         let changed = constant != self.constant;
         if changed {
             self.constant = constant;
@@ -469,8 +483,8 @@ impl AttributeManager {
     }
 
     /// Whether [`plan`](Self::plan) would change the layouts, so the layer needs a new model.
-    pub fn plan_changed(&self, sources: &[(&'static str, AttributeSource)]) -> bool {
-        self.constant_buffers(sources) != self.constant
+    pub fn plan_changed(&self, sources: &[(&'static str, AttributeSource)], data: &LayerData) -> bool {
+        self.constant_buffers(sources, data) != self.constant
     }
 
     /// Whether a buffer holds a single element read by every instance.
