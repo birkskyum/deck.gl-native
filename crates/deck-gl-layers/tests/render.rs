@@ -1175,6 +1175,62 @@ fn orthographic_and_orbit_views_draw_cartesian_data() {
 }
 
 #[test]
+fn globe_view_draws_points_on_the_sphere() {
+    use deck_gl::{AnyViewState, GlobeViewProps, View};
+    let Some(ctx) = context() else { return };
+    let point = |position: [f64; 3], color: [u8; 4]| {
+        Box::new(ScatterplotLayer::new(ScatterplotLayerProps {
+            base: LayerProps::new(format!("point-{}", color[0])),
+            data: LayerData::with_length(1),
+            get_position: Accessor::Constant(position),
+            get_fill_color: Accessor::Constant(color),
+            get_radius: Accessor::Constant(3.0),
+            radius_units: Unit::Pixels,
+            antialiasing: false,
+            ..Default::default()
+        })) as Box<dyn Layer>
+    };
+    let view_state = ViewState {
+        longitude: 10.0,
+        latitude: 40.0,
+        zoom: 1.0,
+        pitch: 0.0,
+        bearing: 0.0,
+    };
+    let mut deck = Deck::new(
+        &ctx.device,
+        &ctx.queue,
+        RenderTarget::default(),
+        DeckProps {
+            width: SIZE,
+            height: SIZE,
+            view: View::Globe(GlobeViewProps::default()),
+            view_state,
+            layers: vec![
+                point([10.0, 40.0, 0.0], [255, 0, 0, 255]),
+                point([10.0, 43.0, 0.0], [0, 0, 255, 255]),
+            ],
+            ..Default::default()
+        },
+    )
+    .expect("deck");
+    assert!(matches!(deck.any_view_state(), AnyViewState::Globe(_)));
+    let shot = deck.snapshot(None).unwrap();
+    let c = SIZE / 2;
+    assert_eq!(shot.pixel(c, c), [255, 0, 0, 255], "the target is at the centre");
+    // The northern point lies above the centre, where the viewport projects it
+    let expected = deck
+        .viewport()
+        .project(deck_gl::glam::DVec3::new(10.0, 43.0, 0.0), true);
+    assert_eq!(
+        shot.pixel(expected.x.round() as u32, expected.y.round() as u32),
+        [0, 0, 255, 255],
+        "{expected:?}"
+    );
+    assert!(expected.y < c as f64);
+}
+
+#[test]
 fn contour_layer_draws_isolines_and_isobands() {
     use deck_gl::math_gl::web_mercator::{get_distance_scales, lng_lat_to_world, world_to_lng_lat};
     let Some(ctx) = context() else { return };

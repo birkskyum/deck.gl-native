@@ -5,7 +5,8 @@ use glam::DVec3;
 
 use crate::deck::ViewState;
 use crate::viewport::{
-    FirstPersonViewportOptions, OrbitViewportOptions, OrthographicViewportOptions, Viewport,
+    FirstPersonViewportOptions, GlobeViewportOptions, OrbitViewportOptions, OrthographicViewportOptions,
+    Viewport,
 };
 
 /// Axis an `OrbitView` rotates around freely.
@@ -79,12 +80,37 @@ impl Default for FirstPersonViewProps {
     }
 }
 
+/// `GlobeView` props: the earth as a sphere, driven by a map [`ViewState`]. Above zoom 12
+/// the view switches to the Web Mercator map, as deck.gl does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlobeViewProps {
+    /// Degrees per mesh segment when flat geometry is turned into 3D
+    pub resolution: f64,
+    pub near_z_multiplier: f64,
+    pub far_z_multiplier: f64,
+    /// Camera altitude relative to the viewport height
+    pub altitude: f64,
+}
+
+impl Default for GlobeViewProps {
+    fn default() -> Self {
+        Self {
+            resolution: 10.0,
+            near_z_multiplier: 0.5,
+            far_z_multiplier: 1.0,
+            altitude: 1.5,
+        }
+    }
+}
+
 /// Which kind of camera a deck uses, deck.gl's `views` prop (one view).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum View {
     /// Web Mercator map, driven by a [`ViewState`]
     #[default]
     Map,
+    /// The earth as a sphere, driven by a [`ViewState`]
+    Globe(GlobeViewProps),
     Orthographic(OrthographicViewProps),
     Orbit(OrbitViewProps),
     FirstPerson(FirstPersonViewProps),
@@ -162,6 +188,7 @@ impl Default for FirstPersonViewState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AnyViewState {
     Map(ViewState),
+    Globe(ViewState),
     Orthographic(OrthographicViewState),
     Orbit(OrbitViewState),
     FirstPerson(FirstPersonViewState),
@@ -180,10 +207,10 @@ impl From<ViewState> for AnyViewState {
 }
 
 impl AnyViewState {
-    /// The map view state, when this is one.
+    /// The map view state, when this is one (globe states use the same type).
     pub fn map(&self) -> Option<ViewState> {
         match self {
-            Self::Map(state) => Some(*state),
+            Self::Map(state) | Self::Globe(state) => Some(*state),
             _ => None,
         }
     }
@@ -194,6 +221,7 @@ impl View {
     pub fn default_view_state(&self) -> AnyViewState {
         match self {
             View::Map => AnyViewState::Map(ViewState::default()),
+            View::Globe(_) => AnyViewState::Globe(ViewState::default()),
             View::Orthographic(_) => AnyViewState::Orthographic(OrthographicViewState::default()),
             View::Orbit(_) => AnyViewState::Orbit(OrbitViewState::default()),
             View::FirstPerson(_) => AnyViewState::FirstPerson(FirstPersonViewState::default()),
@@ -205,6 +233,25 @@ impl View {
     pub fn make_viewport(&self, state: &AnyViewState, width: f64, height: f64) -> Viewport {
         match (self, state) {
             (View::Map, AnyViewState::Map(vs)) => map_viewport(vs, width, height),
+            (View::Globe(props), AnyViewState::Globe(vs)) => {
+                if vs.zoom > 12.0 {
+                    return map_viewport(vs, width, height);
+                }
+                Viewport::globe(&GlobeViewportOptions {
+                    width,
+                    height,
+                    longitude: vs.longitude,
+                    latitude: vs.latitude,
+                    zoom: vs.zoom,
+                    bearing: vs.bearing,
+                    pitch: vs.pitch,
+                    altitude: props.altitude,
+                    near_z_multiplier: props.near_z_multiplier,
+                    far_z_multiplier: props.far_z_multiplier,
+                    resolution: props.resolution,
+                    ..Default::default()
+                })
+            }
             (View::Orthographic(props), AnyViewState::Orthographic(vs)) => {
                 Viewport::orthographic(&OrthographicViewportOptions {
                     width,

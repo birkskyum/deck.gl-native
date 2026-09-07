@@ -113,6 +113,124 @@ pub struct Viewport {
     /// Depth of the viewport centre in pixel space, the default depth `unproject` uses when
     /// none is given (orbit viewports, deck.gl's `projectedCenter`)
     pub projected_center_depth: Option<f64>,
+    /// A globe viewport: positions project onto a sphere of [`GLOBE_RADIUS`] common units
+    pub globe: bool,
+    /// Degrees per mesh segment when flat geometry is turned into 3D on the globe
+    pub resolution: f64,
+}
+
+/// Radius of the globe in common units.
+pub const GLOBE_RADIUS: f64 = 256.0;
+/// Earth radius used by the globe projection, in meters.
+pub const GLOBE_EARTH_RADIUS: f64 = 6370972.0;
+/// Latitude beyond which globe scales are held fixed to avoid the singularity at the poles.
+pub const MAX_LATITUDE: f64 = 85.051129;
+
+/// deck.gl's `zoomAdjust`: the zoom offset that makes the globe and the Web Mercator map
+/// converge at high zoom (the map's scale grows with 1 / cos(latitude)).
+pub fn globe_zoom_adjust(latitude: f64, clamp_to_poles: bool) -> f64 {
+    let latitude = if clamp_to_poles {
+        latitude.clamp(-MAX_LATITUDE, MAX_LATITUDE)
+    } else {
+        latitude
+    };
+    (std::f64::consts::PI * latitude.to_radians().cos()).log2()
+}
+
+/// Options of [`Viewport::globe`], deck.gl's `GlobeViewport`.
+#[derive(Clone, Debug)]
+pub struct GlobeViewportOptions {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub longitude: f64,
+    pub latitude: f64,
+    pub zoom: f64,
+    pub bearing: f64,
+    pub pitch: f64,
+    /// Camera altitude relative to the viewport height, controls the field of view
+    pub altitude: f64,
+    /// Field of view in degrees; overrides `altitude` when set
+    pub fovy: Option<f64>,
+    pub position: DVec3,
+    pub orthographic: bool,
+    /// Near plane in viewport heights (0.5, as maplibre)
+    pub near_z_multiplier: f64,
+    /// Far plane multiplier
+    pub far_z_multiplier: f64,
+    pub near_z: Option<f64>,
+    pub far_z: Option<f64>,
+    /// Degrees per mesh segment for flat geometry
+    pub resolution: f64,
+}
+
+impl Default for GlobeViewportOptions {
+    fn default() -> Self {
+        Self {
+            id: "globe".to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            longitude: 0.0,
+            latitude: 0.0,
+            zoom: 0.0,
+            bearing: 0.0,
+            pitch: 0.0,
+            altitude: 1.5,
+            fovy: None,
+            position: DVec3::ZERO,
+            orthographic: false,
+            near_z_multiplier: 0.5,
+            far_z_multiplier: 1.0,
+            near_z: None,
+            far_z: None,
+            resolution: 10.0,
+        }
+    }
+}
+
+fn globe_distance_scales() -> DistanceScales {
+    let units_per_meter = GLOBE_RADIUS / GLOBE_EARTH_RADIUS;
+    let units_per_degree = std::f64::consts::PI / 180.0 * GLOBE_RADIUS;
+    DistanceScales {
+        units_per_meter: DVec3::splat(units_per_meter),
+        meters_per_unit: DVec3::splat(1.0 / units_per_meter),
+        units_per_degree: DVec3::new(units_per_degree, units_per_degree, units_per_meter),
+        degrees_per_unit: DVec3::new(
+            1.0 / units_per_degree,
+            1.0 / units_per_degree,
+            1.0 / units_per_meter,
+        ),
+        ..Default::default()
+    }
+}
+
+/// Longitude, latitude and meters above the surface to the globe's common space.
+pub fn globe_project_position(lng_lat_z: DVec3) -> DVec3 {
+    let lambda = lng_lat_z.x.to_radians();
+    let phi = lng_lat_z.y.to_radians();
+    let cos_phi = phi.cos();
+    let d = (lng_lat_z.z / GLOBE_EARTH_RADIUS + 1.0) * GLOBE_RADIUS;
+    DVec3::new(
+        lambda.sin() * cos_phi * d,
+        -lambda.cos() * cos_phi * d,
+        phi.sin() * d,
+    )
+}
+
+/// The inverse of [`globe_project_position`].
+pub fn globe_unproject_position(xyz: DVec3) -> DVec3 {
+    let d = xyz.length();
+    let phi = (xyz.z / d).asin();
+    let lambda = xyz.x.atan2(-xyz.y);
+    DVec3::new(
+        lambda.to_degrees(),
+        phi.to_degrees(),
+        (d / GLOBE_RADIUS - 1.0) * GLOBE_EARTH_RADIUS,
+    )
 }
 
 /// Options of the generic constructor, deck.gl's `Viewport` base class. The camera is given
@@ -425,6 +543,8 @@ impl Viewport {
             far: projection_parameters.far,
             world_offset: 0,
             projected_center_depth: None,
+            globe: false,
+            resolution: 0.0,
         }
     }
 
@@ -502,7 +622,93 @@ impl Viewport {
             far: opts.far,
             world_offset: 0,
             projected_center_depth: None,
+            globe: false,
+            resolution: 0.0,
         }
+    }
+
+    /// A globe, deck.gl's `GlobeViewport`: the world is a sphere of [`GLOBE_RADIUS`] common
+    /// units and the camera looks at `longitude`, `latitude` from `altitude` viewport heights.
+    pub fn globe(opts: &GlobeViewportOptions) -> Self {
+        let height = if opts.height > 0.0 { opts.height } else { 1.0 };
+        let latitude = opts.latitude.clamp(-90.0, 90.0);
+        let (fovy, altitude) = match opts.fovy {
+            Some(fovy) => (fovy, wm::fovy_to_altitude(fovy)),
+            None => (wm::altitude_to_fovy(opts.altitude), opts.altitude),
+        };
+        // Exaggerate the distance by latitude to match the Web Mercator distortion, so the
+        // globe and the map converge at high zoom
+        let scale_latitude = latitude.clamp(-MAX_LATITUDE, MAX_LATITUDE);
+        let scale = wm::zoom_to_scale(opts.zoom - globe_zoom_adjust(scale_latitude, false));
+        let pitch_radians = opts.pitch.to_radians();
+        let near = opts.near_z.unwrap_or(opts.near_z_multiplier);
+        let far = opts.far_z.unwrap_or(
+            (altitude + (GLOBE_RADIUS * 2.0 * scale) / height / pitch_radians.cos().max(0.1))
+                * opts.far_z_multiplier,
+        );
+        // The camera sits on -Y looking at the origin; after the globe rotation the surface at
+        // the target faces it with east along +X and north along +Z
+        let view_matrix = look_at(DVec3::new(0.0, -altitude, 0.0), DVec3::ZERO, DVec3::Z)
+            * DMat4::from_rotation_x(-pitch_radians)
+            * DMat4::from_rotation_y(-opts.bearing.to_radians())
+            * DMat4::from_rotation_x(latitude.to_radians())
+            * DMat4::from_rotation_z(-opts.longitude.to_radians())
+            * DMat4::from_scale(DVec3::splat(scale / height));
+        let distance_scales = globe_distance_scales();
+        // The base constructor projects the centre through the flat helpers; do it here with
+        // the sphere instead
+        let center = globe_project_position(DVec3::new(opts.longitude, latitude, 0.0))
+            + opts.position * distance_scales.units_per_meter;
+        let mut viewport = Self::from_options(&ViewportOptions {
+            id: opts.id.clone(),
+            x: opts.x,
+            y: opts.y,
+            width: opts.width,
+            height,
+            longitude: Some(opts.longitude),
+            latitude: Some(latitude),
+            position: DVec3::ZERO,
+            zoom: opts.zoom,
+            distance_scales: Some(distance_scales),
+            view_matrix,
+            orthographic: opts.orthographic,
+            fovy,
+            near,
+            far,
+            focal_distance: altitude,
+            ..Default::default()
+        });
+        viewport.globe = true;
+        viewport.resolution = opts.resolution;
+        viewport.scale = scale;
+        viewport.pitch = opts.pitch;
+        viewport.bearing = opts.bearing;
+        viewport.altitude = altitude;
+        viewport.position = opts.position;
+        viewport.center = center;
+        viewport.view_matrix = view_matrix * DMat4::from_translation(-center);
+        viewport.view_projection_matrix = viewport.projection_matrix * viewport.view_matrix;
+        viewport.view_matrix_inverse = viewport.view_matrix.inverse();
+        viewport.camera_position = viewport.view_matrix_inverse.w_axis.truncate();
+        let viewport_matrix =
+            DMat4::from_scale(DVec3::new(viewport.width / 2.0, -viewport.height / 2.0, 1.0))
+                * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0));
+        viewport.pixel_projection_matrix = viewport_matrix * viewport.view_projection_matrix;
+        viewport.pixel_unprojection_matrix = viewport.pixel_projection_matrix.inverse();
+        viewport
+    }
+
+    /// The longitude, latitude and zoom that keep the globe under a dragged pointer: port of
+    /// `GlobeViewport.panByPosition`. `start` is the longitude, latitude and zoom when the
+    /// drag started at `start_pixel`.
+    pub fn globe_pan_by_position(&self, start: [f64; 3], pixel: [f64; 2], start_pixel: [f64; 2]) -> [f64; 3] {
+        // Rotation speed falls with zoom, for a roughly constant panning speed on screen
+        let scale = wm::zoom_to_scale(self.zoom - globe_zoom_adjust(self.latitude, false));
+        let rotation_speed = 0.25 / scale;
+        let longitude = start[0] + rotation_speed * (start_pixel[0] - pixel[0]);
+        let latitude = (start[1] - rotation_speed * (start_pixel[1] - pixel[1])).clamp(-90.0, 90.0);
+        let zoom = start[2] - globe_zoom_adjust(start[1], false) + globe_zoom_adjust(latitude, false);
+        [longitude, latitude, zoom]
     }
 
     /// A 2D view of cartesian coordinates, deck.gl's `OrthographicViewport`.
@@ -689,7 +895,7 @@ impl Viewport {
     /// (deck.gl's `MapView({repeat: true})`): this viewport followed by one per extra world
     /// copy visible across the antimeridian, at most three to each side.
     pub fn sub_viewports(&self) -> Vec<Viewport> {
-        if !self.is_geospatial {
+        if !self.is_geospatial || self.globe {
             return vec![self.clone()];
         }
         let bounds = self.get_bounds(0.0);
@@ -709,6 +915,9 @@ impl Viewport {
     }
 
     pub fn projection_mode(&self) -> ProjectionMode {
+        if self.globe {
+            return ProjectionMode::Globe;
+        }
         if self.is_geospatial {
             if self.zoom < 12.0 {
                 ProjectionMode::WebMercator
@@ -742,6 +951,9 @@ impl Viewport {
 
     /// Project [lng, lat] on sphere onto [x, y] on the 512 x 512 Mercator zoom 0 tile.
     pub fn project_flat(&self, xy: [f64; 2]) -> [f64; 2] {
+        if self.globe {
+            return xy;
+        }
         if self.is_geospatial {
             Self::project_flat_geospatial(xy)
         } else {
@@ -766,6 +978,9 @@ impl Viewport {
     }
 
     pub fn unproject_flat(&self, xy: [f64; 2]) -> [f64; 2] {
+        if self.globe {
+            return xy;
+        }
         if self.is_geospatial {
             world_to_lng_lat(xy)
         } else {
@@ -777,6 +992,9 @@ impl Viewport {
     /// Project a position in the viewport's coordinate system (lng, lat, meters above sea
     /// level) into common space.
     pub fn project_position(&self, xyz: DVec3) -> DVec3 {
+        if self.globe {
+            return globe_project_position(xyz);
+        }
         let [x, y] = self.project_flat([xyz.x, xyz.y]);
         let z = if self.is_geospatial {
             xyz.z * units_per_meter(xyz.y)
@@ -788,6 +1006,9 @@ impl Viewport {
 
     /// Inverse of [`Viewport::project_position`].
     pub fn unproject_position(&self, xyz: DVec3) -> DVec3 {
+        if self.globe {
+            return globe_unproject_position(xyz);
+        }
         let [x, y] = self.unproject_flat([xyz.x, xyz.y]);
         let z = if self.is_geospatial {
             xyz.z / units_per_meter(y)
@@ -812,6 +1033,9 @@ impl Viewport {
     /// plane at `target_z` meters.
     pub fn unproject(&self, xy: DVec2, z: Option<f64>, top_left: bool, target_z: Option<f64>) -> DVec3 {
         let y2 = if top_left { xy.y } else { self.height - xy.y };
+        if self.globe {
+            return self.unproject_globe(DVec2::new(xy.x, y2), z, target_z);
+        }
         // Orbit viewports unproject onto the plane through the target by default
         let z = z.or(if target_z.is_none() {
             self.projected_center_depth
@@ -826,6 +1050,37 @@ impl Viewport {
             target_z_world,
         );
         let mut result = self.unproject_position(coord);
+        if z.is_none() {
+            result.z = target_z.unwrap_or(0.0);
+        }
+        result
+    }
+
+    /// Globe unprojection: with a depth the pixel maps straight back; without one the pixel's
+    /// view ray is intersected with the sphere at `target_z` meters above the surface.
+    fn unproject_globe(&self, pixel: DVec2, z: Option<f64>, target_z: Option<f64>) -> DVec3 {
+        let transform = |v: DVec4| {
+            let r = self.pixel_unprojection_matrix * v;
+            r.truncate() / r.w
+        };
+        let coord = match z {
+            Some(z) => transform(DVec4::new(pixel.x, pixel.y, z, 1.0)),
+            None => {
+                let coord0 = transform(DVec4::new(pixel.x, pixel.y, -1.0, 1.0));
+                let coord1 = transform(DVec4::new(pixel.x, pixel.y, 1.0, 1.0));
+                let lt = (target_z.unwrap_or(0.0) / GLOBE_EARTH_RADIUS + 1.0) * GLOBE_RADIUS;
+                let l_sqr = (coord0 - coord1).length_squared();
+                let l0_sqr = coord0.length_squared();
+                let l1_sqr = coord1.length_squared();
+                let s_sqr = (4.0 * l0_sqr * l1_sqr - (l_sqr - l0_sqr - l1_sqr).powi(2)) / 16.0;
+                let d_sqr = 4.0 * s_sqr / l_sqr;
+                let r0 = (l0_sqr - d_sqr).max(0.0).sqrt();
+                let dr = (lt * lt - d_sqr).max(0.0).sqrt();
+                let t = (r0 - dr) / l_sqr.sqrt();
+                coord0.lerp(coord1, t)
+            }
+        };
+        let mut result = globe_unproject_position(coord);
         if z.is_none() {
             result.z = target_z.unwrap_or(0.0);
         }
@@ -852,6 +1107,9 @@ impl Viewport {
 
     /// Distance scales, optionally high precision around a coordinate origin.
     pub fn get_distance_scales(&self, coordinate_origin: Option<DVec3>) -> DistanceScales {
+        if self.globe {
+            return self.distance_scales;
+        }
         match coordinate_origin {
             Some(origin) if self.is_geospatial => get_distance_scales(origin.x, origin.y, true),
             _ => self.distance_scales,
@@ -997,6 +1255,51 @@ mod tests {
         });
         let p = v.project(DVec3::new(10.0, 0.0, 0.0), true);
         assert!((p.x - 50.0).abs() < 1e-6 && (p.y - 50.0).abs() < 1e-6, "{p:?}");
+    }
+
+    #[test]
+    fn globe_viewport_projects_onto_the_sphere() {
+        let v = Viewport::globe(&GlobeViewportOptions {
+            width: 400.0,
+            height: 300.0,
+            longitude: 10.0,
+            latitude: 50.0,
+            zoom: 1.0,
+            ..Default::default()
+        });
+        assert_eq!(v.projection_mode(), ProjectionMode::Globe);
+        // The target is at the centre of the screen and on the sphere
+        let c = v.project(DVec3::new(10.0, 50.0, 0.0), true);
+        assert!((c.x - 200.0).abs() < 1e-6 && (c.y - 150.0).abs() < 1e-6, "{c:?}");
+        let common = v.project_position(DVec3::new(10.0, 50.0, 0.0));
+        assert!((common.length() - GLOBE_RADIUS).abs() < 1e-9);
+        let back = v.unproject_position(common);
+        assert!(
+            (back.x - 10.0).abs() < 1e-9 && (back.y - 50.0).abs() < 1e-9,
+            "{back:?}"
+        );
+        // Unprojecting a pixel hits the sphere
+        let hit = v.unproject(DVec2::new(230.0, 140.0), None, true, None);
+        let round_trip = v.project(DVec3::new(hit.x, hit.y, 0.0), true);
+        assert!(
+            (round_trip.x - 230.0).abs() < 1e-6 && (round_trip.y - 140.0).abs() < 1e-6,
+            "{round_trip:?}"
+        );
+        // North is up and east is right
+        let north = v.project(DVec3::new(10.0, 55.0, 0.0), true);
+        let east = v.project(DVec3::new(15.0, 50.0, 0.0), true);
+        assert!(north.y < c.y && east.x > c.x, "{north:?} {east:?}");
+        // Panning keeps a constant speed on screen and adjusts the zoom with latitude
+        let [lng, lat, zoom] = v.globe_pan_by_position([10.0, 50.0, 1.0], [210.0, 150.0], [200.0, 150.0]);
+        assert!(
+            lng < 10.0 && (lat - 50.0).abs() < 1e-9 && (zoom - 1.0).abs() < 1e-9,
+            "{lng} {lat} {zoom}"
+        );
+        let [_, lat2, zoom2] = v.globe_pan_by_position([10.0, 50.0, 1.0], [200.0, 100.0], [200.0, 150.0]);
+        assert!(
+            lat2 < 50.0 && zoom2 > 1.0,
+            "moving south towards the equator raises the zoom: {lat2} {zoom2}"
+        );
     }
 
     fn sf() -> Viewport {

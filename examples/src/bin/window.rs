@@ -11,7 +11,9 @@ use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{ClickCallback, Deck, DeckProps, HoverCallback, MapController, OrbitController, ViewState};
+use deck_gl::{
+    ClickCallback, Deck, DeckProps, GlobeController, HoverCallback, MapController, OrbitController, ViewState,
+};
 use deck_gl_examples::{scene, spec};
 use deck_gl_layers::TripsLayer;
 use winit::application::ApplicationHandler;
@@ -40,6 +42,8 @@ struct State {
     map_view: bool,
     /// The controller of an orbit or orthographic view
     orbit: Option<OrbitController>,
+    /// The controller of a globe view
+    globe: Option<GlobeController>,
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -127,6 +131,15 @@ impl State {
             )),
             _ => None,
         };
+        let globe = match loaded.view {
+            deck_gl::View::Globe(props) => Some(GlobeController::new(
+                props,
+                loaded.camera.and_then(|c| c.map()).unwrap_or(base_view),
+                config.width as f64 / scale as f64,
+                config.height as f64 / scale as f64,
+            )),
+            _ => None,
+        };
         deck.set_on_hover(Some(HoverCallback::new(|info| {
             if let Some(hit) = info {
                 println!(
@@ -150,6 +163,7 @@ impl State {
             base_view,
             controller,
             orbit,
+            globe,
             map_view,
             start: Instant::now(),
             cursor: None,
@@ -196,6 +210,12 @@ impl State {
                 self.config.height as f64 / scale as f64,
             );
         }
+        if let Some(globe) = &mut self.globe {
+            globe.set_size(
+                self.config.width as f64 / scale as f64,
+                self.config.height as f64 / scale as f64,
+            );
+        }
     }
 
     fn now_ms(&self) -> f64 {
@@ -219,6 +239,12 @@ impl State {
                 } else if button == MouseButton::Left {
                     orbit.pan_start(pixel);
                 }
+            } else if let Some(globe) = &mut self.globe {
+                if rotate {
+                    globe.rotate_start(pixel);
+                } else if button == MouseButton::Left {
+                    globe.pan_start(pixel);
+                }
             } else if rotate {
                 self.controller.rotate_start(pixel);
             } else if button == MouseButton::Left {
@@ -229,6 +255,10 @@ impl State {
             if let Some(orbit) = &mut self.orbit {
                 orbit.rotate_end();
                 orbit.pan_end();
+            }
+            if let Some(globe) = &mut self.globe {
+                globe.rotate_end();
+                globe.pan_end();
             }
             self.controller.rotate_end();
             self.controller.pan_end(self.now_ms());
@@ -257,6 +287,25 @@ impl State {
                     "e" => orbit.rotate_by(15.0, 0.0),
                     "r" => orbit.rotate_by(0.0, 10.0),
                     "f" => orbit.rotate_by(0.0, -10.0),
+                    _ => {}
+                },
+                _ => {}
+            }
+            return;
+        }
+        if let Some(globe) = &mut self.globe {
+            match key {
+                Key::Named(NamedKey::ArrowLeft) => globe.move_by([step, 0.0]),
+                Key::Named(NamedKey::ArrowRight) => globe.move_by([-step, 0.0]),
+                Key::Named(NamedKey::ArrowUp) => globe.move_by([0.0, step]),
+                Key::Named(NamedKey::ArrowDown) => globe.move_by([0.0, -step]),
+                Key::Character(c) => match c.as_str() {
+                    "+" | "=" => globe.zoom_in(),
+                    "-" => globe.zoom_out(),
+                    "q" => globe.rotate_by(-15.0, 0.0),
+                    "e" => globe.rotate_by(15.0, 0.0),
+                    "r" => globe.rotate_by(0.0, 10.0),
+                    "f" => globe.rotate_by(0.0, -10.0),
                     _ => {}
                 },
                 _ => {}
@@ -311,6 +360,10 @@ impl State {
         if let Some(orbit) = &self.orbit {
             if orbit.interacted() {
                 self.deck.set_any_view_state(orbit.view_state());
+            }
+        } else if let Some(globe) = &self.globe {
+            if globe.interacted() {
+                self.deck.set_any_view_state(globe.any_view_state());
             }
         } else if !self.map_view {
             // First person views keep their JSON camera
@@ -403,6 +456,9 @@ impl ApplicationHandler for App {
                     if let Some(orbit) = &mut state.orbit {
                         orbit.pan([pixel.0, pixel.1]);
                         orbit.rotate([pixel.0, pixel.1]);
+                    } else if let Some(globe) = &mut state.globe {
+                        globe.pan([pixel.0, pixel.1]);
+                        globe.rotate([pixel.0, pixel.1]);
                     } else {
                         state.controller.pan([pixel.0, pixel.1], now);
                         state.controller.rotate([pixel.0, pixel.1]);
@@ -430,6 +486,8 @@ impl ApplicationHandler for App {
                 let pixel = [state.last_cursor.0, state.last_cursor.1];
                 if let Some(orbit) = &mut state.orbit {
                     orbit.zoom_by(pixel, lines * 0.25);
+                } else if let Some(globe) = &mut state.globe {
+                    globe.zoom_by(lines * 0.25);
                 } else {
                     state.controller.zoom_by(pixel, lines * 0.25);
                 }

@@ -150,7 +150,10 @@ impl Deck {
             clip_depth_range: props.clip_depth_range,
             uniform_slot: 0,
         };
-        let camera = AnyViewState::Map(props.view_state);
+        let camera = match props.view {
+            View::Globe(_) => AnyViewState::Globe(props.view_state),
+            _ => AnyViewState::Map(props.view_state),
+        };
         let viewport = props
             .view
             .make_viewport(&camera, props.width as f64, props.height as f64);
@@ -210,8 +213,10 @@ impl Deck {
     pub fn set_view_state(&mut self, view_state: ViewState) {
         self.transition = None;
         self.view_state = view_state;
-        if matches!(self.view, View::Map) {
-            self.camera = AnyViewState::Map(view_state);
+        match self.view {
+            View::Map => self.camera = AnyViewState::Map(view_state),
+            View::Globe(_) => self.camera = AnyViewState::Globe(view_state),
+            _ => {}
         }
         self.external_viewport = false;
         self.viewport = self
@@ -226,6 +231,7 @@ impl Deck {
         let matches = matches!(
             (&view, &self.camera),
             (View::Map, AnyViewState::Map(_))
+                | (View::Globe(_), AnyViewState::Globe(_))
                 | (View::Orthographic(_), AnyViewState::Orthographic(_))
                 | (View::Orbit(_), AnyViewState::Orbit(_))
                 | (View::FirstPerson(_), AnyViewState::FirstPerson(_))
@@ -246,7 +252,7 @@ impl Deck {
     /// Move the camera of any view kind; a map state also updates [`Deck::view_state`].
     pub fn set_any_view_state(&mut self, state: AnyViewState) {
         self.transition = None;
-        if let AnyViewState::Map(view_state) = state {
+        if let AnyViewState::Map(view_state) | AnyViewState::Globe(view_state) = state {
             self.view_state = view_state;
         }
         self.camera = state;
@@ -297,7 +303,10 @@ impl Deck {
         };
         let view = transition.at(now);
         self.view_state = view;
-        self.camera = AnyViewState::Map(view);
+        self.camera = match self.view {
+            View::Globe(_) => AnyViewState::Globe(view),
+            _ => AnyViewState::Map(view),
+        };
         self.external_viewport = false;
         self.viewport = self
             .view

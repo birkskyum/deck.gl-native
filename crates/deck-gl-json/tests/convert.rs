@@ -554,13 +554,13 @@ fn render_parameters() {
 #[test]
 fn map_view_repeat() {
     let spec = json!({
-        "views": [{"@@type": "MapView", "repeat": true, "controller": true}, {"@@type": "GlobeView"}],
+        "views": [{"@@type": "MapView", "repeat": true, "controller": true}, {"@@type": "SomeOtherView"}],
         "layers": []
     });
     let deck = JsonConverter::new().convert(&spec).unwrap();
     assert!(deck.repeat);
     assert_eq!(deck.warnings.len(), 1, "{:?}", deck.warnings);
-    assert!(deck.warnings[0].contains("GlobeView"));
+    assert!(deck.warnings[0].contains("SomeOtherView"));
 }
 
 #[test]
@@ -609,6 +609,25 @@ fn non_map_views_and_their_view_states() {
             zoom_x: Some(3.0),
             zoom_y: None,
         }))
+    );
+
+    let spec = json!({
+        "views": [{"@@type": "GlobeView", "altitude": 2}],
+        "initialViewState": {"longitude": 10, "latitude": 20, "zoom": 1},
+        "layers": []
+    });
+    let deck = JsonConverter::new().convert(&spec).unwrap();
+    match (deck.view, deck.camera) {
+        (View::Globe(props), Some(AnyViewState::Globe(state))) => {
+            assert_eq!(props.altitude, 2.0);
+            assert_eq!((state.longitude, state.latitude, state.zoom), (10.0, 20.0, 1.0));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        deck.view_state.map(|v| v.zoom),
+        Some(1.0),
+        "globe states are map states"
     );
 
     let spec = json!({

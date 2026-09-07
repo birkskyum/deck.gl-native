@@ -106,13 +106,15 @@ number deck.gl uses also works). Units are strings: `"radiusUnits": "pixels"`.
 ## Views
 
 A top level `views` array may hold a `MapView` (the default; its `repeat` flag makes the deck
-draw extra copies of the world when the view spans the antimeridian), an `OrthographicView`
+draw extra copies of the world when the view spans the antimeridian), a `GlobeView`
+(`resolution`, `nearZMultiplier`, `farZMultiplier`, `altitude`; the same `initialViewState` as
+the map, switching to the map above zoom 12), an `OrthographicView`
 (`near`, `far`, `flipY`), an `OrbitView` (`orbitAxis`, `fovy`, `near`, `far`, `orthographic`) or
 a `FirstPersonView` (`fovy`, `near`, `far`, `focalDistance`). `initialViewState` is read for the
 chosen view: `target`, `zoom`, `zoomX`, `zoomY` for the orthographic view; `target`, `zoom`,
 `rotationOrbit`, `rotationX` for the orbit view; `longitude`, `latitude`, `position`, `bearing`,
 `pitch` for the first person view. Layers in the non map views use cartesian coordinates.
-`GlobeView` and multiple views produce a warning and are skipped until they exist here.
+Multiple views produce a warning; only the last one is used.
 
 ## Effects
 

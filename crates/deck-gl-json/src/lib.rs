@@ -26,8 +26,9 @@ use std::path::{Path, PathBuf};
 
 use arrow_array::RecordBatch;
 use deck_gl::{
-    AnyViewState, DeckError, FirstPersonViewProps, FirstPersonViewState, Layer, LightingEffect, OrbitAxis,
-    OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState, View, ViewState,
+    AnyViewState, DeckError, FirstPersonViewProps, FirstPersonViewState, GlobeViewProps, Layer,
+    LightingEffect, OrbitAxis, OrbitViewProps, OrbitViewState, OrthographicViewProps, OrthographicViewState,
+    View, ViewState,
 };
 use serde_json::Value;
 
@@ -330,6 +331,15 @@ pub fn view_from_value(value: &Value) -> std::result::Result<Option<View>, Strin
     let boolean = |key: &str, default: bool| map.get(key).and_then(Value::as_bool).unwrap_or(default);
     match map.get(props::TYPE_KEY).and_then(Value::as_str) {
         Some("MapView") => Ok(None),
+        Some("GlobeView") => {
+            let d = GlobeViewProps::default();
+            Ok(Some(View::Globe(GlobeViewProps {
+                resolution: number("resolution", d.resolution)?,
+                near_z_multiplier: number("nearZMultiplier", d.near_z_multiplier)?,
+                far_z_multiplier: number("farZMultiplier", d.far_z_multiplier)?,
+                altitude: number("altitude", d.altitude)?,
+            })))
+        }
         Some("OrthographicView") => {
             let d = OrthographicViewProps::default();
             Ok(Some(View::Orthographic(OrthographicViewProps {
@@ -400,6 +410,7 @@ pub fn any_view_state_from_value(value: &Value, view: &View) -> Result<AnyViewSt
     };
     Ok(match view {
         View::Map => AnyViewState::Map(view_state_from_value(value)?),
+        View::Globe(_) => AnyViewState::Globe(view_state_from_value(value)?),
         View::Orthographic(_) => {
             let d = OrthographicViewState::default();
             AnyViewState::Orthographic(OrthographicViewState {
