@@ -2638,6 +2638,140 @@ fn the_terrain_extension_lifts_a_layer_onto_the_ground() {
     );
 }
 
+/// A binary glTF with one horizontal triangle of `size` metres, coloured by `base_color`.
+/// glTF is y up, so the triangle lies in its x and z, which 3D Tiles turn into east and north.
+fn horizontal_triangle_glb(size: f32, base_color: [f32; 4]) -> Vec<u8> {
+    let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [size, 0.0, 0.0], [0.0, 0.0, -size]];
+    let normals: [[f32; 3]; 3] = [[0.0, 1.0, 0.0]; 3];
+    let indices: [u16; 3] = [0, 1, 2];
+    let mut bin: Vec<u8> = Vec::new();
+    bin.extend(bytemuck::cast_slice(&positions));
+    bin.extend(bytemuck::cast_slice(&normals));
+    bin.extend(bytemuck::cast_slice(&indices));
+    bin.extend([0u8; 2]);
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1}},"indices":2,"material":0}}]}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,{}],"max":[{},0,0]}},{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},{{"bufferView":2,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},{{"buffer":0,"byteOffset":72,"byteLength":6}}],"buffers":[{{"byteLength":{}}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[{},{},{},{}]}}}}]}}"#,
+        -size,
+        size,
+        bin.len(),
+        base_color[0],
+        base_color[1],
+        base_color[2],
+        base_color[3]
+    );
+    let mut json = json.into_bytes();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let mut glb = Vec::new();
+    glb.extend(b"glTF");
+    glb.extend(2u32.to_le_bytes());
+    glb.extend(((12 + 8 + json.len() + 8 + bin.len()) as u32).to_le_bytes());
+    glb.extend((json.len() as u32).to_le_bytes());
+    glb.extend(b"JSON");
+    glb.extend(&json);
+    glb.extend((bin.len() as u32).to_le_bytes());
+    glb.extend(b"BIN\0");
+    glb.extend(&bin);
+    glb
+}
+
+/// A `b3dm` container around a glTF payload.
+fn b3dm(gltf: &[u8]) -> Vec<u8> {
+    let feature_table = br#"{"BATCH_LENGTH":0}"#;
+    let mut bytes = Vec::new();
+    bytes.extend(b"b3dm");
+    bytes.extend(1u32.to_le_bytes());
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend((feature_table.len() as u32).to_le_bytes());
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend(feature_table);
+    bytes.extend(gltf);
+    bytes
+}
+
+/// Serve a tileset and its tile from a local socket, by path.
+fn serve_tileset(tileset: String, tile: Vec<u8>) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base = format!("http://{}", listener.local_addr().expect("addr"));
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = [0u8; 2048];
+            let read = stream.read(&mut request).unwrap_or(0);
+            let line = String::from_utf8_lossy(&request[..read]).to_string();
+            let body: &[u8] = if line.contains("tileset.json") {
+                tileset.as_bytes()
+            } else {
+                &tile
+            };
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).ok();
+            stream.write_all(body).ok();
+        }
+    });
+    base
+}
+
+#[test]
+fn tile_3d_layer_draws_a_tileset_around_its_origin() {
+    use deck_gl_layers::tiles3d::{cartographic_to_cartesian, east_north_up};
+    use deck_gl_layers::{Tile3DLayer, Tile3DLayerProps};
+    let Some(ctx) = context() else { return };
+    // A tile whose frame sits at the view centre, holding a 60 m triangle to the north east
+    let centre = cartographic_to_cartesian(CENTER[0], CENTER[1], 0.0);
+    let frame = east_north_up(centre);
+    let columns: Vec<String> = frame.to_cols_array().iter().map(|v| v.to_string()).collect();
+    let tileset = format!(
+        r#"{{"asset":{{"version":"1.0"}},"geometricError":100,"root":{{"boundingVolume":{{"sphere":[0,0,0,100]}},"geometricError":0,"refine":"REPLACE","transform":[{}],"content":{{"uri":"tile.b3dm"}}}}}}"#,
+        columns.join(",")
+    );
+    let base = serve_tileset(
+        tileset,
+        b3dm(&horizontal_triangle_glb(60.0, [0.0, 0.8, 1.0, 1.0])),
+    );
+    let layer = Tile3DLayer::new(Tile3DLayerProps {
+        base: LayerProps {
+            material: Material::unlit(),
+            ..LayerProps::new("tiles")
+        },
+        data: format!("{base}/tileset.json"),
+        ..Default::default()
+    });
+    let mut deck = make_deck(&ctx, vec![Box::new(layer)]);
+    // The tileset and its tile load in the background, so keep drawing until they arrive
+    let mut shot = deck.snapshot(None).unwrap();
+    for _ in 0..100 {
+        let done = deck
+            .layer_mut("tiles")
+            .and_then(|l| l.as_any_mut().downcast_mut::<Tile3DLayer>())
+            .is_some_and(|l| l.tileset().is_some() && l.is_loaded() && !l.selected().is_empty());
+        if done {
+            shot = deck.snapshot(None).unwrap();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        shot = deck.snapshot(None).unwrap();
+    }
+    let layer = deck
+        .layer_mut("tiles")
+        .and_then(|l| l.as_any_mut().downcast_mut::<Tile3DLayer>())
+        .unwrap();
+    assert!(layer.tileset().is_some(), "the tileset loaded");
+    assert_eq!(layer.selected().len(), 1, "one tile was picked");
+    assert!(layer.is_loaded());
+    // The triangle covers the ground north east of the view centre and nothing south west
+    let c = SIZE / 2;
+    assert_eq!(shot.pixel(c + 4, c - 4), [0, 204, 255, 255], "the tile's colour");
+    assert_eq!(shot.pixel(c - 10, c + 10)[3], 0, "and nothing the other way");
+}
+
 #[test]
 fn prop_changes_upload_only_what_changed() {
     let Some(ctx) = context() else { return };

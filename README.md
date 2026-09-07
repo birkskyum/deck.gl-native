@@ -44,7 +44,7 @@ and `@deck.gl/mesh-layers`, all verified pixel by pixel in headless GPU tests:
 | Core | `ScatterplotLayer`, `LineLayer`, `SolidPolygonLayer` (filled, extruded, wireframe, holes), `PathLayer` (joints, caps, billboard), `ArcLayer`, `BitmapLayer`, `IconLayer`, `TextLayer` (font atlas from any TrueType font, SDF outlines, backgrounds, wrapping), `ColumnLayer`, `GridCellLayer`, `PointCloudLayer` |
 | Composite | `PolygonLayer`, `GeoJsonLayer` |
 | Aggregation | `HexagonLayer`, `GridLayer`, `ScreenGridLayer` (CPU binning, sum/mean/min/max/count, quantize/linear/quantile/ordinal scales, percentile cutoffs), `HeatmapLayer` (GPU weights texture, colour ramp), `ContourLayer` (marching squares isolines and isobands) |
-| Geo | `TileLayer` (frustum culled quadtree, best available refinement, cache, background loading), `MVTLayer` (a dependency free Mapbox Vector Tile decoder), `WMSLayer`, `TerrainLayer` (Martini meshes from elevation tiles, Mapbox Terrain-RGB and Terrarium decoders), `TripsLayer`, `GreatCircleLayer`, `H3HexagonLayer`, `H3ClusterLayer` (sets of cells merged into one outline), `S2Layer`, `A5Layer`, `GeohashLayer`, `QuadkeyLayer` |
+| Geo | `TileLayer` (frustum culled quadtree, best available refinement, cache, background loading), `MVTLayer` (a dependency free Mapbox Vector Tile decoder), `WMSLayer`, `TerrainLayer` (Martini meshes from elevation tiles, Mapbox Terrain-RGB and Terrarium decoders), `Tile3DLayer` (3D Tiles: screen space error traversal, `b3dm` and glTF tiles placed as metre offsets), `TripsLayer`, `GreatCircleLayer`, `H3HexagonLayer`, `H3ClusterLayer` (sets of cells merged into one outline), `S2Layer`, `A5Layer`, `GeohashLayer`, `QuadkeyLayer` |
 | Mesh | `SimpleMeshLayer` (OBJ files, a cube helper), `ScenegraphLayer` (glTF scenes with node transforms, materials and textures); both with orientation, scale, translation or a transform matrix per instance, and size limits in pixels |
 
 **Views and interaction.** Map, globe, orthographic, orbit and first person views, several at
@@ -81,9 +81,9 @@ for iOS and for `wasm32-unknown-unknown`.
 PNG, logging goes through `tracing`, and criterion benchmarks cover the large layers
 ([docs/benchmarks.md](docs/benchmarks.md)).
 
-Not yet: `Tile3DLayer` and the `TerrainExtension` that drapes layers over terrain, GeoArrow
-columns of multi geometries, Python, Swift and Kotlin bindings, golden image comparisons
-against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port.md) for the
+Not yet: point cloud (`pnts`) tiles in `Tile3DLayer`, draping layers over terrain (the other
+half of `TerrainExtension`), GeoArrow columns of multi geometries, Python, Swift and Kotlin
+bindings, golden image comparisons against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port.md) for the
 design and the open decisions, and the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
 for what is planned.
 

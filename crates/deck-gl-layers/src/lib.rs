@@ -42,7 +42,9 @@ pub mod terrain;
 pub mod terrain_layer;
 pub mod text;
 pub mod text_layer;
+pub mod tile_3d_layer;
 pub mod tile_layer;
+pub mod tiles3d;
 pub mod tileset;
 pub mod trips_layer;
 pub mod wms_layer;
@@ -89,6 +91,7 @@ pub use terrain::{terrain_mesh, ElevationDecoder, HeightGrid, Martini};
 pub use terrain_layer::{TerrainLayer, TerrainLayerProps, TerrainTile};
 pub use text::{CharacterSet, FontAtlas, FontSettings, FontSource, WordBreak};
 pub use text_layer::{AlignmentBaseline, TextAnchor, TextLayer, TextLayerProps};
+pub use tile_3d_layer::{Tile3DLayer, Tile3DLayerProps};
 pub use tile_layer::{
     raster_renderer, LoadedTile, TileData, TileLayer, TileLayerProps, TileLoader, TileRenderer,
 };

@@ -15,8 +15,8 @@ use deck_gl_layers::{
     PolygonLayerProps, RefinementStrategy, ScaleType, ScatterplotLayer, ScatterplotLayerProps, Scenegraph,
     ScenegraphLayer, ScenegraphLayerProps, ScenegraphLighting, ScreenGridLayer, ScreenGridLayerProps,
     SimpleMeshLayer, SimpleMeshLayerProps, SolidPolygonLayer, SolidPolygonLayerProps, TerrainLayer,
-    TerrainLayerProps, TextAnchor, TextLayer, TextLayerProps, TileLayer, TileLayerProps, TripsLayer,
-    TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
+    TerrainLayerProps, TextAnchor, TextLayer, TextLayerProps, Tile3DLayer, Tile3DLayerProps, TileLayer,
+    TileLayerProps, TripsLayer, TripsLayerProps, WmsLayer, WmsLayerProps, WmsServiceType, WmsSrs, WordBreak,
 };
 use serde_json::Value;
 
@@ -140,6 +140,28 @@ pub fn convert_layer(
                 polygon,
                 get_cell: props.accessor(accessor, field, convert::string)?,
                 kind: defaults.kind,
+            }))
+        }
+        "Tile3DLayer" => {
+            let d = Tile3DLayerProps::default();
+            props.get("loadOptions");
+            props.get("onTilesetLoad");
+            let url = props
+                .string("data")?
+                .ok_or_else(|| props.error("data", "a Tile3DLayer needs the URL of a tileset"))?;
+            Box::new(Tile3DLayer::new(Tile3DLayerProps {
+                base: props.base()?,
+                data: url,
+                maximum_screen_space_error: props
+                    .f32("maximumScreenSpaceError", d.maximum_screen_space_error as f32)?
+                    as f64,
+                color: props.color("color", d.color)?,
+                lighting: match props.string("_lighting")? {
+                    Some(name) => ScenegraphLighting::parse(&name).ok_or_else(|| {
+                        props.error("_lighting", format!("expected `flat` or `pbr`, got `{name}`"))
+                    })?,
+                    None => d.lighting,
+                },
             }))
         }
         "H3ClusterLayer" => {

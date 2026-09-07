@@ -1382,3 +1382,39 @@ fn terrain_operations_and_the_terrain_extension() {
     let error = JsonConverter::new().convert(&bad).unwrap_err().to_string();
     assert!(error.contains("terrain"), "{error}");
 }
+
+#[test]
+fn tile_3d_layer_reads_its_tileset_url_and_props() {
+    use deck_gl_layers::{ScenegraphLighting, Tile3DLayer};
+    let mut deck = JsonConverter::new()
+        .convert(&json!([{
+            "@@type": "Tile3DLayer",
+            "id": "buildings",
+            "data": "https://example.com/tiles/tileset.json",
+            "maximumScreenSpaceError": 8,
+            "color": [200, 220, 255],
+            "_lighting": "pbr",
+            "opacity": 0.8
+        }]))
+        .unwrap();
+    assert!(deck.warnings.is_empty(), "{:?}", deck.warnings);
+    let layer = deck.layers[0]
+        .as_any_mut()
+        .downcast_mut::<Tile3DLayer>()
+        .expect("a 3d tiles layer");
+    let props = layer.props();
+    assert_eq!(props.data, "https://example.com/tiles/tileset.json");
+    assert_eq!(props.maximum_screen_space_error, 8.0);
+    assert_eq!(props.color, [200, 220, 255, 255]);
+    assert_eq!(props.lighting, ScenegraphLighting::Pbr);
+    assert_eq!(props.base.opacity, 0.8);
+    // The tileset has not loaded, so nothing is picked yet
+    assert!(layer.tileset().is_none());
+    assert!(layer.selected().is_empty());
+    // A layer without a tileset URL is an error
+    let error = JsonConverter::new()
+        .convert(&json!([{"@@type": "Tile3DLayer", "id": "x"}]))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("tileset"), "{error}");
+}
