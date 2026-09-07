@@ -35,6 +35,9 @@ naga, so there are no hand-maintained `#[repr(C)]` mirrors to drift out of sync.
 **Arrow first.** `LayerData` wraps an Arrow `RecordBatch`; an `Accessor` is a constant, a
 column name, or a function of the row index. Column accessors read Arrow buffers directly,
 including GeoArrow polygon layouts. Function accessors exist for convenience and small data.
+An accessor that is a constant becomes a single element with a zero vertex stride, so a
+million objects that share a colour upload four bytes instead of four megabytes; the layer
+rebuilds its model when an accessor stops being constant, as deck.gl does.
 Data compares by column identity, so sending the same batch again costs nothing, and
 `LayerData::with_changed_rows` names the rows that differ from the last update: the
 `AttributeManager` writes those rows in place and grows its buffers with headroom when rows

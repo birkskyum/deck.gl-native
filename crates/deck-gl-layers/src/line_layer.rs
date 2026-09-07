@@ -99,9 +99,9 @@ impl LineLayer {
         }
     }
 
-    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+    /// Where every attribute of the layer reads from.
+    fn sources(&self) -> Result<Vec<(&'static str, AttributeSource)>> {
         let props = &self.props;
-        let model = initialized(self.model.as_mut(), &props.base.id)?;
         let mut sources = vec![
             (
                 "source",
@@ -115,6 +115,13 @@ impl LineLayer {
             ("width", AttributeSource::Floats(props.get_width.clone())),
         ];
         sources.extend(props.base.extensions.sources(&props.data)?);
+        Ok(sources)
+    }
+
+    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+        let sources = self.sources()?;
+        let props = &self.props;
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
         self.attributes
             .update(&ctx.device, &ctx.queue, model, &props.data, &sources)?;
         model.set_instance_count(props.data.len() as u32);
@@ -132,6 +139,10 @@ impl Layer for LineLayer {
         let shader = extensions.assemble(&self.props.base.id, &STANDARD_MODULES, SHADER)?;
         self.attributes = line_attributes();
         self.attributes.extend(extensions.buffer_specs(&shader)?);
+        // Attributes whose accessors are constants hold a single element, see `plan`
+        self.attributes.set_transitions(&self.props.base.transitions);
+        let sources = self.sources()?;
+        self.attributes.plan(&sources);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -169,6 +180,11 @@ impl Layer for LineLayer {
         }
         self.attributes.set_time(ctx.time);
         self.attributes.set_transitions(&self.props.base.transitions);
+        // A constant accessor that stopped being one (or the other way round) changes the
+        // vertex layouts, so the model is built again
+        if self.attributes.plan_changed(&self.sources()?) {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

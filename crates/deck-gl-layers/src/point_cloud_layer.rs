@@ -110,16 +110,23 @@ impl PointCloudLayer {
         probe != *old
     }
 
-    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+    /// Where every attribute of the layer reads from.
+    fn sources(&self) -> Result<Vec<(&'static str, AttributeSource)>> {
         let props = &self.props;
-        let data = &props.data;
-        let model = initialized(self.model.as_mut(), &props.base.id)?;
         let mut sources = vec![
             ("position", AttributeSource::Positions(props.get_position.clone())),
             ("normal", AttributeSource::Vec3(props.get_normal.clone())),
             ("color", AttributeSource::Colors(props.get_color.clone())),
         ];
         sources.extend(props.base.extensions.sources(&props.data)?);
+        Ok(sources)
+    }
+
+    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+        let sources = self.sources()?;
+        let props = &self.props;
+        let data = &props.data;
+        let model = initialized(self.model.as_mut(), &props.base.id)?;
         self.attributes
             .update(&ctx.device, &ctx.queue, model, data, &sources)?;
         model.set_instance_count(data.len() as u32);
@@ -142,6 +149,10 @@ impl Layer for PointCloudLayer {
         let shader = extensions.assemble(&self.props.base.id, &modules, SHADER)?;
         self.attributes = point_cloud_attributes();
         self.attributes.extend(extensions.buffer_specs(&shader)?);
+        // Attributes whose accessors are constants hold a single element, see `plan`
+        self.attributes.set_transitions(&self.props.base.transitions);
+        let sources = self.sources()?;
+        self.attributes.plan(&sources);
         let mut layouts = vec![VertexBufferLayout::vertex(
             "positions",
             0,
@@ -179,6 +190,11 @@ impl Layer for PointCloudLayer {
         }
         self.attributes.set_time(ctx.time);
         self.attributes.set_transitions(&self.props.base.transitions);
+        // A constant accessor that stopped being one (or the other way round) changes the
+        // vertex layouts, so the model is built again
+        if self.attributes.plan_changed(&self.sources()?) {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

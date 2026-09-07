@@ -247,13 +247,9 @@ impl ColumnLayer {
             .flatten()
     }
 
-    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+    /// Where every attribute of the layer reads from.
+    fn sources(&self) -> Result<Vec<(&'static str, AttributeSource)>> {
         let props = &self.props;
-        let data = &props.data;
-        let mut models: Vec<&mut Model> = [&mut self.fill, &mut self.stroke, &mut self.wireframe]
-            .into_iter()
-            .flatten()
-            .collect();
         let mut sources = vec![
             ("position", AttributeSource::Positions(props.get_position.clone())),
             ("elevation", AttributeSource::Floats(props.get_elevation.clone())),
@@ -262,6 +258,17 @@ impl ColumnLayer {
             ("lineWidth", AttributeSource::Floats(props.get_line_width.clone())),
         ];
         sources.extend(props.base.extensions.sources(&props.data)?);
+        Ok(sources)
+    }
+
+    fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
+        let sources = self.sources()?;
+        let props = &self.props;
+        let data = &props.data;
+        let mut models: Vec<&mut Model> = [&mut self.fill, &mut self.stroke, &mut self.wireframe]
+            .into_iter()
+            .flatten()
+            .collect();
         self.attributes
             .update_many(&ctx.device, &ctx.queue, &mut models, data, &sources)?;
         for model in models {
@@ -290,6 +297,10 @@ impl Layer for ColumnLayer {
         let shader = extensions.assemble(&props.base.id, &modules, SHADER)?;
         self.attributes = column_attributes();
         self.attributes.extend(extensions.buffer_specs(&shader)?);
+        // Attributes whose accessors are constants hold a single element, see `plan`
+        self.attributes.set_transitions(&self.props.base.transitions);
+        let sources = self.sources()?;
+        self.attributes.plan(&sources);
         let layouts = [VertexBufferLayout::interleaved(
             "geometry",
             std::mem::size_of::<GeometryVertex>() as u64,
@@ -349,6 +360,11 @@ impl Layer for ColumnLayer {
         }
         self.attributes.set_time(ctx.time);
         self.attributes.set_transitions(&self.props.base.transitions);
+        // A constant accessor that stopped being one (or the other way round) changes the
+        // vertex layouts, so the model is built again
+        if self.attributes.plan_changed(&self.sources()?) {
+            self.initialize(ctx)?;
+        }
         if self.data_dirty {
             self.update_attributes(ctx)?;
             self.data_dirty = false;

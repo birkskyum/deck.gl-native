@@ -2494,13 +2494,13 @@ fn prop_changes_upload_only_what_changed() {
         [255, 0, 0, 255],
         "the larger radius shows"
     );
-    // A colour change uploads the colour buffer only: 4 bytes per instance
+    // A colour change uploads the colour buffer only, and a constant accessor is one element
     deck.set_layers(vec![Box::new(ScatterplotLayer::new(props(
         3.0,
         [0, 0, 255, 255],
     )))]);
     let shot = deck.snapshot(None).unwrap();
-    assert_eq!(deck.stats().uploaded_bytes, 400, "{:?}", deck.stats());
+    assert_eq!(deck.stats().uploaded_bytes, 4, "{:?}", deck.stats());
     assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
     // The same for a line layer's width
     let line = |width: f32| LineLayerProps {
@@ -2517,7 +2517,64 @@ fn prop_changes_upload_only_what_changed() {
     deck.snapshot(None).unwrap();
     deck.set_layers(vec![Box::new(LineLayer::new(line(5.0)))]);
     deck.snapshot(None).unwrap();
-    assert_eq!(deck.stats().uploaded_bytes, 40, "widths only: {:?}", deck.stats());
+    assert_eq!(deck.stats().uploaded_bytes, 4, "widths only: {:?}", deck.stats());
+}
+
+#[test]
+fn constant_accessors_upload_one_element_and_switch_back_to_rows() {
+    let Some(ctx) = context() else { return };
+    let rows = 500;
+    // Every accessor is a constant, so no attribute needs a value per row
+    let constant = |color: [u8; 4]| ScatterplotLayerProps {
+        base: LayerProps::new("points"),
+        data: LayerData::with_length(rows),
+        get_position: Accessor::Constant(CENTER),
+        get_fill_color: Accessor::Constant(color),
+        get_radius: Accessor::Constant(4.0),
+        radius_units: Unit::Pixels,
+        ..Default::default()
+    };
+    let mut deck = make_deck(
+        &ctx,
+        vec![Box::new(ScatterplotLayer::new(constant([255, 0, 0, 255])))],
+    );
+    let shot = deck.snapshot(None).unwrap();
+    let first = deck.stats().uploaded_bytes;
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [255, 0, 0, 255]);
+    // Positions and both colour buffers are one element each; only the interleaved instance
+    // data stays per row, since it carries the row index that picking needs
+    assert!(first < 200 + rows as u64 * 20, "{first} bytes for {rows} rows");
+    // Switching one accessor to a function rebuilds the layout and uploads that buffer per row
+    let mut per_row = constant([255, 0, 0, 255]);
+    per_row.get_fill_color = Accessor::func(|i| {
+        if i % 2 == 0 {
+            [0, 0, 255, 255]
+        } else {
+            [0, 255, 0, 255]
+        }
+    });
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(per_row))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert!(
+        deck.stats().uploaded_bytes >= rows as u64 * 4,
+        "the colours are per row now: {:?}",
+        deck.stats()
+    );
+    // The last row wins where they overlap, and 499 is odd
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 255, 0, 255]);
+    // And back to a constant: the layouts change again, so every buffer is written once more
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(constant([
+        255, 255, 0, 255,
+    ])))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [255, 255, 0, 255]);
+    // A colour change from there is one element again
+    deck.set_layers(vec![Box::new(ScatterplotLayer::new(constant([
+        0, 255, 255, 255,
+    ])))]);
+    let shot = deck.snapshot(None).unwrap();
+    assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 255, 255, 255]);
+    assert_eq!(deck.stats().uploaded_bytes, 4, "{:?}", deck.stats());
 }
 
 #[test]
@@ -2563,9 +2620,10 @@ fn arrow_columns_upload_without_conversion() {
         assert_eq!(shot.pixel(SIZE / 2, SIZE / 2), [0, 0, 255, 255]);
         deck.stats().uploaded_bytes
     };
-    // Per row: positions high and low (12 bytes each), fill and line colours (4 each) and the
-    // 20 byte instance data; the quad geometry of the layer is the same for both
-    assert_eq!(uploaded(100) - uploaded(50), 50 * (12 + 12 + 4 + 4 + 20));
+    // Per row: positions high and low (12 bytes each), the fill colour (4) and the 20 byte
+    // instance data. The line colour is a constant accessor, so it is one element whatever
+    // the row count, and the quad geometry of the layer is the same for both
+    assert_eq!(uploaded(100) - uploaded(50), 50 * (12 + 12 + 4 + 20));
 }
 
 #[test]

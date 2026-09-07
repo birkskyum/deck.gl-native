@@ -5,7 +5,7 @@
 //! Data that names its changed rows ([`LayerData::changed_rows`]) is written in place for
 //! those rows only, and buffers grow with headroom when rows are appended.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arrow_array::cast::AsArray;
 use arrow_array::types::{Float32Type, UInt8Type};
@@ -36,6 +36,21 @@ pub enum AttributeSource {
     Vec4(Accessor<[f32; 4]>),
     /// The row of the layer's data each object comes from (picking)
     RowIndex,
+}
+
+impl AttributeSource {
+    /// Whether every row reads the same value, so one element can stand for all of them.
+    pub fn is_constant(&self) -> bool {
+        match self {
+            Self::Positions(a) => matches!(a, Accessor::Constant(_)),
+            Self::Colors(a) => matches!(a, Accessor::Constant(_)),
+            Self::Floats(a) => matches!(a, Accessor::Constant(_)),
+            Self::Vec2(a) => matches!(a, Accessor::Constant(_)),
+            Self::Vec3(a) => matches!(a, Accessor::Constant(_)),
+            Self::Vec4(a) => matches!(a, Accessor::Constant(_)),
+            Self::RowIndex => false,
+        }
+    }
 }
 
 /// Which part of a position a field holds.
@@ -186,6 +201,9 @@ pub struct AttributeManager {
     last_values: HashMap<&'static str, Resolved>,
     animations: HashMap<&'static str, AttributeAnimation>,
     time: f64,
+    /// Buffers whose fields all read constant accessors: deck.gl's constant attributes. They
+    /// hold one element and their layout has a zero stride, so every instance reads it.
+    constant: HashSet<&'static str>,
 }
 
 /// A running attribute transition: values move from `from` to `to`.
@@ -323,6 +341,7 @@ impl AttributeManager {
             last_values: HashMap::new(),
             animations: HashMap::new(),
             time: 0.0,
+            constant: HashSet::new(),
         }
     }
 
@@ -417,8 +436,60 @@ impl AttributeManager {
     }
 
     /// The vertex buffer layouts for the model, in declaration order.
+    /// Which buffers can hold one element instead of one per row: deck.gl's constant
+    /// attributes. A buffer qualifies when every field of it reads a constant accessor and
+    /// no transition animates one of them.
+    fn constant_buffers(&self, sources: &[(&'static str, AttributeSource)]) -> HashSet<&'static str> {
+        let mut constant = HashSet::new();
+        for buffer in &self.buffers {
+            let all_constant = buffer.fields.iter().all(|field| {
+                self.transitions.for_attribute(field.attribute).is_none()
+                    && sources
+                        .iter()
+                        .find(|(name, _)| *name == field.attribute)
+                        .is_some_and(|(_, source)| source.is_constant())
+            });
+            if all_constant && !buffer.fields.is_empty() {
+                constant.insert(buffer.name);
+            }
+        }
+        constant
+    }
+
+    /// Work out which buffers are constant for `sources` and keep it; the layouts and the
+    /// model must be built after this. Returns whether the answer changed.
+    pub fn plan(&mut self, sources: &[(&'static str, AttributeSource)]) -> bool {
+        let constant = self.constant_buffers(sources);
+        let changed = constant != self.constant;
+        if changed {
+            self.constant = constant;
+            self.force = true;
+        }
+        changed
+    }
+
+    /// Whether [`plan`](Self::plan) would change the layouts, so the layer needs a new model.
+    pub fn plan_changed(&self, sources: &[(&'static str, AttributeSource)]) -> bool {
+        self.constant_buffers(sources) != self.constant
+    }
+
+    /// Whether a buffer holds a single element read by every instance.
+    pub fn is_constant(&self, buffer: &str) -> bool {
+        self.constant.contains(buffer)
+    }
+
     pub fn layouts(&self) -> Vec<VertexBufferLayout> {
-        self.buffers.iter().map(BufferSpec::layout).collect()
+        self.buffers
+            .iter()
+            .map(|buffer| {
+                let mut layout = buffer.layout();
+                // A constant buffer holds one element every instance reads
+                if self.constant.contains(buffer.name) {
+                    layout.stride = 0;
+                }
+                layout
+            })
+            .collect()
     }
 
     /// Upload every buffer on the next update (after the model was recreated).
@@ -576,8 +647,32 @@ impl AttributeManager {
             }
         }
         let mut partial: HashMap<&'static str, Resolved> = HashMap::new();
+        // Constant buffers resolve their single value from the first row
+        let mut constant_resolved: HashMap<&'static str, Resolved> = HashMap::new();
+        let first_row = if self.constant.is_empty() {
+            LayerData::default()
+        } else {
+            data.slice(0..1)
+        };
         for buffer in &self.buffers {
+            let is_constant = self.constant.contains(buffer.name);
             let fields_changed = buffer.fields.iter().any(|f| changed(f.attribute));
+            if is_constant {
+                if !data_changed && !fields_changed {
+                    continue;
+                }
+                let existing = self.gpu.get(buffer.name);
+                let upload =
+                    |bytes: &[u8]| write_or_create_vertex_buffer(device, queue, existing, buffer.name, bytes);
+                let gpu_buffer =
+                    build_buffer(&upload, buffer, &first_row, sources, &mut constant_resolved, None)?;
+                for model in models.iter_mut() {
+                    model.set_vertex_buffer(buffer.name, gpu_buffer.clone())?;
+                }
+                self.gpu.insert(buffer.name, gpu_buffer);
+                uploaded += 1;
+                continue;
+            }
             let existing = self.gpu.get(buffer.name);
             let needed = data.len() as u64 * buffer.stride;
             // Changed rows go into the buffer the model already has when they fit
