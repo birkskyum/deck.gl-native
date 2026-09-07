@@ -355,18 +355,18 @@ pub const TRIP_LOOP_SECONDS: f32 = 12.0;
 pub fn trips() -> TripsLayer {
     let loops: Vec<Path> = vec![
         vec![
-            [CENTER[0] - 0.012, CENTER[1] - 0.008, 0.0],
-            [CENTER[0] + 0.012, CENTER[1] - 0.008, 0.0],
-            [CENTER[0] + 0.012, CENTER[1] + 0.008, 0.0],
-            [CENTER[0] - 0.012, CENTER[1] + 0.008, 0.0],
-            [CENTER[0] - 0.012, CENTER[1] - 0.008, 0.0],
+            [CENTER[0] - 0.014, CENTER[1] - 0.034, 0.0],
+            [CENTER[0] + 0.01, CENTER[1] - 0.034, 0.0],
+            [CENTER[0] + 0.01, CENTER[1] - 0.02, 0.0],
+            [CENTER[0] - 0.014, CENTER[1] - 0.02, 0.0],
+            [CENTER[0] - 0.014, CENTER[1] - 0.034, 0.0],
         ],
         vec![
-            [CENTER[0] + 0.03, CENTER[1] - 0.02, 0.0],
-            [CENTER[0] + 0.03, CENTER[1] + 0.02, 0.0],
-            [CENTER[0] + 0.05, CENTER[1] + 0.02, 0.0],
-            [CENTER[0] + 0.05, CENTER[1] - 0.02, 0.0],
-            [CENTER[0] + 0.03, CENTER[1] - 0.02, 0.0],
+            [CENTER[0] + 0.02, CENTER[1] - 0.04, 0.0],
+            [CENTER[0] + 0.02, CENTER[1] - 0.024, 0.0],
+            [CENTER[0] + 0.042, CENTER[1] - 0.024, 0.0],
+            [CENTER[0] + 0.042, CENTER[1] - 0.04, 0.0],
+            [CENTER[0] + 0.02, CENTER[1] - 0.04, 0.0],
         ],
     ];
     let timestamps: Vec<Vec<f32>> = loops

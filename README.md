@@ -74,6 +74,7 @@ cargo run --release --bin window           # the same scene in a window, with ho
 cargo run --release --bin geojson -- file.geojson   # any GeoJSON file, extruded and colored by properties
 cargo run --release --bin json_render -- examples/json/san-francisco.json out.png   # a JSON description to a PNG
 DECKGL_JSON=examples/json/vancouver-blocks.json cargo run --release --bin window   # any example, from a JSON description
+DECKGL_ONLY=trips,labels cargo run --release --bin texture_render   # only the listed layer ids
 cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a maplibre-native basemap
 ```
 

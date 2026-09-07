@@ -11,6 +11,16 @@ use deck_gl_json::JsonConverter;
 use crate::scene;
 
 pub const ENV_VAR: &str = "DECKGL_JSON";
+/// Comma separated layer ids to keep, for looking at one layer at a time.
+pub const ONLY_VAR: &str = "DECKGL_ONLY";
+
+fn keep_only(mut layers: Vec<Box<dyn Layer>>) -> Vec<Box<dyn Layer>> {
+    if let Ok(only) = std::env::var(ONLY_VAR) {
+        let ids: Vec<&str> = only.split(',').map(str::trim).collect();
+        layers.retain(|layer| ids.contains(&layer.id()));
+    }
+    layers
+}
 
 pub struct Scene {
     pub view_state: ViewState,
@@ -28,12 +38,12 @@ pub fn load(bearing: f64) -> Result<Scene, Box<dyn Error>> {
             println!("loaded {} layers from {path}", json.layers.len());
             Ok(Scene {
                 view_state: json.view_state.unwrap_or_else(|| scene::view_state(bearing)),
-                layers: json.layers,
+                layers: keep_only(json.layers),
             })
         }
         _ => Ok(Scene {
             view_state: scene::view_state(bearing),
-            layers: scene::layers(),
+            layers: keep_only(scene::layers()),
         }),
     }
 }
