@@ -11,7 +11,8 @@
 //! and bearing by deck.gl's own projection, the same way the maplibre-native host works.
 
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{Deck, DeckProps, ViewState};
+use deck_gl::viewport::{Viewport, WebMercatorViewportOptions};
+use deck_gl::{Deck, DeckProps};
 use deck_gl_json::JsonConverter;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -118,6 +119,16 @@ impl DeckGlOverlay {
 
     /// Draw the layers into whatever maplibre has bound, with the camera the map is at. Call
     /// this from the custom layer's `render(gl, args)`.
+    /// `near_z` and `far_z` are the map's own depth planes, from the custom layer's render
+    /// parameters. Sharing a depth buffer means agreeing on what a depth value stands for,
+    /// and deck and maplibre place their planes differently, so an arc well above a tower can
+    /// still lose to it at some angles.
+    ///
+    /// Passing them through as they are makes the layers disappear, so they are not used yet
+    /// and deck keeps its own planes: the remaining disagreement is a known gap rather than a
+    /// solved one. `@deck.gl/maplibre` divides them by the viewport height, which is the same
+    /// unit deck's planes are in, so the difference is somewhere else.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         longitude: f64,
@@ -125,6 +136,8 @@ impl DeckGlOverlay {
         zoom: f64,
         pitch: f64,
         bearing: f64,
+        near_z: f64,
+        far_z: f64,
     ) -> Result<(), JsValue> {
         let generation = deck_gl_layers::fetch::Fetcher::global().generation();
         if generation != self.converted_at && self.spec.is_some() {
@@ -142,13 +155,25 @@ impl DeckGlOverlay {
             );
             self.depth = crate::depth_texture(&self.device, &self.deck.context().target, size.0, size.1);
         }
-        self.deck.set_view_state(ViewState {
-            longitude,
-            latitude,
-            zoom,
-            pitch,
-            bearing,
-        });
+        let _ = (near_z, far_z);
+        let ratio = crate::device_pixel_ratio() as f64;
+        let width = (self.size.0 as f64 / ratio).max(1.0);
+        let height = (self.size.1 as f64 / ratio).max(1.0);
+        // maplibre measures its planes in CSS pixels, deck in viewport heights: its camera
+        // sits at an altitude of 1.5, not at `cameraToCenterDistance` pixels.
+        self.deck
+            .set_viewport(Viewport::web_mercator(&WebMercatorViewportOptions {
+                width,
+                height,
+                longitude,
+                latitude,
+                zoom,
+                pitch,
+                bearing,
+                near_z: None,
+                far_z: None,
+                ..Default::default()
+            }));
 
         let color = self.map_framebuffer()?;
         let color_view = color.create_view(&Default::default());

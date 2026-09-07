@@ -61,6 +61,23 @@ A map with terrain or the globe projection renders into a framebuffer of its own
 layers cannot attach a depth buffer to without taking the map's away; the overlay reports that
 rather than doing it.
 
+### The depth planes do not agree yet
+
+Sharing a depth buffer means agreeing on what a depth value stands for, and deck and MapLibre
+put their near and far planes in different places. The layers therefore win and lose depth
+comparisons they should not at some camera angles: an arc well above a tower can vanish behind
+it.
+
+The camera comes from the custom layer's render parameters, `nearZ` and `farZ`, which is the
+public way to reach it. `@deck.gl/maplibre` divides them by the viewport height, the unit
+deck's own planes are in, and hands them to the view. Doing the same here makes the layers
+disappear entirely, so something else differs as well and the planes are not used yet: the
+overlay keeps deck's own. Finding the rest of that difference is the next thing to do.
+
+The example runs on MapLibre GL JS 6, which is ESM only, WebGL2 only, and no longer has the
+private `map.transform` that older integrations read. It loads MapLibre's own `.mjs` build
+rather than a rebundled one, because MapLibre's worker only starts from that file.
+
 ## The JavaScript API
 
 ```js

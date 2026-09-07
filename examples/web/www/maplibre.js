@@ -1,8 +1,10 @@
 // deck.gl-native as a maplibre-gl-js custom layer: the map hands its WebGL2 context to wgpu,
 // which draws the layers into the framebuffer and depth buffer the map is already using.
+// MapLibre GL JS 6 is ESM only and WebGL2 only, which is what this layer wants anyway.
+// MapLibre's own ESM build, not a rebundled one: its worker only starts from this file.
+// v6 has named exports rather than a default one.
+import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.7.0/dist/maplibre-gl.mjs'
 import init, { create_overlay } from './pkg/deck_gl_web_gl.js'
-
-const maplibregl = window.maplibregl
 const status = document.querySelector('#status')
 const say = (message, isError = false) => {
   status.textContent = message
@@ -41,8 +43,19 @@ const deckLayer = {
       })
       .catch((error) => say(String(error), true))
   },
-  render(gl) {
+  // `parameters` are the custom layer render parameters, which carry the map's own depth
+  // planes. They are the public way to reach them: MapLibre 6 removed the private
+  // `map.transform` that older integrations read. This is what @deck.gl/maplibre does too.
+  render(gl, parameters, legacyParameters) {
     if (!this.overlay) return
+    const camera = [parameters, legacyParameters].find(
+      (p) => p && Number.isFinite(p.nearZ) && Number.isFinite(p.farZ),
+    )
+    if (!camera) {
+      say('this MapLibre is too old to share its depth planes; needs 4.5.1 or later', true)
+      this.overlay = null
+      return
+    }
     const center = this.map.getCenter()
     try {
       this.overlay.render(
@@ -51,6 +64,8 @@ const deckLayer = {
         this.map.getZoom(),
         this.map.getPitch(),
         this.map.getBearing(),
+        camera.nearZ,
+        camera.farZ,
       )
     } catch (error) {
       say(String(error), true)
