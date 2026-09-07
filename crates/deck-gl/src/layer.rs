@@ -376,3 +376,12 @@ pub fn update_standard_uniforms(
     model.upload_uniforms(&ctx.queue);
     Ok(())
 }
+
+/// The GPU resources of a layer, or the error a layer returns when it is used before
+/// `initialize`.
+pub fn initialized<'a, T>(resource: Option<&'a mut T>, layer: &str) -> Result<&'a mut T> {
+    resource.ok_or_else(|| crate::DeckError::Layer {
+        layer: layer.to_string(),
+        message: "used before initialize".to_string(),
+    })
+}

@@ -683,7 +683,9 @@ impl Deck {
             self.layers[i].layer.set_picking_active(&self.ctx, true)?;
         }
 
-        let target = self.picking.as_ref().expect("picking target");
+        let Some(target) = self.picking.as_ref() else {
+            return Err(DeckError::Render("picking target missing".into()));
+        };
         let color_view = target.color.create_view(&Default::default());
         let depth_view = target.depth.as_ref().map(|d| d.create_view(&Default::default()));
         let mut encoder = self
@@ -1124,7 +1126,11 @@ impl Deck {
                 depth: target.depth_format.map(|f| make("deck.gl msaa depth", f)),
             });
         }
-        self.msaa.as_ref().expect("msaa textures")
+        // Created above when missing or stale; the borrow rules keep this two step
+        match self.msaa.as_ref() {
+            Some(msaa) => msaa,
+            None => unreachable_after_creation(),
+        }
     }
 }
 
@@ -1175,4 +1181,15 @@ fn same_kind(view: &View, state: &AnyViewState) -> bool {
 /// layer is initialized again.
 fn same_pipelines(current: &LayerProps, incoming: &LayerProps) -> bool {
     current.pickable == incoming.pickable && !current.parameters.differs(&incoming.parameters)
+}
+
+/// `msaa_textures` fills the slot just before reading it; this only documents the invariant.
+#[cold]
+fn unreachable_after_creation() -> &'static MsaaTextures {
+    // Cannot happen: the textures were stored a few lines earlier. Returning an error would
+    // need a signature change on every caller for a case that cannot occur.
+    #[allow(clippy::panic)]
+    {
+        panic!("msaa textures were not created")
+    }
 }

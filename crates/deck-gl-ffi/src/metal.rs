@@ -182,8 +182,12 @@ pub unsafe extern "C" fn deckgl_metal_render(
     }
 
     let color_texture = unsafe { wrap_texture(&handle.device, color, color_format, "host color") };
-    let depth_texture = depth
-        .map(|depth| unsafe { wrap_texture(&handle.device, depth, depth_format.unwrap(), "host depth") });
+    let depth_texture = match (depth, depth_format) {
+        (Some(depth), Some(format)) => {
+            Some(unsafe { wrap_texture(&handle.device, depth, format, "host depth") })
+        }
+        _ => None,
+    };
     let color_view = color_texture.create_view(&Default::default());
     let depth_view = depth_texture.as_ref().map(|t| t.create_view(&Default::default()));
     if let (Some(depth), Some(deck)) = (&depth_texture, handle.deck.as_ref()) {
@@ -202,7 +206,10 @@ pub unsafe extern "C" fn deckgl_metal_render(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("deck.gl overlay"),
         });
-    let result = handle.deck.as_mut().expect("deck created").render_with(
+    let Some(deck) = handle.deck.as_mut() else {
+        return handle.set_error("deck was not created");
+    };
+    let result = deck.render_with(
         &mut encoder,
         &color_view,
         depth_view.as_ref(),

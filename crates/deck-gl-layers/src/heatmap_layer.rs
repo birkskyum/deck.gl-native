@@ -13,8 +13,8 @@ use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::model::create_rgba8_texture;
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
-    Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, ProjectionMode, RenderParameters,
-    Result, Viewport,
+    initialized, Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, ProjectionMode,
+    RenderParameters, Result, Viewport,
 };
 use luma_gl::buffer::{create_vertex_buffer_from, split_f64};
 use luma_gl::{assemble_shader, Model, ModelDescriptor, RenderTarget, VertexBufferLayout};
@@ -155,7 +155,7 @@ impl HeatmapLayer {
         let weights = resolve_f32(&props.data, &props.get_weight)?;
         let flat: Vec<f64> = positions.iter().flatten().copied().collect();
         let (hi, lo) = split_f64(&flat);
-        let model = &mut self.resources.as_mut().expect("initialized").weights;
+        let model = &mut initialized(self.resources.as_mut(), &self.props.base.id)?.weights;
         model.set_vertex_buffer(
             "instancePositions",
             create_vertex_buffer_from(&ctx.device, "instancePositions", &hi),
@@ -219,7 +219,7 @@ impl HeatmapLayer {
             tex_coords.push(((common.x - bounds[0]) / (bounds[2] - bounds[0])) as f32);
             tex_coords.push(((common.y - bounds[1]) / (bounds[3] - bounds[1])) as f32);
         }
-        let model = &mut self.resources.as_mut().expect("initialized").triangle;
+        let model = &mut initialized(self.resources.as_mut(), &self.props.base.id)?.triangle;
         model.set_vertex_buffer(
             "positions",
             create_vertex_buffer_from(&ctx.device, "positions", &positions),
@@ -236,7 +236,7 @@ impl HeatmapLayer {
         let colors: Vec<u8> = self.props.color_range.iter().flatten().copied().collect();
         let width = self.props.color_range.len().max(1) as u32;
         let texture = create_rgba8_texture(&ctx.device, &ctx.queue, "heatmap colors", width, 1, &colors);
-        let model = &mut self.resources.as_mut().expect("initialized").triangle;
+        let model = &mut initialized(self.resources.as_mut(), &self.props.base.id)?.triangle;
         model.set_texture("colorTexture", texture.create_view(&Default::default()))?;
         self.color_range_dirty = false;
         Ok(())
@@ -245,9 +245,11 @@ impl HeatmapLayer {
     /// Splat the points into the weights texture and reduce it to its maximum.
     fn update_weightmap(&mut self, ctx: &LayerContext, viewport: &Viewport) -> Result<()> {
         let props = &self.props;
-        let resources = self.resources.as_mut().expect("initialized");
+        let resources = initialized(self.resources.as_mut(), &self.props.base.id)?;
         let texture_size = resources.texture_size;
-        let world = self.world_bounds.expect("bounds");
+        let Some(world) = self.world_bounds else {
+            return Ok(());
+        };
         // The weights shader projects through the layer's project module, whose positions are
         // relative to the viewport centre in auto offset mode (zoom 12 and up): shift the
         // bounds the same way, as deck.gl's layer level projectPosition does.
@@ -532,7 +534,7 @@ impl Layer for HeatmapLayer {
         }
         let props = &self.props;
         let color_domain = self.color_domain;
-        let model = &mut self.resources.as_mut().expect("initialized").triangle;
+        let model = &mut initialized(self.resources.as_mut(), &self.props.base.id)?.triangle;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
         let u = model.uniforms("triangle")?;
         u.set_f32(

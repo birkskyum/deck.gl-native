@@ -64,8 +64,9 @@ fn tesselate_column(nradial: u32, extruded: bool) -> ColumnGeometry {
             }
         }
         // duplicate the last vertex to create a proper degenerate triangle
-        let last = *vertices.last().unwrap();
-        vertices.push(last);
+        if let Some(&last) = vertices.last() {
+            vertices.push(last);
+        }
     }
     // top: 0, -1, 1, -2, 2, -3, 3, ...
     for j in (if extruded { 0 } else { 1 })..verts_around_edge {

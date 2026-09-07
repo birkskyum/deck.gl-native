@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/scatterplot-layer/scatterplot-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_vec2};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -106,7 +106,7 @@ impl ScatterplotLayer {
         let props = &self.props;
         let data = &props.data;
         let device = &ctx.device;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
         let positions = resolve_positions(data, &props.get_position)?;
         let flat: Vec<f64> = positions.iter().flatten().copied().collect();
@@ -204,7 +204,7 @@ impl Layer for ScatterplotLayer {
             self.data_dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
 
         let u = model.uniforms("scatterplot")?;

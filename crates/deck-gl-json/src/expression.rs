@@ -370,7 +370,8 @@ fn binary(op: BinaryOp, l: &Value, r: &Value) -> Value {
         Shl => number(to_int32(l).wrapping_shl(to_int32(r) as u32 & 31) as f64),
         Shr => number((to_int32(l) >> (to_int32(r) as u32 & 31)) as f64),
         UShr => number(((to_int32(l) as u32) >> (to_int32(r) as u32 & 31)) as f64),
-        Or | And => unreachable!("short circuit operators are evaluated by Expr::eval"),
+        // Short circuit operators are evaluated by Expr::eval; treat a stray one as false
+        Or | And => Value::Bool(false),
     }
 }
 

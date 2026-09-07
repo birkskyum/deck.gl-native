@@ -239,12 +239,14 @@ fn classify(inner: &TypeInner) -> UniformKind {
 /// Explicit `@binding(N)` slots that appear in the source are reserved; `auto` slots take the
 /// remaining numbers in order of appearance.
 fn resolve_bindings(wgsl: &str) -> String {
+    #[allow(clippy::expect_used)] // literal patterns
     let explicit = Regex::new(r"@binding\((\d+)\)").expect("regex");
     let mut used: BTreeSet<u32> = explicit
         .captures_iter(wgsl)
         .filter_map(|c| c[1].parse().ok())
         .collect();
 
+    #[allow(clippy::expect_used)]
     let auto = Regex::new(r"@binding\(auto\)").expect("regex");
     let mut next = 0u32;
     let resolved = auto.replace_all(wgsl, |_: &regex::Captures| {
@@ -255,6 +257,7 @@ fn resolve_bindings(wgsl: &str) -> String {
         format!("@binding({next})")
     });
 
+    #[allow(clippy::expect_used)]
     let group = Regex::new(r"@group\(\d+\)").expect("regex");
     group.replace_all(&resolved, "@group(0)").into_owned()
 }

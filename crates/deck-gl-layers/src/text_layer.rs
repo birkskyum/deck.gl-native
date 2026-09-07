@@ -231,7 +231,10 @@ fn resolve_enum<T: Clone + Send + Sync + 'static>(
             .iter()
             .map(|s| parse(s).ok_or_else(|| DeckError::Data(format!("unknown {what} `{s}`"))))
             .collect(),
-        other => resolve_with(data, other, |_| unreachable!("constant or function accessor")),
+        // Constant and function accessors never read a column
+        other => resolve_with(data, other, |_| {
+            Err(DeckError::Data(format!("{what} cannot come from a column here")))
+        }),
     }
 }
 
@@ -323,7 +326,7 @@ impl TextLayer {
         let props = &self.props;
         let data = &props.data;
         let device = &ctx.device;
-        let atlas = self.atlas.as_ref().expect("atlas built");
+        let atlas = deck_gl::initialized(self.atlas.as_mut(), &self.props.base.id)?;
 
         let positions = resolve_positions(data, &props.get_position)?;
         let colors = resolve_colors(data, &props.get_color)?;

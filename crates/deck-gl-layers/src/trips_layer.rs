@@ -2,7 +2,7 @@
 //! part travelled before `current_time` with a fading trail.
 
 use deck_gl::data::resolve_f32_lists;
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::{Accessor, DeckError, Layer, LayerContext, LayerProps, Result, Viewport};
 use luma_gl::buffer::create_vertex_buffer_from;
 use luma_gl::{Model, VertexBufferLayout};
@@ -142,7 +142,7 @@ impl TripsLayer {
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.path.base.id)?;
         let tesselated = upload_path_attributes(model, ctx, &self.props.path)?;
         let timestamps = resolve_f32_lists(&self.props.path.data, &self.props.get_timestamps)?;
         let mut packed = Vec::with_capacity(tesselated.instance_count());
@@ -191,7 +191,7 @@ impl Layer for TripsLayer {
             self.data_dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.path.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.path.base)?;
         write_path_uniforms(model, &props.path)?;
         let u = model.uniforms("trips")?;

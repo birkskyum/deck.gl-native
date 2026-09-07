@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use deck_gl::data::{resolve_f32, resolve_positions};
 use deck_gl::glam::{DMat4, DVec3};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Viewport};
 use luma_gl::buffer::create_vertex_buffer_from;
@@ -197,7 +197,7 @@ impl ScreenGridLayer {
                 }
             })
             .collect();
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         model.set_vertex_buffer(
             "instanceData",
             create_vertex_buffer_from(&ctx.device, "instanceData", &instances),
@@ -267,7 +267,7 @@ impl Layer for ScreenGridLayer {
             self.last_view = Some(view);
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
         let u = model.uniforms("screenGrid")?;
         u.set_f32("cellSizePixels", props.cell_size_pixels)?;

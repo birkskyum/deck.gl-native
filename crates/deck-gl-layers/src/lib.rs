@@ -2,6 +2,10 @@
 //!
 //! Layer shaders are the WGSL sources deck.gl 9 ships, included verbatim from `src/wgsl`.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
+)]
 pub mod aggregation;
 pub mod arc_layer;
 pub mod bitmap_layer;

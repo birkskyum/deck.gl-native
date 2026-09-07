@@ -576,7 +576,9 @@ impl Model {
         };
         pass.set_bind_group(0, bind_group, &[]);
         for (slot, buffer) in self.vertex_slots.iter().enumerate() {
-            pass.set_vertex_buffer(slot as u32, buffer.as_ref().unwrap().slice(..));
+            if let Some(buffer) = buffer {
+                pass.set_vertex_buffer(slot as u32, buffer.slice(..));
+            }
         }
         match &self.index_buffer {
             Some(index) => {

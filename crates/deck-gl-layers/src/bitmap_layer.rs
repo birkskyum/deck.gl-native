@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Layer, LayerContext, LayerProps, Result, Viewport};
 use glam::{Vec3, Vec4};
@@ -90,7 +90,7 @@ impl BitmapLayer {
 
     fn update_mesh_and_texture(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         let [min_x, min_y, max_x, max_y] = props.bounds;
         // [[minX, minY], [minX, maxY], [maxX, maxY], [maxX, minY]]
         let corners: [f64; 12] = [
@@ -167,7 +167,7 @@ impl Layer for BitmapLayer {
             self.dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
 
         let u = model.uniforms("bitmap")?;

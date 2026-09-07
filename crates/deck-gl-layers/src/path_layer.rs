@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/path-layer/path-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_paths};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Path, Result, Unit, Viewport};
 use luma_gl::buffer::{create_index_buffer, create_vertex_buffer_from};
@@ -91,7 +91,7 @@ impl PathLayer {
     }
 
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         upload_path_attributes(model, ctx, &self.props)?;
         Ok(())
     }
@@ -251,7 +251,7 @@ impl Layer for PathLayer {
             self.data_dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
         write_path_uniforms(model, props)?;
         model.upload_uniforms(&ctx.queue);

@@ -7,6 +7,10 @@
 //! - [`buffer`]: helpers for building vertex buffers (fp64 splitting, colors)
 //! - [`device`]: headless device creation and texture readback
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
+)]
 pub mod buffer;
 pub mod device;
 pub mod model;

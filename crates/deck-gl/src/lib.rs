@@ -9,6 +9,10 @@
 //! interleaved rendering: the map owns the device, the attachments and the camera, and deck
 //! layers draw into the same pass with the same depth buffer.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
+)]
 pub mod constants;
 pub mod controller;
 pub mod data;
@@ -30,7 +34,7 @@ pub use data::{Accessor, Color, LayerData, Path, Polygon, Position};
 pub use deck::{Deck, DeckProps, PickingInfo, Snapshot, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use globe_controller::{GlobeConstraints, GlobeController};
-pub use layer::{ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};
+pub use layer::{initialized, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
 pub use orbit_controller::{OrbitConstraints, OrbitController};
 pub use parameters::{CullMode, RenderParameters};

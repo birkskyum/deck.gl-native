@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions, resolve_strings, resolve_vec2};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, DeckError, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -201,7 +201,7 @@ impl IconLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         let Some(atlas) = &props.atlas else {
             model.set_instance_count(0);
             return Ok(());
@@ -341,7 +341,7 @@ impl Layer for IconLayer {
         }
         let props = &self.props;
         let texture_size = self.texture_size;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
         let u = model.uniforms("icon")?;
         u.set_f32("sizeScale", props.size_scale)?;

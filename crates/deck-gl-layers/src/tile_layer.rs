@@ -164,12 +164,13 @@ impl LoadPool {
             let queue = queue.clone();
             let tx: Sender<(TileIndex, std::result::Result<Option<TileData>, String>)> = tx.clone();
             let loader = loader.clone();
+            // A failed spawn leaves fewer workers; the queue still drains through the others
             std::thread::Builder::new()
                 .name("deck-gl tile loader".into())
                 .spawn(move || loop {
                     let job = {
                         let (lock, cvar) = &*queue;
-                        let mut q = lock.lock().unwrap();
+                        let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
                         loop {
                             if let Some(job) = q.pop_front() {
                                 break Some(job);
@@ -178,7 +179,7 @@ impl LoadPool {
                             if Arc::strong_count(&queue) <= workers.max(1) {
                                 break None;
                             }
-                            q = cvar.wait(q).unwrap();
+                            q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
                         }
                     };
                     let Some((index, bounds)) = job else { return };
@@ -187,7 +188,7 @@ impl LoadPool {
                         return;
                     }
                 })
-                .expect("spawn tile loader");
+                .ok();
         }
         Self {
             queue,
@@ -198,7 +199,9 @@ impl LoadPool {
 
     fn submit(&self, index: TileIndex, bounds: TileBounds) {
         let (lock, cvar) = &*self.queue;
-        lock.lock().unwrap().push_back((index, bounds));
+        lock.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back((index, bounds));
         cvar.notify_one();
     }
 }
@@ -301,7 +304,9 @@ impl TileLayer {
         if self.pool.is_none() {
             self.pool = Some(LoadPool::new(loader, self.props.max_requests, self.generation));
         }
-        let pool = self.pool.as_mut().expect("pool");
+        let Some(pool) = self.pool.as_mut() else {
+            return false;
+        };
         for index in self.tileset.pending() {
             if let Some(tile) = self.tileset.tile(index) {
                 pool.submit(index, tile.bounds);

@@ -99,7 +99,7 @@ impl ScaleType {
 /// Percentile thresholds of the finite values (99 of them for 100 buckets).
 fn quantile_thresholds(values: &[f32], buckets: usize) -> Vec<f32> {
     let mut sorted: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(f32::total_cmp);
     let n = buckets.max(1);
     (1..n).map(|i| threshold(&sorted, i as f64 / n as f64)).collect()
 }
@@ -183,7 +183,7 @@ impl ScaledValues {
             }
             ScaleType::Ordinal => {
                 let mut unique: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
-                unique.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                unique.sort_by(f32::total_cmp);
                 unique.dedup();
                 let index_of = |v: f32| unique.partition_point(|u| *u < v) as f32;
                 let mapped = values

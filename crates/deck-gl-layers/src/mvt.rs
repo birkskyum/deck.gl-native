@@ -81,14 +81,16 @@ impl<'a> Reader<'a> {
         let end = self.pos + 8;
         let bytes = self.bytes.get(self.pos..end).ok_or("truncated fixed64")?;
         self.pos = end;
-        Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
+        let array: [u8; 8] = bytes.try_into().map_err(|_| "truncated fixed64")?;
+        Ok(u64::from_le_bytes(array))
     }
 
     fn fixed32(&mut self) -> Result<u32, String> {
         let end = self.pos + 4;
         let bytes = self.bytes.get(self.pos..end).ok_or("truncated fixed32")?;
         self.pos = end;
-        Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
+        let array: [u8; 4] = bytes.try_into().map_err(|_| "truncated fixed32")?;
+        Ok(u32::from_le_bytes(array))
     }
 }
 
@@ -268,9 +270,10 @@ fn feature_geometry(kind: u32, rings: Vec<Vec<[i64; 2]>>, projector: &Projector)
                 .filter(|r| r.len() >= 2)
                 .map(|r| convert(r))
                 .collect();
+            let mut lines = lines;
             match lines.len() {
                 0 => None,
-                1 => Some(Geometry::LineString(lines.into_iter().next().unwrap())),
+                1 => lines.pop().map(Geometry::LineString),
                 _ => Some(Geometry::MultiLineString(lines)),
             }
         }
@@ -286,7 +289,7 @@ fn feature_geometry(kind: u32, rings: Vec<Vec<[i64; 2]>>, projector: &Projector)
             }
             match polygons.len() {
                 0 => None,
-                1 => Some(Geometry::Polygon(polygons.into_iter().next().unwrap())),
+                1 => polygons.pop().map(Geometry::Polygon),
                 _ => Some(Geometry::MultiPolygon(polygons)),
             }
         }
@@ -463,9 +466,9 @@ pub fn encode_tile(layers: &[EncodeLayer<'_>]) -> Vec<u8> {
             match value {
                 Value::String(s) => field_bytes(&mut encoded, 1, s.as_bytes()),
                 Value::Bool(b) => field_varint(&mut encoded, 7, u64::from(*b)),
-                Value::Number(n) if n.is_i64() => {
+                Value::Number(n) if n.as_i64().is_some() => {
                     varint(&mut encoded, 6 << 3);
-                    varint(&mut encoded, zig(n.as_i64().unwrap()));
+                    varint(&mut encoded, zig(n.as_i64().unwrap_or(0)));
                 }
                 Value::Number(n) => {
                     varint(&mut encoded, 3 << 3 | 1);

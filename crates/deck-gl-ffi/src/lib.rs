@@ -4,6 +4,10 @@
 //! `MTLCommandQueue` through wgpu's hal layer, so deck's command buffers are committed on the
 //! host's queue and execute after whatever the host committed before them.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
+)]
 // Only the Metal host renders so far; the screenshot helpers are unused on other platforms
 // until Vulkan host interop lands.
 #![cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
@@ -401,13 +405,17 @@ impl DeckglHandle {
                 self.apply_camera();
             }
             None => {
-                let deck = self.deck.as_mut().expect("ensured");
+                let Some(deck) = self.deck.as_mut() else {
+                    return Err("deck was not created".to_string());
+                };
                 deck.set_device_pixel_ratio(1.0);
                 deck.set_size(width, height);
                 deck.set_view_state(self.view_state.unwrap_or_default());
             }
         }
-        let deck = self.deck.as_mut().expect("ensured");
+        let Some(deck) = self.deck.as_mut() else {
+            return Err("deck was not created".to_string());
+        };
         deck.snapshot(None).map_err(|e| e.to_string())
     }
 }
@@ -470,10 +478,12 @@ pub unsafe extern "C" fn deckgl_pick(
     }
     if handle.camera.is_some() {
         handle.apply_camera();
-    } else if let Some(view_state) = handle.view_state {
-        handle.deck.as_mut().expect("ensured").set_view_state(view_state);
+    } else if let (Some(view_state), Some(deck)) = (handle.view_state, handle.deck.as_mut()) {
+        deck.set_view_state(view_state);
     }
-    let deck = handle.deck.as_mut().expect("ensured");
+    let Some(deck) = handle.deck.as_mut() else {
+        return handle.set_error("deckgl_pick: deck was not created");
+    };
     match deck.pick(x, y) {
         Ok(Some(hit)) => {
             handle.picked_layer = CString::new(hit.layer_id).unwrap_or_default();

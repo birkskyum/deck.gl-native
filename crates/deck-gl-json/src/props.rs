@@ -57,7 +57,8 @@ impl<T: Clone> From<&Accessor<T>> for AccessorDefault<T> {
         match accessor {
             Accessor::Constant(value) => AccessorDefault::Value(value.clone()),
             Accessor::Column(name) => AccessorDefault::Expr(name.clone()),
-            Accessor::Func(_) => panic!("default accessors are constants or columns"),
+            // Function defaults have no JSON form: use their value for the first row
+            Accessor::Func(f) => AccessorDefault::Value(f(0)),
         }
     }
 }

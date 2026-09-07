@@ -1018,8 +1018,8 @@ fn contour_from_value(value: &Value) -> std::result::Result<Contour, String> {
         .as_object()
         .ok_or_else(|| format!("expected an object, got {}", crate::props::describe(value)))?;
     let threshold = match map.get("threshold") {
-        Some(Value::Array(_)) => {
-            let n = convert::numbers(map.get("threshold").unwrap(), 2, 2)?;
+        Some(array @ Value::Array(_)) => {
+            let n = convert::numbers(array, 2, 2)?;
             ContourThreshold::Band([n[0] as f32, n[1] as f32])
         }
         Some(v) if v.is_number() => ContourThreshold::Line(convert::f32(v)?),

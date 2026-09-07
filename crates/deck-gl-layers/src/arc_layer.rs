@@ -1,7 +1,7 @@
 //! Port of `@deck.gl/layers/src/arc-layer/arc-layer.ts`.
 
 use deck_gl::data::{resolve_colors, resolve_f32, resolve_positions};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::STANDARD_MODULES;
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -110,7 +110,7 @@ impl ArcLayer {
         let props = &self.props;
         let data = &props.data;
         let device = &ctx.device;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
         let sources = resolve_positions(data, &props.get_source_position)?;
         let targets = resolve_positions(data, &props.get_target_position)?;
@@ -233,7 +233,7 @@ impl Layer for ArcLayer {
             self.data_dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         model.set_vertex_count(props.num_segments.max(1) * 2);
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
 

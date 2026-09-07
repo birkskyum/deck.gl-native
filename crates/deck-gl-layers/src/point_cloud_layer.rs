@@ -2,7 +2,7 @@
 //! normals.
 
 use deck_gl::data::{resolve_colors, resolve_positions};
-use deck_gl::layer::{set_model_picking_active, update_standard_uniforms};
+use deck_gl::layer::{initialized, set_model_picking_active, update_standard_uniforms};
 use deck_gl::shaderlib::{LIGHTING_MODULES, STANDARD_MODULES};
 use deck_gl::{
     Accessor, Color, Layer, LayerContext, LayerData, LayerProps, Position, Result, Unit, Viewport,
@@ -85,7 +85,7 @@ impl PointCloudLayer {
     fn update_attributes(&mut self, ctx: &LayerContext) -> Result<()> {
         let props = &self.props;
         let data = &props.data;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
 
         let positions = resolve_positions(data, &props.get_position)?;
         let normals = deck_gl::data::resolve_with(data, &props.get_normal, |_| {
@@ -188,7 +188,7 @@ impl Layer for PointCloudLayer {
             self.data_dirty = false;
         }
         let props = &self.props;
-        let model = self.model.as_mut().expect("initialized");
+        let model = initialized(self.model.as_mut(), &self.props.base.id)?;
         update_standard_uniforms(model, ctx, viewport, &props.base)?;
         let u = model.uniforms("pointCloudUniforms")?;
         u.set_f32("radiusPixels", props.point_size)?;

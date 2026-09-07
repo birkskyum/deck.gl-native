@@ -21,6 +21,10 @@
 //! assert_eq!(deck.view_state.unwrap().zoom, 12.0);
 //! ```
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)
+)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
