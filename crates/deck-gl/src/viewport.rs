@@ -636,6 +636,37 @@ impl Viewport {
         viewport
     }
 
+    /// The target that puts the world position `coords` under `pixel`, for the orthographic and
+    /// orbit viewports: port of their `panByPosition`. Map viewports use
+    /// [`Viewport::pan_by_position`].
+    pub fn pan_target_by_position(&self, coords: DVec3, pixel: DVec2) -> DVec3 {
+        match self.projected_center_depth {
+            Some(depth) => {
+                // Orbit: shift the centre in pixel space, scaled by the relative depth of the
+                // grabbed point, and unproject it back at the centre's depth
+                let p0 = self.project(coords, true);
+                let (near, far) = (self.near, self.far);
+                let pz = (near * far) / (far - p0.z * (far - near));
+                let center_z = (near * far) / (far - depth * (far - near));
+                let shift_scale = pz / center_z;
+                let next_center = DVec2::new(
+                    self.width / 2.0 + (p0.x - pixel.x) * shift_scale,
+                    self.height / 2.0 + (p0.y - pixel.y) * shift_scale,
+                );
+                self.unproject(next_center, Some(depth), true, None)
+            }
+            None => {
+                // Orthographic: move the centre by the offset between the grabbed point and the
+                // point currently under the pointer, in common space
+                let from = pixels_to_world(pixel, None, &self.pixel_unprojection_matrix, 0.0);
+                let to = self.project_flat([coords.x, coords.y]);
+                let new_center = [self.center.x + to[0] - from.x, self.center.y + to[1] - from.y];
+                let flat = self.unproject_flat(new_center);
+                DVec3::new(flat[0], flat[1], coords.z)
+            }
+        }
+    }
+
     /// A copy of this viewport looking at the world shifted by `offset` whole worlds (512
     /// common units each) along longitude: port of `WebMercatorViewport`'s `worldOffset`.
     pub fn with_world_offset(&self, offset: i32) -> Viewport {

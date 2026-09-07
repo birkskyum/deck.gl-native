@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use deck_gl::luma_gl::device::create_render_texture;
 use deck_gl::luma_gl::RenderTarget;
-use deck_gl::{ClickCallback, Deck, DeckProps, HoverCallback, MapController, ViewState};
+use deck_gl::{ClickCallback, Deck, DeckProps, HoverCallback, MapController, OrbitController, ViewState};
 use deck_gl_examples::{scene, spec};
 use deck_gl_layers::TripsLayer;
 use winit::application::ApplicationHandler;
@@ -38,6 +38,8 @@ struct State {
     press_pixel: [f64; 2],
     /// Whether the map controller drives the camera (non map views keep their JSON camera)
     map_view: bool,
+    /// The controller of an orbit or orthographic view
+    orbit: Option<OrbitController>,
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -116,6 +118,15 @@ impl State {
             deck.set_any_view_state(camera);
         }
         let map_view = matches!(loaded.view, deck_gl::View::Map);
+        let orbit = match loaded.view {
+            deck_gl::View::Orbit(_) | deck_gl::View::Orthographic(_) => Some(OrbitController::new(
+                loaded.view,
+                loaded.camera.unwrap_or_else(|| loaded.view.default_view_state()),
+                config.width as f64 / scale as f64,
+                config.height as f64 / scale as f64,
+            )),
+            _ => None,
+        };
         deck.set_on_hover(Some(HoverCallback::new(|info| {
             if let Some(hit) = info {
                 println!(
@@ -138,6 +149,7 @@ impl State {
             deck,
             base_view,
             controller,
+            orbit,
             map_view,
             start: Instant::now(),
             cursor: None,
@@ -178,6 +190,12 @@ impl State {
             self.config.width as f64 / scale as f64,
             self.config.height as f64 / scale as f64,
         );
+        if let Some(orbit) = &mut self.orbit {
+            orbit.set_size(
+                self.config.width as f64 / scale as f64,
+                self.config.height as f64 / scale as f64,
+            );
+        }
     }
 
     fn now_ms(&self) -> f64 {
@@ -195,13 +213,23 @@ impl State {
             }
             self.dragging = Some(button);
             self.press_pixel = pixel;
-            if rotate {
+            if let Some(orbit) = &mut self.orbit {
+                if rotate {
+                    orbit.rotate_start(pixel);
+                } else if button == MouseButton::Left {
+                    orbit.pan_start(pixel);
+                }
+            } else if rotate {
                 self.controller.rotate_start(pixel);
             } else if button == MouseButton::Left {
                 self.controller.pan_start(pixel, self.now_ms());
             }
         } else if self.dragging == Some(button) {
             self.dragging = None;
+            if let Some(orbit) = &mut self.orbit {
+                orbit.rotate_end();
+                orbit.pan_end();
+            }
             self.controller.rotate_end();
             self.controller.pan_end(self.now_ms());
             // A left button released where it was pressed is a click
@@ -216,6 +244,25 @@ impl State {
 
     fn key(&mut self, key: &Key) {
         let step = 60.0;
+        if let Some(orbit) = &mut self.orbit {
+            match key {
+                Key::Named(NamedKey::ArrowLeft) => orbit.move_by([step, 0.0]),
+                Key::Named(NamedKey::ArrowRight) => orbit.move_by([-step, 0.0]),
+                Key::Named(NamedKey::ArrowUp) => orbit.move_by([0.0, step]),
+                Key::Named(NamedKey::ArrowDown) => orbit.move_by([0.0, -step]),
+                Key::Character(c) => match c.as_str() {
+                    "+" | "=" => orbit.zoom_in(),
+                    "-" => orbit.zoom_out(),
+                    "q" => orbit.rotate_by(-15.0, 0.0),
+                    "e" => orbit.rotate_by(15.0, 0.0),
+                    "r" => orbit.rotate_by(0.0, 10.0),
+                    "f" => orbit.rotate_by(0.0, -10.0),
+                    _ => {}
+                },
+                _ => {}
+            }
+            return;
+        }
         match key {
             Key::Named(NamedKey::ArrowLeft) => self.controller.move_by([step, 0.0]),
             Key::Named(NamedKey::ArrowRight) => self.controller.move_by([-step, 0.0]),
@@ -261,8 +308,12 @@ impl State {
         let elapsed = self.start.elapsed().as_secs_f64();
         let now = elapsed * 1000.0;
         self.controller.tick(now);
-        if !self.map_view {
-            // The controller only knows map cameras; leave the view's camera alone
+        if let Some(orbit) = &self.orbit {
+            if orbit.interacted() {
+                self.deck.set_any_view_state(orbit.view_state());
+            }
+        } else if !self.map_view {
+            // First person views keep their JSON camera
         } else if self.controller.interacted() {
             self.deck.set_view_state(self.controller.view_state());
         } else {
@@ -349,8 +400,13 @@ impl ApplicationHandler for App {
                 state.last_cursor = pixel;
                 if state.dragging.is_some() {
                     let now = state.now_ms();
-                    state.controller.pan([pixel.0, pixel.1], now);
-                    state.controller.rotate([pixel.0, pixel.1]);
+                    if let Some(orbit) = &mut state.orbit {
+                        orbit.pan([pixel.0, pixel.1]);
+                        orbit.rotate([pixel.0, pixel.1]);
+                    } else {
+                        state.controller.pan([pixel.0, pixel.1], now);
+                        state.controller.rotate([pixel.0, pixel.1]);
+                    }
                 } else {
                     state.cursor = Some(pixel);
                 }
@@ -372,7 +428,11 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::PixelDelta(p) => p.y / 40.0,
                 };
                 let pixel = [state.last_cursor.0, state.last_cursor.1];
-                state.controller.zoom_by(pixel, lines * 0.25);
+                if let Some(orbit) = &mut state.orbit {
+                    orbit.zoom_by(pixel, lines * 0.25);
+                } else {
+                    state.controller.zoom_by(pixel, lines * 0.25);
+                }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 state.modifiers = modifiers.state();

@@ -16,6 +16,7 @@ pub mod deck;
 pub mod geojson;
 pub mod layer;
 pub mod lighting;
+pub mod orbit_controller;
 pub mod parameters;
 pub mod shaderlib;
 pub mod transition;
@@ -29,6 +30,7 @@ pub use deck::{Deck, DeckProps, PickingInfo, Snapshot, ViewState};
 pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use layer::{ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
+pub use orbit_controller::{OrbitConstraints, OrbitController};
 pub use parameters::{CullMode, RenderParameters};
 pub use transition::{
     TransitionDuration, TransitionInterpolator, TransitionInterruption, TransitionProps, ViewStateTransition,
