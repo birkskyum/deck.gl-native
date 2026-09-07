@@ -149,7 +149,13 @@ deck.set_layers(json.layers);
 
 ## Credits and license
 
+The Rust port is written and maintained by [Birk Skyum](https://github.com/birkskyum).
+
 deck.gl, luma.gl and math.gl are MIT licensed projects of the vis.gl community under the
 OpenJS Foundation; their shader and projection code is reused here under that license, with
 the original copyright notices kept in the source files. The 2020 C++ prototype by Unfolded,
-Inc. is MIT licensed as well. This repository is MIT licensed.
+Inc. is MIT licensed as well.
+
+Everything else in this repository is copyright Birk Skyum and dual licensed under either
+the [MIT license](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your
+option, like most of the Rust ecosystem.
