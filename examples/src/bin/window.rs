@@ -3,7 +3,8 @@
 //! Run with `cargo run --release --bin window`. Set `DECKGL_JSON` to show a JSON description
 //! instead of the built-in scene. The camera orbits until you touch it: drag to pan, right
 //! drag (or Ctrl or Cmd drag) to rotate and pitch, scroll to zoom, arrows to move, `+`/`-` to
-//! zoom, `q`/`e` to rotate, `r`/`f` to pitch and `0` to return to the start.
+//! zoom, `q`/`e` to rotate, `r`/`f` to pitch, `0` to return to the start and `1`/`2`/`3` to
+//! fly home, to New York or to London.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -220,6 +221,28 @@ impl State {
                 "r" => self.controller.rotate_by(0.0, 10.0),
                 "f" => self.controller.rotate_by(0.0, -10.0),
                 "0" => self.controller.set_view_state(self.base_view),
+                // Fly to a few places: home, New York, London
+                "1" => self.controller.fly_to(self.base_view, self.now_ms()),
+                "2" => self.controller.fly_to(
+                    ViewState {
+                        longitude: -74.0,
+                        latitude: 40.72,
+                        zoom: 11.0,
+                        pitch: 45.0,
+                        bearing: -20.0,
+                    },
+                    self.now_ms(),
+                ),
+                "3" => self.controller.fly_to(
+                    ViewState {
+                        longitude: -0.12,
+                        latitude: 51.5,
+                        zoom: 10.0,
+                        pitch: 30.0,
+                        bearing: 0.0,
+                    },
+                    self.now_ms(),
+                ),
                 _ => {}
             },
             _ => {}

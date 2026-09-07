@@ -18,6 +18,7 @@ pub mod layer;
 pub mod lighting;
 pub mod parameters;
 pub mod shaderlib;
+pub mod transition;
 pub mod viewport;
 
 pub use constants::{ClipDepthRange, CoordinateSystem, ProjectionMode, Unit};
@@ -28,6 +29,9 @@ pub use geojson::{Feature, FeatureCollection, Geometry};
 pub use layer::{ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, SubLayers};
 pub use lighting::{AmbientLight, DirectionalLight, LightingEffect, Material, PointLight};
 pub use parameters::{CullMode, RenderParameters};
+pub use transition::{
+    TransitionDuration, TransitionInterpolator, TransitionInterruption, TransitionProps, ViewStateTransition,
+};
 pub use viewport::{Viewport, WebMercatorViewportOptions};
 
 pub use glam;

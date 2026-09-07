@@ -4,6 +4,7 @@
 //! `@math.gl/web-mercator`. Vector and matrix types come from `glam` in f64
 //! precision, which matches the JavaScript implementation's use of doubles.
 
+pub mod fly_to;
 pub mod web_mercator;
 
 pub use glam;

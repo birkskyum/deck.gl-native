@@ -7,6 +7,7 @@
 //! [`MapController::tick`].
 
 use crate::deck::ViewState;
+use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
 
 const PITCH_MOUSE_THRESHOLD: f64 = 5.0;
@@ -57,6 +58,7 @@ pub struct MapController {
     /// Recent pan samples as (pixel, time in ms) for the inertia velocity
     samples: Vec<([f64; 2], f64)>,
     animation: Option<PanInertia>,
+    transition: Option<ViewStateTransition>,
     interacted: bool,
 }
 
@@ -73,8 +75,38 @@ impl MapController {
             start_zoom: None,
             samples: Vec::new(),
             animation: None,
+            transition: None,
             interacted: false,
         }
+    }
+
+    /// Animate to `end` with deck.gl's transition props, starting at `now` (milliseconds,
+    /// the same clock as [`MapController::tick`]). Interrupts a running transition according to
+    /// the new props' `interruption`. A zero duration jumps straight to `end`.
+    pub fn transition_to(&mut self, end: ViewState, props: TransitionProps, now: f64) {
+        let (current, proceed) =
+            crate::transition::interrupt(self.transition.as_ref(), self.view_state, props.interruption);
+        if !proceed {
+            return;
+        }
+        self.animation = None;
+        self.interacted = true;
+        self.view_state = self.constrain(current);
+        let end = self.constrain(end);
+        self.transition = ViewStateTransition::new(self.view_state, end, self.width, self.height, props, now);
+        if self.transition.is_none() {
+            self.view_state = end;
+        }
+    }
+
+    /// Fly to `end` along the van Wijk and Nuij path with an automatic duration.
+    pub fn fly_to(&mut self, end: ViewState, now: f64) {
+        self.transition_to(end, TransitionProps::fly_to(), now);
+    }
+
+    /// The transition in flight, if any.
+    pub fn transition(&self) -> Option<&ViewStateTransition> {
+        self.transition.as_ref()
     }
 
     pub fn view_state(&self) -> ViewState {
@@ -82,7 +114,9 @@ impl MapController {
     }
 
     /// Replace the view state, for instance from an external animation.
+    /// Jump to a view state, ending any transition.
     pub fn set_view_state(&mut self, view_state: ViewState) {
+        self.transition = None;
         self.view_state = self.constrain(view_state);
     }
 
@@ -102,6 +136,7 @@ impl MapController {
             || self.start_rotate.is_some()
             || self.start_zoom.is_some()
             || self.animation.is_some()
+            || self.transition.is_some()
     }
 
     fn viewport(&self, view_state: &ViewState) -> Viewport {
@@ -149,6 +184,7 @@ impl MapController {
     /// Start dragging at `pixel` (`now` in milliseconds, for inertia).
     pub fn pan_start(&mut self, pixel: [f64; 2], now: f64) {
         self.animation = None;
+        self.transition = None;
         self.start_pan_lng_lat = Some(self.unproject(pixel));
         self.samples.clear();
         self.samples.push((pixel, now));
@@ -215,8 +251,15 @@ impl MapController {
         ))
     }
 
-    /// Advance inertia; returns true while the view is still changing.
+    /// Advance a transition or inertia; returns true while the view is still changing.
     pub fn tick(&mut self, now: f64) -> bool {
+        if let Some(transition) = self.transition {
+            self.view_state = self.constrain(transition.at(now));
+            if transition.is_done(now) {
+                self.transition = None;
+            }
+            return true;
+        }
         let Some(animation) = self.animation else {
             return false;
         };
@@ -237,12 +280,14 @@ impl MapController {
         });
         if t >= 1.0 {
             self.animation = None;
+            self.transition = None;
         }
         true
     }
 
     pub fn rotate_start(&mut self, pixel: [f64; 2]) {
         self.animation = None;
+        self.transition = None;
         self.start_rotate = Some((pixel, self.view_state.bearing, self.view_state.pitch));
     }
 
@@ -286,6 +331,7 @@ impl MapController {
     /// Zoom by `delta` levels keeping the ground under `pixel` fixed (wheel input).
     pub fn zoom_by(&mut self, pixel: [f64; 2], delta: f64) {
         self.animation = None;
+        self.transition = None;
         let anchor = self.unproject(pixel);
         let zoom = (self.view_state.zoom + delta).clamp(self.constraints.min_zoom, self.constraints.max_zoom);
         let zoomed = self.viewport(&ViewState {
@@ -304,6 +350,7 @@ impl MapController {
     /// Start a pinch or drag zoom at `pixel`.
     pub fn zoom_start(&mut self, pixel: [f64; 2]) {
         self.animation = None;
+        self.transition = None;
         self.start_zoom = Some((self.unproject(pixel), self.view_state.zoom));
     }
 
@@ -342,6 +389,7 @@ impl MapController {
     /// Move the view by a pixel offset (positive x moves the map right).
     pub fn move_by(&mut self, pixels: [f64; 2]) {
         self.animation = None;
+        self.transition = None;
         let center = [self.width / 2.0, self.height / 2.0];
         let anchor = self.unproject(center);
         let [longitude, latitude] = self
@@ -356,6 +404,7 @@ impl MapController {
 
     pub fn rotate_by(&mut self, bearing: f64, pitch: f64) {
         self.animation = None;
+        self.transition = None;
         self.set(ViewState {
             bearing: self.view_state.bearing + bearing,
             pitch: self.view_state.pitch + pitch,
@@ -463,5 +512,78 @@ mod tests {
             "bearing wraps: {}",
             c.view_state().bearing
         );
+    }
+
+    #[test]
+    fn transitions_advance_and_gestures_interrupt_them() {
+        use crate::transition::{TransitionInterruption, TransitionProps};
+        let start = ViewState {
+            longitude: 0.0,
+            latitude: 0.0,
+            zoom: 4.0,
+            pitch: 0.0,
+            bearing: 0.0,
+        };
+        let end = ViewState {
+            longitude: 10.0,
+            zoom: 6.0,
+            ..start
+        };
+        let mut c = MapController::new(start, 400.0, 300.0);
+        c.transition_to(end, TransitionProps::linear(1000.0), 0.0);
+        assert!(c.is_active() && c.interacted());
+        assert!(c.tick(500.0));
+        assert!((c.view_state().longitude - 5.0).abs() < 1e-9);
+        assert!((c.view_state().zoom - 5.0).abs() < 1e-9);
+        // Break (the default) restarts from the current view
+        let elsewhere = ViewState {
+            longitude: -20.0,
+            ..start
+        };
+        c.transition_to(elsewhere, TransitionProps::linear(1000.0), 500.0);
+        c.tick(1000.0);
+        assert!(
+            (c.view_state().longitude - (-7.5)).abs() < 1e-9,
+            "{:?}",
+            c.view_state()
+        );
+        // Ignore keeps the running transition
+        c.transition_to(
+            end,
+            TransitionProps::linear(1000.0).with_interruption(TransitionInterruption::Ignore),
+            1000.0,
+        );
+        c.tick(1500.0);
+        assert!((c.view_state().longitude - (-20.0)).abs() < 1e-9);
+        assert!(!c.is_active(), "finished at 1500");
+        // Snap to end jumps to the running transition's end before starting the new one
+        c.transition_to(end, TransitionProps::linear(1000.0), 2000.0);
+        c.transition_to(
+            start,
+            TransitionProps::linear(1000.0).with_interruption(TransitionInterruption::SnapToEnd),
+            2500.0,
+        );
+        assert_eq!(c.view_state(), end);
+        // A gesture ends a transition
+        c.tick(2600.0);
+        c.pan_start([10.0, 10.0], 2600.0);
+        assert!(c.transition().is_none());
+        // Fly to has an automatic duration and lands exactly
+        let mut c = MapController::new(start, 400.0, 300.0);
+        c.fly_to(end, 0.0);
+        let duration = c.transition().unwrap().duration_ms();
+        assert!(duration > 500.0);
+        c.tick(duration / 2.0);
+        let mid = c.view_state();
+        assert!(
+            mid.longitude > 0.0 && mid.longitude < 10.0 && mid.zoom < 6.0,
+            "midway {mid:?}"
+        );
+        c.tick(duration);
+        assert!((c.view_state().longitude - 10.0).abs() < 1e-6 && (c.view_state().zoom - 6.0).abs() < 1e-6);
+        assert!(!c.is_active());
+        // A zero duration jumps
+        c.transition_to(start, TransitionProps::linear(0.0), 9000.0);
+        assert_eq!(c.view_state(), start);
     }
 }

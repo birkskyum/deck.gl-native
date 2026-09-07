@@ -30,8 +30,10 @@ Working today, headless and verified pixel by pixel in tests:
 - Per-layer render `parameters`: blend state, depth test and writes, face culling
 - `Deck::snapshot` reads a frame back as RGBA pixels (and saves PNGs with the `png` feature); the C API has `deckgl_snapshot` and `deckgl_snapshot_png`
 - A `MapController` with deck.gl's gestures: drag to pan with inertia, rotate and pitch, zoom
-  around the cursor, keyboard moves, zoom and pitch limits. Independent of the windowing
-  library; the window example wires it to winit.
+  around the cursor, keyboard moves, zoom and pitch limits, and view state transitions
+  (`FlyToInterpolator`'s van Wijk and Nuij flight path and linear interpolation, with deck.gl's
+  interruption modes; also on `Deck::fly_to` for decks without a controller). Independent of
+  the windowing library; the window example wires it to winit.
 - `Deck::set_layers` reconciles by id: a layer re-sent with the same id and type keeps its GPU
   resources, and attributes are only rebuilt when its props changed
 - A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks

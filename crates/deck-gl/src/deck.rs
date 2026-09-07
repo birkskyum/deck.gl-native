@@ -9,6 +9,7 @@ use crate::layer::{
     decode_picking_color, ClickCallback, HoverCallback, Layer, LayerContext, LayerProps, LAYER_INDEX_STRIDE,
 };
 use crate::lighting::LightingEffect;
+use crate::transition::{TransitionProps, ViewStateTransition};
 use crate::viewport::{Viewport, WebMercatorViewportOptions};
 use crate::{DeckError, Result};
 
@@ -115,6 +116,8 @@ pub struct Deck {
     external_viewport: bool,
     picking: Option<PickingTarget>,
     repeat: bool,
+    /// A view state transition started with [`Deck::transition_to`]
+    transition: Option<ViewStateTransition>,
     /// The object under the pointer after the last `pointer_move`
     hovered: Option<PickingInfo>,
     on_hover: Option<HoverCallback>,
@@ -151,6 +154,7 @@ impl Deck {
             external_viewport: false,
             picking: None,
             repeat: props.repeat,
+            transition: None,
             hovered: None,
             on_hover: None,
             on_click: None,
@@ -188,11 +192,61 @@ impl Deck {
         self.ctx.device_pixel_ratio = ratio;
     }
 
-    /// Move the default map camera.
+    /// Move the default map camera, ending any transition.
     pub fn set_view_state(&mut self, view_state: ViewState) {
+        self.transition = None;
         self.view_state = view_state;
         self.external_viewport = false;
         self.viewport = make_viewport(self.width, self.height, &view_state);
+    }
+
+    /// Animate the map camera to `end` with deck.gl's transition props, for decks driven
+    /// without a [`crate::MapController`] (which has its own transitions). Call
+    /// [`Deck::tick`] every frame with the same millisecond clock as `now`.
+    pub fn transition_to(&mut self, end: ViewState, props: TransitionProps, now: f64) {
+        let (current, proceed) =
+            crate::transition::interrupt(self.transition.as_ref(), self.view_state, props.interruption);
+        if !proceed {
+            return;
+        }
+        self.set_view_state(current);
+        self.transition = ViewStateTransition::new(
+            self.view_state,
+            end,
+            self.width as f64,
+            self.height as f64,
+            props,
+            now,
+        );
+        if self.transition.is_none() {
+            self.set_view_state(end);
+        }
+    }
+
+    /// Fly to `end` along the van Wijk and Nuij path with an automatic duration.
+    pub fn fly_to(&mut self, end: ViewState, now: f64) {
+        self.transition_to(end, TransitionProps::fly_to(), now);
+    }
+
+    /// Advance a transition started with [`Deck::transition_to`]; returns true while the
+    /// camera is still moving.
+    pub fn tick(&mut self, now: f64) -> bool {
+        let Some(transition) = self.transition else {
+            return false;
+        };
+        let view = transition.at(now);
+        self.view_state = view;
+        self.external_viewport = false;
+        self.viewport = make_viewport(self.width, self.height, &view);
+        if transition.is_done(now) {
+            self.transition = None;
+        }
+        true
+    }
+
+    /// The view state transition in flight, if any.
+    pub fn transition(&self) -> Option<&ViewStateTransition> {
+        self.transition.as_ref()
     }
 
     /// Use a caller-built viewport instead of the internal view state. This is how a host
