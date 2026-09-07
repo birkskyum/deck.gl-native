@@ -1,9 +1,11 @@
 # deck.gl-native inside maplibre-native
 
-![maplibre-native GLFW app with the deck.gl-native overlay](images/maplibre-overlay.png)
+![deck.gl-native arcs weaving through maplibre-native's 3D buildings](images/maplibre-interleaved.png)
 
-*The maplibre-native GLFW demo app (Metal, OpenFreeMap Liberty style) with deck.gl-native's
-scatterplot, line and extruded polygon layers drawn into the same frame.*
+*The maplibre-native GLFW demo app (Metal, OpenFreeMap Liberty style) with deck.gl-native arcs
+drawn into the same frame. The arcs share the map's depth buffer, so each one is hidden where
+it passes behind a building and visible where it clears one. The scene is
+`examples/json/maplibre-arcs.json`, shown with `DECKGL_JSON`.*
 
 This is the interleaved rendering path: maplibre-native draws the map, deck.gl-native draws its
 layers into the same drawable and depth texture, on the same Metal command queue, and the

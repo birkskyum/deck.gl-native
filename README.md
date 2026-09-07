@@ -47,62 +47,38 @@ and `@deck.gl/mesh-layers`, all verified pixel by pixel in headless GPU tests:
 | Geo | `TileLayer` (frustum culled quadtree, best available refinement, cache, background loading), `MVTLayer` (a dependency free Mapbox Vector Tile decoder), `WMSLayer`, `TerrainLayer` (Martini meshes from elevation tiles, Mapbox Terrain-RGB and Terrarium decoders), `TripsLayer`, `GreatCircleLayer`, `H3HexagonLayer`, `S2Layer`, `GeohashLayer`, `QuadkeyLayer` |
 | Mesh | `SimpleMeshLayer` (OBJ files, a cube helper), `ScenegraphLayer` (glTF scenes with node transforms, materials and textures); both with orientation, scale, translation or a transform matrix per instance, and size limits in pixels |
 
-Everything else that works today:
+**Views and interaction.** Map, globe, orthographic, orbit and first person views, several at
+once in sub rectangles of the canvas with their own cameras and a layer filter. A
+`MapController` with deck.gl's gestures (drag with inertia, rotate, pitch, zoom around the
+cursor, keyboard), globe and orbit controllers, and `FlyToInterpolator` view state transitions.
+Picking returns the layer, object index and coordinate, with `autoHighlight` and hover and
+click callbacks. Prop transitions animate uniforms and attributes with an easing or a spring.
+The viewport math is ported from `@math.gl/web-mercator` and tested against it, including
+world copies across the antimeridian.
 
-- `GlobeView`, `OrthographicView`, `OrbitView` and `FirstPersonView` next to the map view, with their viewports and view states, plus a `GlobeController` and an `OrbitController` (also for the orthographic view) with deck.gl's gestures
-- Several views per deck in sub rectangles of the canvas (`Deck::set_views`, pixel or percentage extents, padding, per view cameras, a `layerFilter`, view aware picking)
-- Web Mercator viewport math ported from `@math.gl/web-mercator` and tested against it, with repeated world copies across the antimeridian (`DeckProps::repeat`) and `wrapLongitude` shortest paths
-- deck.gl's `project` and `project32` shader modules, picking uniforms, `LightingEffect` with ambient, directional and point lights, and a per-layer `material`
-- GeoArrow geometry columns in both coordinate layouts, interleaved and separated, plus WKB,
-  with the column's extension name reported when a layer cannot read its geometry kind
-- Arrow record batches as layer data, with column, constant and function accessors (a
-  constant accessor uploads one element with a zero vertex stride instead of one per object), and
-  incremental updates that rewrite only the rows marked as changed (`LayerData::with_changed_rows`)
-- Background loading of URLs through a shared `Fetcher` (thread pool, in memory cache, one
-  request per URL, cancellation of tiles that left the view, progress counters); JSON
-  descriptions and the C API show layers as their data arrives
-- Rendering into any caller-owned `wgpu` render pass, or into textures you provide, with
-  multisampling when the render target asks for it (the examples default to 4x)
-- Picking (`Deck::pick` returns layer, object index and coordinate), per-object highlighting, `autoHighlight`, and `onHover` and `onClick` callbacks per layer and per deck driven by `Deck::pointer_move` and `Deck::click`
-- Per-layer render `parameters`: blend state, depth test and writes, face culling
-- Shadows from directional lights (`DirectionalLight { shadow: true }`, up to two): a shadow
-  map per light fitted to the view frustum, sampled by every layer through deck.gl's `shadow`
-  shader module, with `shadowColor` and a per-layer `shadow_enabled` opt out
-- Post-processing effects over the rendered frame (`PostProcessEffect`): luma.gl's eighteen
-  shader passes ported to WGSL, from brightness and vignette to blurs, halftones and warps,
-  chained in order and composited onto the host's frame
-- Shader hooks for WGSL and layer extensions (`LayerExtension`: shader modules, injections,
-  attributes and uniforms), with `DataFilterExtension` filtering objects by value ranges, soft
-  ranges and categories on the GPU, `BrushingExtension` showing what lies within a radius of
-  the pointer, `ClipExtension` clipping layers to bounds, `MaskExtension` masking layers by
-  the geometry of another layer (`operation: mask`), `CollisionFilterExtension` hiding
-  overlapping labels and icons by priority, `FillStyleExtension` tiling fills with patterns and
-  `PathStyleExtension` dashing and offsetting paths. See [docs/extensions.md](docs/extensions.md).
-- Benchmarks for a million points, a hundred thousand polygons and ten thousand paths in `docs/benchmarks.md`
-- `Deck::stats` reports the last frame (layers, draw calls, instances, uploaded bytes, CPU time); logging goes through `tracing` (the examples and the C API print to stderr at the level of `DECKGL_LOG`)
-- `Deck::snapshot` reads a frame back as RGBA pixels (and saves PNGs with the `png` feature); the C API has `deckgl_snapshot` and `deckgl_snapshot_png`
-- A `MapController` with deck.gl's gestures: drag to pan with inertia, rotate and pitch, zoom
-  around the cursor, keyboard moves, zoom and pitch limits, and view state transitions
-  (`FlyToInterpolator`'s van Wijk and Nuij flight path and linear interpolation, with deck.gl's
-  interruption modes; also on `Deck::fly_to` for decks without a controller). Independent of
-  the windowing library; the window example wires it to winit.
-- `Deck::set_layers` reconciles by id: a layer re-sent with the same id and type keeps its GPU
-  resources, and attributes are only rebuilt when its props changed
-- deck.gl's `transitions` prop: uniform props (`radiusScale`, `opacity`, ...) and attributes
-  (`getPosition`, `getFillColor`, ...) animate from their old to their new values with a
-  duration and easing or as a spring; `Deck::tick` drives the clock and `Deck::animating`
-  says whether to keep drawing
-- A GeoJSON reader (`FeatureCollection`) feeding `GeoJsonLayer`; deck.gl's Vancouver blocks
-  example (4,600 extruded polygons) parses and renders in under 50 ms
-- JSON descriptions in the `@deck.gl/json` and pydeck format, with `@@=` accessor expressions
-  and data from inline rows, files, URLs or named Arrow tables, including GeoJSON, CSV,
-  NDJSON, GeoParquet, Parquet and FlatGeobuf files. See [docs/json.md](docs/json.md).
-- A C API that takes JSON layers and Arrow tables through the Arrow C Data Interface, so a host
-  in any language can feed columnar data without copying it.
-- Rendering into a maplibre-native map, depth interleaved with its 3D buildings, either inside
-  maplibre-native's own Metal backend through a C API, or from an all-Rust host through
-  maplibre-native-ffi. See [docs/maplibre-native.md](docs/maplibre-native.md).
-- The C API library cross-compiles for iOS (`cargo build --target aarch64-apple-ios -p deck-gl-ffi`).
+**Data.** Arrow record batches with column, constant and function accessors; GeoArrow geometry
+columns in both coordinate layouts plus WKB; GeoJSON, CSV, NDJSON, GeoParquet, Parquet and
+FlatGeobuf files. Constant accessors upload a single element, `with_changed_rows` rewrites only
+the rows that changed, and URLs load in the background through a shared fetcher with a cache,
+deduplication and cancellation.
+
+**Rendering.** deck.gl's own `project` and `project32` WGSL, lighting with a per layer
+material, shadows from directional lights, eighteen post-processing passes, per layer blend and
+depth state, and multisampling. Shader hooks and eight layer extensions: data filter, brushing,
+clip, mask, collision filter, fill style and path style
+([docs/extensions.md](docs/extensions.md)).
+
+**Embedding.** Render into a wgpu pass you own or into textures you provide. A C API
+(`libdeckgl.a`) takes JSON layers and Arrow tables through the Arrow C Data Interface, so a
+host in any language feeds columnar data without copying it. Layers draw inside a
+maplibre-native map, depth interleaved with its 3D buildings
+([docs/maplibre-native.md](docs/maplibre-native.md)). JSON descriptions follow the
+`@deck.gl/json` and pydeck format ([docs/json.md](docs/json.md)). The library cross-compiles
+for iOS and for `wasm32-unknown-unknown`.
+
+**Tooling.** `Deck::stats` reports the last frame, `Deck::snapshot` reads it back as RGBA or a
+PNG, logging goes through `tracing`, and criterion benchmarks cover the large layers
+([docs/benchmarks.md](docs/benchmarks.md)).
 
 Not yet: `Tile3DLayer` and the `TerrainExtension` that drapes layers over terrain, GeoArrow
 columns of multi geometries, Python, Swift and Kotlin bindings, golden image comparisons
@@ -110,9 +86,12 @@ against deck.gl JS, and published crates. See [docs/rust-port.md](docs/rust-port
 design and the open decisions, and the [roadmap issue](https://github.com/birkskyum/deck.gl-native/issues/75)
 for what is planned.
 
-![maplibre-native with the deck.gl-native overlay](docs/images/maplibre-overlay.png)
+![deck.gl-native arcs weaving through maplibre-native's 3D buildings](docs/images/maplibre-interleaved.png)
 
-*maplibre-native's GLFW app on Metal with deck.gl-native layers drawn into the same frame.*
+*Depth interleaved: deck.gl-native arcs and maplibre-native's own extruded buildings in one
+frame, sharing a depth buffer, so the arcs pass behind the towers they go under. This is
+maplibre-native's GLFW app on Metal, drawing `examples/json/maplibre-arcs.json` through the C
+API. See [docs/maplibre-native.md](docs/maplibre-native.md).*
 
 ## Performance
 
@@ -171,8 +150,8 @@ cargo run --release --manifest-path examples/maplibre-ffi/Cargo.toml   # on a ma
 
 `examples/json/` holds the descriptions behind the gallery and a few more: `scenegraph.json`,
 `terrain.json`, `shadows.json`, `post-process.json`, `osm-tiles.json`, `vancouver-blocks.json`,
-`san-francisco.json`, `heathrow-flights.json`, `simple-mesh.json`, `minimap.json` and
-`data-filter.json`. Any of them runs in the window (`DECKGL_JSON=...`) or renders to a PNG
+`san-francisco.json`, `heathrow-flights.json`, `simple-mesh.json`, `minimap.json`,
+`maplibre-arcs.json` and `data-filter.json`. Any of them runs in the window (`DECKGL_JSON=...`) or renders to a PNG
 (`json_render`), and the ones that load tiles or remote data keep rendering until the loads
 settle.
 

@@ -1,0 +1,44 @@
+{
+  "initialViewState": {"longitude": -122.4005, "latitude": 37.7905, "zoom": 16.2, "pitch": 65, "bearing": -20},
+  "layers": [
+    {
+      "@@type": "ArcLayer",
+      "id": "arcs",
+      "data": [
+        {"from": [-122.4045, 37.7885], "to": [-122.3965, 37.7935], "color": [255, 90, 60]},
+        {"from": [-122.4025, 37.7935], "to": [-122.3985, 37.7875], "color": [80, 200, 255]},
+        {"from": [-122.4065, 37.7925], "to": [-122.3955, 37.7895], "color": [255, 210, 60]},
+        {"from": [-122.3995, 37.7955], "to": [-122.4035, 37.7865], "color": [180, 120, 255]},
+        {"from": [-122.4075, 37.7875], "to": [-122.3945, 37.7925], "color": [80, 255, 160]}
+      ],
+      "getSourcePosition": "@@=from",
+      "getTargetPosition": "@@=to",
+      "getSourceColor": "@@=color",
+      "getTargetColor": "@@=color",
+      "getWidth": 5,
+      "getHeight": 0.32,
+      "widthUnits": "pixels",
+      "opacity": 0.95
+    },
+    {
+      "@@type": "ScatterplotLayer",
+      "id": "ends",
+      "data": [
+        {"position": [-122.4045, 37.7885]},
+        {"position": [-122.3965, 37.7935]},
+        {"position": [-122.4025, 37.7935]},
+        {"position": [-122.3985, 37.7875]},
+        {"position": [-122.4065, 37.7925]},
+        {"position": [-122.3955, 37.7895]},
+        {"position": [-122.3995, 37.7955]},
+        {"position": [-122.4035, 37.7865]},
+        {"position": [-122.4075, 37.7875]},
+        {"position": [-122.3945, 37.7925]}
+      ],
+      "getPosition": "@@=position",
+      "getFillColor": [255, 255, 255, 230],
+      "getRadius": 6,
+      "radiusUnits": "pixels"
+    }
+  ]
+}
