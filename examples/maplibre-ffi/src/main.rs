@@ -70,6 +70,13 @@ impl ViewportSize {
 #[derive(Default)]
 struct Shared {
     camera: Mutex<Option<mln::CameraOptions>>,
+    /// Held while the map's camera must not move. The map thread takes it to apply commands
+    /// and publish where the camera ended up; the render thread takes it to render the map and
+    /// read that same value. Without it the two are sampling independently, the map thread
+    /// republishing every few milliseconds and the render thread reading once a frame, so the
+    /// camera deck draws with is never quite the one maplibre just drew with and the layers
+    /// slide against the basemap whenever it moves.
+    frame: Mutex<()>,
     shutdown: AtomicBool,
     failure: Mutex<Option<String>>,
     /// Set on the first pointer or key interaction; stops the automatic orbit.
@@ -246,19 +253,25 @@ fn map_thread(
 
         let start = Instant::now();
         while !shared.shutdown.load(Ordering::Relaxed) {
-            for command in commands.try_iter() {
-                apply_command(&map, command, view)?;
-            }
-            if !shared.interacted.load(Ordering::Relaxed) {
-                // Slow orbit until the user takes over
-                let mut orbit = mln::CameraOptions::default();
-                orbit.bearing = Some(view.bearing + start.elapsed().as_secs_f64() * 6.0);
-                map.jump_to(&orbit)?;
-            }
+            {
+                let _frame = shared.frame.lock().unwrap();
+                for command in commands.try_iter() {
+                    apply_command(&map, command, view)?;
+                }
+                if !shared.interacted.load(Ordering::Relaxed) {
+                    // Slow orbit until the user takes over
+                    let mut orbit = mln::CameraOptions::default();
+                    orbit.bearing = Some(view.bearing + start.elapsed().as_secs_f64() * 6.0);
+                    map.jump_to(&orbit)?;
+                }
 
-            runtime.pump(Some(Duration::from_millis(4)), None)?;
-            let _ = runtime.drain_events(0)?;
-            *shared.camera.lock().unwrap() = Some(map.camera()?);
+                runtime.pump(Some(Duration::from_millis(4)), None)?;
+                let _ = runtime.drain_events(0)?;
+                *shared.camera.lock().unwrap() = Some(map.camera()?);
+            }
+            // Let the render thread in: this loop is far faster than the display, so without
+            // a yield it can hold the lock again before the render thread is ever scheduled.
+            std::thread::yield_now();
         }
         // The session is closed by the render thread before shutdown is requested.
         map.close().map_err(|e| e.to_string())?;
@@ -500,13 +513,19 @@ impl State {
             return Ok(());
         };
 
-        // 1. maplibre renders the map into our texture and waits for the GPU
-        let _update = session.render_update()?;
-
-        // 2. deck draws its layers into the same texture, with the map's camera
-        let Some(map_camera) = self.shared.camera.lock().unwrap().clone() else {
+        // 1. maplibre renders the map into our texture and waits for the GPU, and we take the
+        //    camera it rendered with. Both under the frame lock, so the map thread cannot move
+        //    the camera in between: `render_update` has no way to report the camera it used, so
+        //    holding it still is what makes the published one the right answer.
+        let Some(map_camera) = ({
+            let _frame = self.shared.frame.lock().unwrap();
+            let _update = session.render_update()?;
+            self.shared.camera.lock().unwrap().clone()
+        }) else {
             return Ok(());
         };
+
+        // 2. deck draws its layers into the same texture, with the map's camera
         let fov = map_camera.field_of_view.unwrap_or(DEFAULT_FOV_DEGREES);
         let pitch = map_camera.pitch.unwrap_or(0.0);
         // deck's depth buffer is its own and cleared each frame, so deck keeps its default near
