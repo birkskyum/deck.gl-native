@@ -518,6 +518,10 @@ impl State {
             (0.0, 0.0)
         };
         let center = map_camera.center.unwrap_or(mln::LatLng::new(0.0, 0.0));
+        // Padding, roll and centre altitude all move where the map puts its centre, so deck
+        // has to be told about them or the layers drift away from the basemap as soon as any
+        // of the three is used.
+        let padding = map_camera.padding.unwrap_or_default();
         let deck_camera = DeckglCamera {
             longitude: center.longitude,
             latitude: center.latitude,
@@ -530,6 +534,15 @@ impl State {
             width: self.size.logical_width,
             height: self.size.logical_height,
             pixel_ratio: self.size.scale_factor as f32,
+            padding_left: padding.left,
+            padding_right: padding.right,
+            padding_top: padding.top,
+            padding_bottom: padding.bottom,
+            roll_degrees: map_camera.roll.unwrap_or(0.0),
+            center_elevation_meters: map_camera.center_altitude.unwrap_or(0.0),
+            // maplibre-native does not hand out its projection matrix, so deck builds its own
+            // from the field of view and the planes above
+            ..Default::default()
         };
         self.deck.set_viewport(viewport_from_camera(&deck_camera));
 
