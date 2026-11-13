@@ -5,11 +5,12 @@
 > maintained: it targets a 2020 snapshot of dawn with prebuilt x64 dependencies and does not
 > build on current toolchains. It is kept only so the code and its history stay readable.
 >
-> ### The work continues at [birkskyum/deckgl-rs](https://github.com/birkskyum/deckgl-rs)
+> ### The work continues at [birkskyum/visgl-rs](https://github.com/birkskyum/visgl-rs)
 >
 > That is the effort the note below anticipated, "this time probably in Rust instead of C++":
 > a port of deck.gl 9 to Rust on [wgpu](https://wgpu.rs), rendering with deck.gl's own WGSL
-> shaders. It began from this repository, which is why the history here is its first commits.
+> shaders, in the `deckgl`, `lumagl` and `mathgl` crates. It began from this repository,
+> which is why the history here is its first commits.
 >
 > If a link brought you here looking for the Rust project, that is where it lives.
 
